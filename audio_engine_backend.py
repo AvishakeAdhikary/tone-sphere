@@ -31,6 +31,12 @@ from pydantic import BaseModel
 from contextlib import asynccontextmanager
 import yaml
 from pathlib import Path
+import tkinter as tk
+from tkinter import ttk, messagebox, scrolledtext
+import socket
+import struct
+import queue
+from concurrent.futures import ThreadPoolExecutor
 
 # Configure logging
 logging.basicConfig(
@@ -335,6 +341,8 @@ class AudioEngine:
         self.processor = AudioProcessor(sample_rate, buffer_size)
         self.virtual_device_manager = VirtualDeviceManager()
         self.routing_matrix = AudioRoutingMatrix()
+        self.network_streamer = NetworkAudioStreamer()
+        self.connected_clients = set()
         
         # Device management
         self.physical_devices: Dict[int, AudioDevice] = {}
@@ -565,6 +573,18 @@ class AudioEngine:
         """Get engine performance statistics"""
         return self.performance_stats.copy()
 
+    def start_network_streaming(self):
+        """Start network audio streaming"""
+        self.network_streamer.start_server()
+
+    def stop_network_streaming(self):
+        """Stop network audio streaming"""
+        self.network_streamer.stop_server()
+
+    def get_network_clients(self) -> List[str]:
+        """Get connected network clients"""
+        return self.network_streamer.get_connected_clients()
+
 # ==============================================================================
 # Configuration Manager
 # ==============================================================================
@@ -624,6 +644,110 @@ class ConfigManager:
             logger.error(f"Failed to save config: {e}")
 
 # ==============================================================================
+# Network Audio Streaming
+# ==============================================================================
+
+class NetworkAudioStreamer:
+    """Handles audio streaming over network"""
+    
+    def __init__(self, port: int = 9001):
+        self.port = port
+        self.server_socket = None
+        self.clients = {}  # client_id: socket
+        self.is_streaming = False
+        self.audio_queue = queue.Queue(maxsize=100)
+        
+    def start_server(self):
+        """Start network audio server"""
+        try:
+            self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.server_socket.bind(('0.0.0.0', self.port))
+            self.server_socket.listen(10)
+            self.is_streaming = True
+            
+            # Start client handler thread
+            threading.Thread(target=self._handle_clients, daemon=True).start()
+            logger.info(f"Network audio server started on port {self.port}")
+            
+        except Exception as e:
+            logger.error(f"Failed to start network audio server: {e}")
+    
+    def _handle_clients(self):
+        """Handle incoming client connections"""
+        while self.is_streaming:
+            try:
+                client_socket, address = self.server_socket.accept()
+                client_id = f"{address[0]}:{address[1]}"
+                self.clients[client_id] = client_socket
+                
+                # Start client thread
+                threading.Thread(
+                    target=self._handle_client, 
+                    args=(client_id, client_socket), 
+                    daemon=True
+                ).start()
+                
+                logger.info(f"Client connected: {client_id}")
+                
+            except Exception as e:
+                if self.is_streaming:  # Only log if we're supposed to be running
+                    logger.error(f"Error accepting client: {e}")
+    
+    def _handle_client(self, client_id: str, client_socket: socket.socket):
+        """Handle individual client"""
+        try:
+            while self.is_streaming:
+                # Send audio data to client
+                if not self.audio_queue.empty():
+                    audio_data = self.audio_queue.get_nowait()
+                    
+                    # Send data length first, then data
+                    data_length = len(audio_data)
+                    client_socket.send(struct.pack('!I', data_length))
+                    client_socket.send(audio_data)
+                
+                time.sleep(0.001)  # Small delay to prevent tight loop
+                
+        except Exception as e:
+            logger.warning(f"Client {client_id} disconnected: {e}")
+        finally:
+            self._remove_client(client_id)
+    
+    def _remove_client(self, client_id: str):
+        """Remove disconnected client"""
+        if client_id in self.clients:
+            try:
+                self.clients[client_id].close()
+            except:
+                pass
+            del self.clients[client_id]
+            logger.info(f"Client removed: {client_id}")
+    
+    def broadcast_audio(self, audio_data: bytes):
+        """Broadcast audio data to all connected clients"""
+        if not self.audio_queue.full():
+            self.audio_queue.put(audio_data)
+    
+    def stop_server(self):
+        """Stop network audio server"""
+        self.is_streaming = False
+        
+        # Close all client connections
+        for client_id in list(self.clients.keys()):
+            self._remove_client(client_id)
+        
+        # Close server socket
+        if self.server_socket:
+            self.server_socket.close()
+        
+        logger.info("Network audio server stopped")
+    
+    def get_connected_clients(self) -> List[str]:
+        """Get list of connected clients"""
+        return list(self.clients.keys())
+
+# ==============================================================================
 # REST API Models
 # ==============================================================================
 
@@ -664,6 +788,7 @@ class PerformanceStats(BaseModel):
 # Global audio engine instance
 audio_engine: Optional[AudioEngine] = None
 config_manager = ConfigManager()
+connected_websockets: set = set()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -842,17 +967,25 @@ async def get_engine_status():
 
 @app.websocket("/ws/events")
 async def websocket_endpoint(websocket: WebSocket):
-    """WebSocket endpoint for real-time events"""
+    """WebSocket endpoint for real-time events with proper client management"""
     await websocket.accept()
+    connected_websockets.add(websocket)
     
     try:
         while True:
             # Send performance stats every second
             if audio_engine:
                 stats = audio_engine.get_performance_stats()
+                network_clients = audio_engine.get_network_clients()
+                
                 await websocket.send_json({
                     "type": "performance_stats",
                     "data": stats
+                })
+                
+                await websocket.send_json({
+                    "type": "network_clients",
+                    "data": {"clients": network_clients, "count": len(network_clients)}
                 })
             
             await asyncio.sleep(1.0)
@@ -860,7 +993,38 @@ async def websocket_endpoint(websocket: WebSocket):
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
     finally:
-        await websocket.close()
+        connected_websockets.discard(websocket)
+        try:
+            await websocket.close()
+        except:
+            pass
+
+@app.post("/network/start")
+async def start_network_streaming():
+    """Start network audio streaming"""
+    if not audio_engine:
+        raise HTTPException(status_code=500, detail="Audio engine not initialized")
+    
+    audio_engine.start_network_streaming()
+    return {"message": "Network streaming started"}
+
+@app.post("/network/stop")
+async def stop_network_streaming():
+    """Stop network audio streaming"""
+    if not audio_engine:
+        raise HTTPException(status_code=500, detail="Audio engine not initialized")
+    
+    audio_engine.stop_network_streaming()
+    return {"message": "Network streaming stopped"}
+
+@app.get("/network/clients")
+async def get_network_clients():
+    """Get connected network clients"""
+    if not audio_engine:
+        raise HTTPException(status_code=500, detail="Audio engine not initialized")
+    
+    clients = audio_engine.get_network_clients()
+    return {"clients": clients, "count": len(clients)}
 
 # ==============================================================================
 # CLI Interface for Development/Testing
@@ -1006,6 +1170,345 @@ class AudioEngineCLI:
         print("\nShutting down...")
         if self.engine:
             self.engine.stop_engine()
+
+# ==============================================================================
+# AudioFlow Studio GUI
+# ==============================================================================
+
+class AudioFlowStudioGUI:
+    """Professional GUI for AudioFlow Studio"""
+    
+    def __init__(self):
+        self.root = tk.Tk()
+        self.root.title("AudioFlow Studio - Professional Audio Routing")
+        self.root.geometry("1200x800")
+        self.root.configure(bg='#2b2b2b')
+        
+        # Configure style
+        self.style = ttk.Style()
+        self.style.theme_use('clam')
+        self._configure_styles()
+        
+        # Engine reference
+        self.engine = None
+        self.update_thread = None
+        self.is_running = False
+        
+        # Create GUI components
+        self._create_widgets()
+        self._create_menu()
+        
+        # Start engine update thread
+        self.start_updates()
+    
+    def _configure_styles(self):
+        """Configure custom styles for professional look"""
+        # Configure colors and fonts
+        bg_color = '#2b2b2b'
+        fg_color = '#ffffff'
+        accent_color = '#4CAF50'
+        
+        self.style.configure('Title.TLabel', 
+                           background=bg_color, 
+                           foreground=accent_color, 
+                           font=('Arial', 16, 'bold'))
+        
+        self.style.configure('Header.TLabel', 
+                           background=bg_color, 
+                           foreground=fg_color, 
+                           font=('Arial', 12, 'bold'))
+        
+        self.style.configure('Custom.TFrame', background=bg_color)
+        self.style.configure('Custom.TButton', font=('Arial', 10))
+        
+    def _create_menu(self):
+        """Create application menu"""
+        menubar = tk.Menu(self.root)
+        self.root.config(menu=menubar)
+        
+        # Engine menu
+        engine_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Engine", menu=engine_menu)
+        engine_menu.add_command(label="Start Engine", command=self.start_engine)
+        engine_menu.add_command(label="Stop Engine", command=self.stop_engine)
+        engine_menu.add_separator()
+        engine_menu.add_command(label="Exit", command=self.root.quit)
+        
+        # Network menu
+        network_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Network", menu=network_menu)
+        network_menu.add_command(label="Start Streaming", command=self.start_network)
+        network_menu.add_command(label="Stop Streaming", command=self.stop_network)
+        
+        # Help menu
+        help_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Help", menu=help_menu)
+        help_menu.add_command(label="About", command=self.show_about)
+    
+    def _create_widgets(self):
+        """Create main GUI widgets"""
+        # Main container
+        main_frame = ttk.Frame(self.root, style='Custom.TFrame')
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Title
+        title_label = ttk.Label(main_frame, text="AudioFlow Studio", style='Title.TLabel')
+        title_label.pack(pady=(0, 20))
+        
+        # Status frame
+        status_frame = ttk.LabelFrame(main_frame, text="System Status", style='Custom.TFrame')
+        status_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        self.status_label = ttk.Label(status_frame, text="Engine: Stopped", style='Header.TLabel')
+        self.status_label.pack(side=tk.LEFT, padx=10, pady=5)
+        
+        self.performance_label = ttk.Label(status_frame, text="CPU: 0% | Latency: 0ms", style='Header.TLabel')
+        self.performance_label.pack(side=tk.RIGHT, padx=10, pady=5)
+        
+        # Control frame
+        control_frame = ttk.Frame(main_frame, style='Custom.TFrame')
+        control_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        ttk.Button(control_frame, text="Start Engine", command=self.start_engine, style='Custom.TButton').pack(side=tk.LEFT, padx=5)
+        ttk.Button(control_frame, text="Stop Engine", command=self.stop_engine, style='Custom.TButton').pack(side=tk.LEFT, padx=5)
+        ttk.Button(control_frame, text="Refresh Devices", command=self.refresh_devices, style='Custom.TButton').pack(side=tk.LEFT, padx=5)
+        
+        # Network control frame
+        network_frame = ttk.LabelFrame(main_frame, text="Network Streaming", style='Custom.TFrame')
+        network_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        ttk.Button(network_frame, text="Start Network", command=self.start_network, style='Custom.TButton').pack(side=tk.LEFT, padx=5, pady=5)
+        ttk.Button(network_frame, text="Stop Network", command=self.stop_network, style='Custom.TButton').pack(side=tk.LEFT, padx=5, pady=5)
+        
+        self.client_count_label = ttk.Label(network_frame, text="Clients: 0", style='Header.TLabel')
+        self.client_count_label.pack(side=tk.RIGHT, padx=10, pady=5)
+        
+        # Devices frame
+        devices_frame = ttk.LabelFrame(main_frame, text="Audio Devices", style='Custom.TFrame')
+        devices_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+        
+        # Devices treeview
+        columns = ('ID', 'Name', 'Type', 'Channels', 'ASIO', 'Latency')
+        self.devices_tree = ttk.Treeview(devices_frame, columns=columns, show='headings', height=10)
+        
+        for col in columns:
+            self.devices_tree.heading(col, text=col)
+            self.devices_tree.column(col, width=100)
+        
+        # Scrollbars for devices tree
+        devices_scrollbar_y = ttk.Scrollbar(devices_frame, orient=tk.VERTICAL, command=self.devices_tree.yview)
+        devices_scrollbar_x = ttk.Scrollbar(devices_frame, orient=tk.HORIZONTAL, command=self.devices_tree.xview)
+        self.devices_tree.configure(yscrollcommand=devices_scrollbar_y.set, xscrollcommand=devices_scrollbar_x.set)
+        
+        self.devices_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        devices_scrollbar_y.pack(side=tk.RIGHT, fill=tk.Y)
+        devices_scrollbar_x.pack(side=tk.BOTTOM, fill=tk.X)
+        
+        # Routing frame
+        routing_frame = ttk.LabelFrame(main_frame, text="Audio Routing", style='Custom.TFrame')
+        routing_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Routing controls
+        routing_controls = ttk.Frame(routing_frame, style='Custom.TFrame')
+        routing_controls.pack(fill=tk.X, padx=5, pady=5)
+        
+        ttk.Label(routing_controls, text="Source:", style='Header.TLabel').pack(side=tk.LEFT, padx=5)
+        self.source_var = tk.StringVar()
+        self.source_combo = ttk.Combobox(routing_controls, textvariable=self.source_var, width=20)
+        self.source_combo.pack(side=tk.LEFT, padx=5)
+        
+        ttk.Label(routing_controls, text="Destination:", style='Header.TLabel').pack(side=tk.LEFT, padx=5)
+        self.dest_var = tk.StringVar()
+        self.dest_combo = ttk.Combobox(routing_controls, textvariable=self.dest_var, width=20)
+        self.dest_combo.pack(side=tk.LEFT, padx=5)
+        
+        ttk.Label(routing_controls, text="Volume:", style='Header.TLabel').pack(side=tk.LEFT, padx=5)
+        self.volume_var = tk.DoubleVar(value=1.0)
+        volume_scale = ttk.Scale(routing_controls, from_=0.0, to=2.0, variable=self.volume_var, length=100)
+        volume_scale.pack(side=tk.LEFT, padx=5)
+        
+        self.volume_label = ttk.Label(routing_controls, text="1.0", style='Header.TLabel')
+        self.volume_label.pack(side=tk.LEFT, padx=5)
+        
+        ttk.Button(routing_controls, text="Create Routing", command=self.create_routing, style='Custom.TButton').pack(side=tk.LEFT, padx=5)
+        
+        # Update volume label when scale changes
+        volume_scale.configure(command=lambda v: self.volume_label.configure(text=f"{float(v):.2f}"))
+        
+        # Log frame
+        log_frame = ttk.LabelFrame(main_frame, text="System Log", style='Custom.TFrame')
+        log_frame.pack(fill=tk.BOTH, expand=True)
+        
+        self.log_text = scrolledtext.ScrolledText(log_frame, height=8, bg='#1e1e1e', fg='#ffffff', font=('Consolas', 9))
+        self.log_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+    def start_engine(self):
+        """Start the audio engine"""
+        try:
+            if not self.engine:
+                config = ConfigManager().load_config()
+                self.engine = AudioEngine(
+                    sample_rate=config['engine']['sample_rate'],
+                    buffer_size=config['engine']['buffer_size']
+                )
+                self.engine.initialize()
+            
+            self.engine.start_engine()
+            self.is_running = True
+            self.log_message("✓ Audio engine started successfully")
+            self.refresh_devices()
+            
+        except Exception as e:
+            self.log_message(f"✗ Failed to start engine: {e}")
+            messagebox.showerror("Error", f"Failed to start engine: {e}")
+    
+    def stop_engine(self):
+        """Stop the audio engine"""
+        try:
+            if self.engine:
+                self.engine.stop_engine()
+                self.is_running = False
+                self.log_message("✓ Audio engine stopped")
+        except Exception as e:
+            self.log_message(f"✗ Error stopping engine: {e}")
+    
+    def start_network(self):
+        """Start network streaming"""
+        try:
+            if self.engine:
+                self.engine.start_network_streaming()
+                self.log_message("✓ Network streaming started on port 9001")
+        except Exception as e:
+            self.log_message(f"✗ Failed to start network streaming: {e}")
+    
+    def stop_network(self):
+        """Stop network streaming"""
+        try:
+            if self.engine:
+                self.engine.stop_network_streaming()
+                self.log_message("✓ Network streaming stopped")
+        except Exception as e:
+            self.log_message(f"✗ Error stopping network streaming: {e}")
+    
+    def refresh_devices(self):
+        """Refresh device list"""
+        if not self.engine:
+            return
+            
+        try:
+            # Clear existing items
+            for item in self.devices_tree.get_children():
+                self.devices_tree.delete(item)
+            
+            # Get devices and populate tree
+            devices = self.engine.get_devices()
+            device_options = []
+            
+            for device in devices:
+                self.devices_tree.insert('', 'end', values=(
+                    device['id'],
+                    device['name'][:30] + '...' if len(device['name']) > 30 else device['name'],
+                    device['type'],
+                    device['channels'],
+                    '✓' if device['is_asio'] else '✗',
+                    f"{device['latency_ms']:.1f}ms"
+                ))
+                device_options.append(f"{device['id']}: {device['name']}")
+            
+            # Update routing comboboxes
+            self.source_combo['values'] = device_options
+            self.dest_combo['values'] = device_options
+            
+            self.log_message(f"✓ Found {len(devices)} audio devices")
+            
+        except Exception as e:
+            self.log_message(f"✗ Error refreshing devices: {e}")
+    
+    def create_routing(self):
+        """Create audio routing"""
+        try:
+            source_text = self.source_var.get()
+            dest_text = self.dest_var.get()
+            
+            if not source_text or not dest_text:
+                messagebox.showwarning("Warning", "Please select both source and destination devices")
+                return
+            
+            # Extract device IDs
+            source_id = int(source_text.split(':')[0])
+            dest_id = int(dest_text.split(':')[0])
+            volume = self.volume_var.get()
+            
+            if self.engine and self.engine.create_routing(source_id, dest_id, volume):
+                self.log_message(f"✓ Created routing: {source_id} -> {dest_id} (Volume: {volume:.2f})")
+            else:
+                self.log_message(f"✗ Failed to create routing")
+                
+        except Exception as e:
+            self.log_message(f"✗ Error creating routing: {e}")
+            messagebox.showerror("Error", f"Error creating routing: {e}")
+    
+    def log_message(self, message: str):
+        """Add message to log"""
+        timestamp = time.strftime("%H:%M:%S")
+        self.log_text.insert(tk.END, f"[{timestamp}] {message}\n")
+        self.log_text.see(tk.END)
+    
+    def update_status(self):
+        """Update status information"""
+        if self.engine:
+            if self.engine.is_running:
+                self.status_label.configure(text="Engine: Running")
+                
+                # Update performance stats
+                stats = self.engine.get_performance_stats()
+                self.performance_label.configure(text=f"CPU: {stats['cpu_usage']:.1f}% | Latency: {stats['latency_ms']:.1f}ms")
+                
+                # Update network client count
+                clients = self.engine.get_network_clients()
+                self.client_count_label.configure(text=f"Clients: {len(clients)}")
+            else:
+                self.status_label.configure(text="Engine: Stopped")
+        else:
+            self.status_label.configure(text="Engine: Not Initialized")
+    
+    def start_updates(self):
+        """Start update thread"""
+        def update_loop():
+            while True:
+                try:
+                    self.root.after(0, self.update_status)
+                    time.sleep(1.0)
+                except:
+                    break
+        
+        self.update_thread = threading.Thread(target=update_loop, daemon=True)
+        self.update_thread.start()
+    
+    def show_about(self):
+        """Show about dialog"""
+        messagebox.showinfo("About AudioFlow Studio", 
+                          "AudioFlow Studio v1.0\n\n"
+                          "Professional Audio Routing Engine\n"
+                          "Inspired by VoiceMeeter Potato\n\n"
+                          "Features:\n"
+                          "• Low-latency ASIO support\n"
+                          "• Virtual audio devices\n"
+                          "• Network audio streaming\n"
+                          "• Professional routing matrix\n"
+                          "• Real-time audio effects")
+    
+    def run(self):
+        """Run the GUI"""
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+        self.root.mainloop()
+    
+    def on_closing(self):
+        """Handle application closing"""
+        if self.engine:
+            self.engine.stop_engine()
+            self.engine.stop_network_streaming()
+        self.root.destroy()
 
 # ==============================================================================
 # API Client Example for Frontend Integration
@@ -1220,6 +1723,11 @@ def main():
         if command == "server":
             print("Starting ToneSphere API server...")
             run_api_server()
+
+        elif command == "gui":
+            print("Starting ToneSphere Studio GUI...")
+            gui = AudioFlowStudioGUI()
+            gui.run()
             
         elif command == "cli":
             cli = AudioEngineCLI()
@@ -1273,6 +1781,7 @@ def main():
         print()
         print("Usage:")
         print("  python audio_engine.py server  - Start API server")
+        print("  python audio_engine.py gui     - Start GUI application")
         print("  python audio_engine.py cli     - Interactive CLI mode")
         print("  python audio_engine.py test    - Run basic tests")
         print("  python audio_engine.py client  - Generate API client example")
