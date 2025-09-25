@@ -1,0 +1,16 @@
+[project]
+name = "tone-sphere"
+version = "0.1.0"
+description = "A complete audio routing system inspired by VoiceMeeter Potato, VB-Audio Cable, and Odeus ASIO Link Pro."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.117.1",
+    "numpy>=2.3.3",
+    "pydantic>=2.11.9",
+    "pyyaml>=6.0.2",
+    "requests>=2.32.5",
+    "sounddevice>=0.5.2",
+    "uvicorn>=0.37.0",
+    "websockets>=15.0.1",
+]
