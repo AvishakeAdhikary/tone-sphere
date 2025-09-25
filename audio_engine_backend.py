@@ -1172,15 +1172,15 @@ class AudioEngineCLI:
             self.engine.stop_engine()
 
 # ==============================================================================
-# AudioFlow Studio GUI
+# ToneSphere Studio GUI
 # ==============================================================================
 
-class AudioFlowStudioGUI:
-    """Professional GUI for AudioFlow Studio"""
+class ToneSphereStudioGUI:
+    """Professional GUI for ToneSphere Studio"""
     
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("AudioFlow Studio - Professional Audio Routing")
+        self.root.title("ToneSphere Studio - Professional Audio Routing")
         self.root.geometry("1200x800")
         self.root.configure(bg='#2b2b2b')
         
@@ -1252,7 +1252,7 @@ class AudioFlowStudioGUI:
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
         # Title
-        title_label = ttk.Label(main_frame, text="AudioFlow Studio", style='Title.TLabel')
+        title_label = ttk.Label(main_frame, text="ToneSphere Studio", style='Title.TLabel')
         title_label.pack(pady=(0, 20))
         
         # Status frame
@@ -1487,8 +1487,8 @@ class AudioFlowStudioGUI:
     
     def show_about(self):
         """Show about dialog"""
-        messagebox.showinfo("About AudioFlow Studio", 
-                          "AudioFlow Studio v1.0\n\n"
+        messagebox.showinfo("About ToneSphere Studio", 
+                          "ToneSphere Studio v1.0\n\n"
                           "Professional Audio Routing Engine\n"
                           "Inspired by VoiceMeeter Potato\n\n"
                           "Features:\n"
@@ -1726,7 +1726,7 @@ def main():
 
         elif command == "gui":
             print("Starting ToneSphere Studio GUI...")
-            gui = AudioFlowStudioGUI()
+            gui = ToneSphereStudioGUI()
             gui.run()
             
         elif command == "cli":
