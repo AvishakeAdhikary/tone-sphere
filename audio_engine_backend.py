@@ -269,7 +269,7 @@ class AudioRoutingMatrix:
         """Add an audio channel"""
         self.channels[channel.id] = channel
         
-    def create_routing(self, source_id: int, destination_id: int, volume: float = 1.0) -> bool:
+    def create_routing(self, source_id: int, destination_id: int, volume: float = 1.0) -> tuple[bool, str]:
         """Create a routing connection"""
         key = (source_id, destination_id)
         if key not in self.connections:
@@ -281,8 +281,8 @@ class AudioRoutingMatrix:
             )
             self.connections[key] = connection
             logger.info(f"Created routing: {source_id} -> {destination_id}")
-            return True
-        return False
+            return True, "✅ Routing created successfully"
+        return False, "⚠️ Routing already exists, skipping command"
     
     def remove_routing(self, source_id: int, destination_id: int) -> bool:
         """Remove a routing connection"""
@@ -542,7 +542,7 @@ class AudioEngine:
         return device_id
     
     # Routing Methods
-    def create_routing(self, source_id: int, destination_id: int, volume: float = 1.0) -> bool:
+    def create_routing(self, source_id: int, destination_id: int, volume: float = 1.0) -> tuple[bool, str]:
         """Create a routing connection"""
         return self.routing_matrix.create_routing(source_id, destination_id, volume)
     
@@ -876,16 +876,13 @@ async def create_routing(request: CreateRoutingRequest):
     if not audio_engine:
         raise HTTPException(status_code=500, detail="Audio engine not initialized")
     
-    success = audio_engine.create_routing(
+    success, message = audio_engine.create_routing(
         request.source_id, 
         request.destination_id, 
         request.volume
     )
     
-    if success:
-        return {"message": "Routing created successfully"}
-    else:
-        raise HTTPException(status_code=400, detail="Failed to create routing")
+    return {"success": success, "message": message}
 
 @app.delete("/routing/{source_id}/{destination_id}")
 async def remove_routing(source_id: int, destination_id: int):
@@ -1181,196 +1178,439 @@ class ToneSphereStudioGUI:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("ToneSphere Studio - Professional Audio Routing")
-        self.root.geometry("1200x800")
-        self.root.configure(bg='#2b2b2b')
+        self.root.geometry("1400x900")
+        self.root.configure(bg='#0a0a0a')
         
-        # Configure style
-        self.style = ttk.Style()
-        self.style.theme_use('clam')
-        self._configure_styles()
+        # Modern color scheme
+        self.colors = {
+            'bg_primary': '#0a0a0a',
+            'bg_secondary': '#1a1a1a', 
+            'bg_tertiary': '#2a2a2a',
+            'accent_red': '#ff4444',
+            'accent_orange': '#ff8844',
+            'accent_gold': '#ffaa44',
+            'text_primary': '#ffffff',
+            'text_secondary': '#cccccc',
+            'text_muted': '#888888',
+            'success': '#44ff44',
+            'warning': '#ffaa44',
+            'error': '#ff4444'
+        }
         
-        # Engine reference
+        # Engine state
         self.engine = None
-        self.update_thread = None
         self.is_running = False
+        self.engine_toggle_state = False
+        self.routing_window = None
+
+        # Initialize combobox variables
+        self.source_combo = None
+        self.dest_combo = None
+        self.volume_var = None
+        self.volume_label = None
         
-        # Create GUI components
-        self._create_widgets()
+        self._create_modern_widgets()
         self._create_menu()
-        
-        # Start engine update thread
         self.start_updates()
     
     def _configure_styles(self):
-        """Configure custom styles for professional look"""
-        # Configure colors and fonts
-        bg_color = '#2b2b2b'
-        fg_color = '#ffffff'
-        accent_color = '#4CAF50'
-        
-        self.style.configure('Title.TLabel', 
-                           background=bg_color, 
-                           foreground=accent_color, 
-                           font=('Arial', 16, 'bold'))
-        
-        self.style.configure('Header.TLabel', 
-                           background=bg_color, 
-                           foreground=fg_color, 
-                           font=('Arial', 12, 'bold'))
-        
-        self.style.configure('Custom.TFrame', background=bg_color)
-        self.style.configure('Custom.TButton', font=('Arial', 10))
+        """Configure modern professional styles"""
+        # Colors are already defined in __init__, no need to update them again
+        pass
         
     def _create_menu(self):
-        """Create application menu"""
-        menubar = tk.Menu(self.root)
+        """Create modern application menu"""
+        menubar = tk.Menu(self.root, bg=self.colors['bg_secondary'], 
+                        fg=self.colors['text_primary'], 
+                        activebackground=self.colors['accent_orange'])
         self.root.config(menu=menubar)
         
         # Engine menu
-        engine_menu = tk.Menu(menubar, tearoff=0)
+        engine_menu = tk.Menu(menubar, tearoff=0, bg=self.colors['bg_secondary'],
+                            fg=self.colors['text_primary'])
         menubar.add_cascade(label="Engine", menu=engine_menu)
-        engine_menu.add_command(label="Start Engine", command=self.start_engine)
-        engine_menu.add_command(label="Stop Engine", command=self.stop_engine)
+        engine_menu.add_command(label="Toggle Engine", command=self.toggle_engine)
         engine_menu.add_separator()
         engine_menu.add_command(label="Exit", command=self.root.quit)
         
+        # Routing menu
+        routing_menu = tk.Menu(menubar, tearoff=0, bg=self.colors['bg_secondary'],
+                            fg=self.colors['text_primary'])
+        menubar.add_cascade(label="Routing", menu=routing_menu)
+        routing_menu.add_command(label="Open Routing Matrix", command=self.open_routing_window)
+        
         # Network menu
-        network_menu = tk.Menu(menubar, tearoff=0)
+        network_menu = tk.Menu(menubar, tearoff=0, bg=self.colors['bg_secondary'],
+                            fg=self.colors['text_primary'])
         menubar.add_cascade(label="Network", menu=network_menu)
         network_menu.add_command(label="Start Streaming", command=self.start_network)
         network_menu.add_command(label="Stop Streaming", command=self.stop_network)
         
         # Help menu
-        help_menu = tk.Menu(menubar, tearoff=0)
+        help_menu = tk.Menu(menubar, tearoff=0, bg=self.colors['bg_secondary'],
+                        fg=self.colors['text_primary'])
         menubar.add_cascade(label="Help", menu=help_menu)
         help_menu.add_command(label="About", command=self.show_about)
     
-    def _create_widgets(self):
-        """Create main GUI widgets"""
+    def _create_modern_widgets(self):
+        """Create modern GUI widgets with professional styling"""
         # Main container
-        main_frame = ttk.Frame(self.root, style='Custom.TFrame')
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        main_frame = tk.Frame(self.root, bg=self.colors['bg_primary'])
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
         
-        # Title
-        title_label = ttk.Label(main_frame, text="ToneSphere Studio", style='Title.TLabel')
-        title_label.pack(pady=(0, 20))
+        # Title with modern styling
+        title_frame = tk.Frame(main_frame, bg=self.colors['bg_primary'], height=80)
+        title_frame.pack(fill=tk.X, pady=(0, 20))
+        title_frame.pack_propagate(False)
         
-        # Status frame
-        status_frame = ttk.LabelFrame(main_frame, text="System Status", style='Custom.TFrame')
-        status_frame.pack(fill=tk.X, pady=(0, 10))
+        title_label = tk.Label(title_frame, text="ToneSphere Studio", 
+                            bg=self.colors['bg_primary'],
+                            fg=self.colors['accent_orange'],
+                            font=('Segoe UI', 28, 'bold'))
+        title_label.pack(expand=True)
         
-        self.status_label = ttk.Label(status_frame, text="Engine: Stopped", style='Header.TLabel')
-        self.status_label.pack(side=tk.LEFT, padx=10, pady=5)
+        # Status card with toggle button
+        status_card = tk.Frame(main_frame, bg=self.colors['bg_secondary'], 
+                            relief='raised', bd=2)
+        status_card.pack(fill=tk.X, pady=(0, 20), ipady=15)
         
-        self.performance_label = ttk.Label(status_frame, text="CPU: 0% | Latency: 0ms", style='Header.TLabel')
-        self.performance_label.pack(side=tk.RIGHT, padx=10, pady=5)
+        status_inner = tk.Frame(status_card, bg=self.colors['bg_secondary'])
+        status_inner.pack(fill=tk.X, padx=20, pady=10)
         
-        # Control frame
-        control_frame = ttk.Frame(main_frame, style='Custom.TFrame')
-        control_frame.pack(fill=tk.X, pady=(0, 10))
+        # Main toggle button
+        self.engine_button = tk.Button(status_inner, 
+                                    text="⚡ START ENGINE",
+                                    command=self.toggle_engine,
+                                    bg=self.colors['bg_tertiary'],
+                                    fg=self.colors['text_primary'],
+                                    activebackground=self.colors['accent_red'],
+                                    font=('Segoe UI', 14, 'bold'),
+                                    relief='raised', bd=3,
+                                    padx=40, pady=15,
+                                    cursor='hand2')
+        self.engine_button.pack(side=tk.LEFT)
         
-        ttk.Button(control_frame, text="Start Engine", command=self.start_engine, style='Custom.TButton').pack(side=tk.LEFT, padx=5)
-        ttk.Button(control_frame, text="Stop Engine", command=self.stop_engine, style='Custom.TButton').pack(side=tk.LEFT, padx=5)
-        ttk.Button(control_frame, text="Refresh Devices", command=self.refresh_devices, style='Custom.TButton').pack(side=tk.LEFT, padx=5)
+        # Status info
+        status_info_frame = tk.Frame(status_inner, bg=self.colors['bg_secondary'])
+        status_info_frame.pack(side=tk.RIGHT)
         
-        # Network control frame
-        network_frame = ttk.LabelFrame(main_frame, text="Network Streaming", style='Custom.TFrame')
-        network_frame.pack(fill=tk.X, pady=(0, 10))
+        self.status_label = tk.Label(status_info_frame, text="Engine: Stopped",
+                                    bg=self.colors['bg_secondary'],
+                                    fg=self.colors['text_secondary'],
+                                    font=('Segoe UI', 12, 'bold'))
+        self.status_label.pack(anchor='e')
         
-        ttk.Button(network_frame, text="Start Network", command=self.start_network, style='Custom.TButton').pack(side=tk.LEFT, padx=5, pady=5)
-        ttk.Button(network_frame, text="Stop Network", command=self.stop_network, style='Custom.TButton').pack(side=tk.LEFT, padx=5, pady=5)
+        self.performance_label = tk.Label(status_info_frame, text="CPU: 0% | Latency: 0ms",
+                                        bg=self.colors['bg_secondary'],
+                                        fg=self.colors['text_muted'],
+                                        font=('Segoe UI', 10))
+        self.performance_label.pack(anchor='e')
+
+                
+        # Control panel
+        control_panel = tk.Frame(main_frame, bg=self.colors['bg_secondary'],
+                                relief='raised', bd=2)
+        control_panel.pack(fill=tk.X, pady=(0, 20), ipady=10)
         
-        self.client_count_label = ttk.Label(network_frame, text="Clients: 0", style='Header.TLabel')
-        self.client_count_label.pack(side=tk.RIGHT, padx=10, pady=5)
+        control_inner = tk.Frame(control_panel, bg=self.colors['bg_secondary'])
+        control_inner.pack(fill=tk.X, padx=20, pady=10)
         
-        # Devices frame
-        devices_frame = ttk.LabelFrame(main_frame, text="Audio Devices", style='Custom.TFrame')
-        devices_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+        tk.Label(control_inner, text="Quick Actions", 
+                bg=self.colors['bg_secondary'],
+                fg=self.colors['accent_orange'],
+                font=('Segoe UI', 14, 'bold')).pack(anchor='w', pady=(0, 10))
         
-        # Devices treeview
+        button_frame = tk.Frame(control_inner, bg=self.colors['bg_secondary'])
+        button_frame.pack(fill=tk.X)
+        
+        # Modern action buttons
+        self._create_action_button(button_frame, "🔄 Refresh Devices", self.refresh_devices)
+        self._create_action_button(button_frame, "🔗 Routing Matrix", self.open_routing_window)
+        self._create_action_button(button_frame, "🌐 Network Panel", self.toggle_network_panel)
+        
+        # Network status panel (initially hidden)
+        self.network_panel = tk.Frame(main_frame, bg=self.colors['bg_secondary'],
+                                     relief='raised', bd=2)
+        
+        network_inner = tk.Frame(self.network_panel, bg=self.colors['bg_secondary'])
+        network_inner.pack(fill=tk.X, padx=20, pady=15)
+        
+        tk.Label(network_inner, text="Network Streaming", 
+                bg=self.colors['bg_secondary'],
+                fg=self.colors['accent_orange'],
+                font=('Segoe UI', 14, 'bold')).pack(anchor='w', pady=(0, 10))
+        
+        network_buttons = tk.Frame(network_inner, bg=self.colors['bg_secondary'])
+        network_buttons.pack(fill=tk.X)
+        
+        self._create_action_button(network_buttons, "▶️ Start Streaming", self.start_network)
+        self._create_action_button(network_buttons, "⏹️ Stop Streaming", self.stop_network)
+        
+        self.client_count_label = tk.Label(network_buttons, text="Clients: 0",
+                                          bg=self.colors['bg_secondary'],
+                                          fg=self.colors['text_secondary'],
+                                          font=('Segoe UI', 11, 'bold'))
+        self.client_count_label.pack(side=tk.RIGHT, padx=10)
+        
+        # Devices panel
+        devices_panel = tk.Frame(main_frame, bg=self.colors['bg_secondary'],
+                                relief='raised', bd=2)
+        devices_panel.pack(fill=tk.BOTH, expand=True, pady=(0, 20))
+        
+        devices_header = tk.Frame(devices_panel, bg=self.colors['bg_secondary'])
+        devices_header.pack(fill=tk.X, padx=20, pady=(15, 10))
+        
+        tk.Label(devices_header, text="Audio Devices", 
+                bg=self.colors['bg_secondary'],
+                fg=self.colors['accent_orange'],
+                font=('Segoe UI', 16, 'bold')).pack(side=tk.LEFT)
+        
+        # Modern devices treeview
+        devices_frame = tk.Frame(devices_panel, bg=self.colors['bg_secondary'])
+        devices_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 15))
+        
         columns = ('ID', 'Name', 'Type', 'Channels', 'ASIO', 'Latency')
-        self.devices_tree = ttk.Treeview(devices_frame, columns=columns, show='headings', height=10)
+        self.devices_tree = ttk.Treeview(devices_frame, columns=columns, 
+                                        show='headings', height=12)
+        
+        # Configure treeview colors
+        style = ttk.Style()
+        style.configure('Treeview', 
+                       background=self.colors['bg_tertiary'],
+                       foreground=self.colors['text_primary'],
+                       fieldbackground=self.colors['bg_tertiary'])
+        style.configure('Treeview.Heading',
+                       background=self.colors['bg_secondary'],
+                       foreground=self.colors['accent_orange'],
+                       font=('Segoe UI', 11, 'bold'))
         
         for col in columns:
             self.devices_tree.heading(col, text=col)
-            self.devices_tree.column(col, width=100)
+            if col == 'Name':
+                self.devices_tree.column(col, width=300)
+            elif col == 'Type':
+                self.devices_tree.column(col, width=150)
+            else:
+                self.devices_tree.column(col, width=80)
         
-        # Scrollbars for devices tree
-        devices_scrollbar_y = ttk.Scrollbar(devices_frame, orient=tk.VERTICAL, command=self.devices_tree.yview)
-        devices_scrollbar_x = ttk.Scrollbar(devices_frame, orient=tk.HORIZONTAL, command=self.devices_tree.xview)
-        self.devices_tree.configure(yscrollcommand=devices_scrollbar_y.set, xscrollcommand=devices_scrollbar_x.set)
+        # Scrollbars
+        devices_scrollbar_y = ttk.Scrollbar(devices_frame, orient=tk.VERTICAL, 
+                                           command=self.devices_tree.yview)
+        self.devices_tree.configure(yscrollcommand=devices_scrollbar_y.set)
         
         self.devices_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         devices_scrollbar_y.pack(side=tk.RIGHT, fill=tk.Y)
-        devices_scrollbar_x.pack(side=tk.BOTTOM, fill=tk.X)
         
-        # Routing frame
-        routing_frame = ttk.LabelFrame(main_frame, text="Audio Routing", style='Custom.TFrame')
-        routing_frame.pack(fill=tk.BOTH, expand=True)
+        # Log panel
+        log_panel = tk.Frame(main_frame, bg=self.colors['bg_secondary'],
+                            relief='raised', bd=2)
+        log_panel.pack(fill=tk.BOTH, expand=True)
+        
+        log_header = tk.Frame(log_panel, bg=self.colors['bg_secondary'])
+        log_header.pack(fill=tk.X, padx=20, pady=(15, 10))
+        
+        tk.Label(log_header, text="System Log", 
+                bg=self.colors['bg_secondary'],
+                fg=self.colors['accent_orange'],
+                font=('Segoe UI', 14, 'bold')).pack(side=tk.LEFT)
+        
+        log_frame = tk.Frame(log_panel, bg=self.colors['bg_secondary'])
+        log_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 15))
+        
+        self.log_text = tk.Text(log_frame, height=8, 
+                               bg=self.colors['bg_primary'], 
+                               fg=self.colors['text_primary'],
+                               font=('Consolas', 10),
+                               insertbackground=self.colors['accent_orange'],
+                               selectbackground=self.colors['accent_red'],
+                               relief='sunken', bd=2)
+        
+        log_scrollbar = ttk.Scrollbar(log_frame, orient=tk.VERTICAL, 
+                                     command=self.log_text.yview)
+        self.log_text.configure(yscrollcommand=log_scrollbar.set)
+        
+        self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        log_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Initially hide network panel
+        self.network_panel_visible = False
+        
+    def toggle_engine(self):
+        """Toggle engine start/stop with single button"""
+        try:
+            if not self.engine_toggle_state:
+                # Start engine
+                if not self.engine:
+                    config = ConfigManager().load_config()
+                    self.engine = AudioEngine(
+                        sample_rate=config['engine']['sample_rate'],
+                        buffer_size=config['engine']['buffer_size']
+                    )
+                    self.engine.initialize()
+                
+                self.engine.start_engine()
+                self.is_running = True
+                self.engine_toggle_state = True
+                
+                # Update button appearance
+                self.engine_button.configure(
+                    text="⏹️ STOP ENGINE",
+                    bg=self.colors['accent_red'],
+                    activebackground=self.colors['accent_orange']
+                )
+                
+                self.log_message("✅ Audio engine started successfully", "success")
+                self.refresh_devices()
+                
+            else:
+                # Stop engine
+                if self.engine:
+                    self.engine.stop_engine()
+                    self.is_running = False
+                    self.engine_toggle_state = False
+                    
+                    # Update button appearance
+                    self.engine_button.configure(
+                        text="⚡ START ENGINE",
+                        bg=self.colors['bg_tertiary'],
+                        activebackground=self.colors['accent_red']
+                    )
+                    
+                    self.log_message("⏹️ Audio engine stopped", "warning")
+                    
+        except Exception as e:
+            self.log_message(f"❌ Engine error: {e}", "error")
+            messagebox.showerror("Engine Error", f"Failed to toggle engine: {e}")
+
+    def _create_action_button(self, parent, text, command):
+        """Create a modern action button"""
+        btn = tk.Button(parent, text=text, command=command,
+                       bg=self.colors['bg_tertiary'],
+                       fg=self.colors['text_primary'],
+                       activebackground=self.colors['accent_orange'],
+                       activeforeground=self.colors['text_primary'],
+                       font=('Segoe UI', 10, 'bold'),
+                       relief='raised', bd=2,
+                       padx=15, pady=8,
+                       cursor='hand2')
+        btn.pack(side=tk.LEFT, padx=(0, 10))
+        return btn
+    
+    def toggle_network_panel(self):
+        """Toggle network panel visibility"""
+        if self.network_panel_visible:
+            self.network_panel.pack_forget()
+            self.network_panel_visible = False
+        else:
+            self.network_panel.pack(fill=tk.X, pady=(0, 20))
+            self.network_panel_visible = True
+    
+    def open_routing_window(self):
+        """Open the routing matrix in a separate window"""
+        if self.routing_window and self.routing_window.winfo_exists():
+            self.routing_window.lift()
+            return
+            
+        self.routing_window = tk.Toplevel(self.root)
+        self.routing_window.title("ToneSphere - Routing Matrix")
+        self.routing_window.geometry("1000x700")
+        self.routing_window.configure(bg=self.colors['bg_primary'])
+        
+        # Create routing interface
+        self._create_routing_interface(self.routing_window)
+    
+    def _create_routing_interface(self, parent):
+        """Create the visual routing interface with blocks and connections"""
+        main_frame = tk.Frame(parent, bg=self.colors['bg_primary'])
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        
+        # Title
+        title_label = tk.Label(main_frame, text="Audio Routing Matrix",
+                              bg=self.colors['bg_primary'],
+                              fg=self.colors['accent_orange'],
+                              font=('Segoe UI', 20, 'bold'))
+        title_label.pack(pady=(0, 20))
+        
+        # Canvas for visual routing
+        canvas_frame = tk.Frame(main_frame, bg=self.colors['bg_secondary'],
+                               relief='raised', bd=2)
+        canvas_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 20))
+        
+        self.routing_canvas = tk.Canvas(canvas_frame, 
+                                       bg=self.colors['bg_primary'],
+                                       highlightthickness=0)
+        self.routing_canvas.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Control panel for routing
+        control_frame = tk.Frame(main_frame, bg=self.colors['bg_secondary'],
+                                relief='raised', bd=2)
+        control_frame.pack(fill=tk.X, ipady=15)
+        
+        control_inner = tk.Frame(control_frame, bg=self.colors['bg_secondary'])
+        control_inner.pack(fill=tk.X, padx=20, pady=10)
         
         # Routing controls
-        routing_controls = ttk.Frame(routing_frame, style='Custom.TFrame')
-        routing_controls.pack(fill=tk.X, padx=5, pady=5)
+        tk.Label(control_inner, text="Create New Routing",
+                bg=self.colors['bg_secondary'],
+                fg=self.colors['accent_orange'],
+                font=('Segoe UI', 14, 'bold')).pack(anchor='w', pady=(0, 10))
         
-        ttk.Label(routing_controls, text="Source:", style='Header.TLabel').pack(side=tk.LEFT, padx=5)
+        routing_controls = tk.Frame(control_inner, bg=self.colors['bg_secondary'])
+        routing_controls.pack(fill=tk.X)
+        
+        tk.Label(routing_controls, text="Source:", 
+                bg=self.colors['bg_secondary'],
+                fg=self.colors['text_primary'],
+                font=('Segoe UI', 11, 'bold')).pack(side=tk.LEFT, padx=(0, 5))
+        
         self.source_var = tk.StringVar()
-        self.source_combo = ttk.Combobox(routing_controls, textvariable=self.source_var, width=20)
-        self.source_combo.pack(side=tk.LEFT, padx=5)
+        self.source_combo = ttk.Combobox(routing_controls, textvariable=self.source_var, 
+                                        width=25, font=('Segoe UI', 10))
+        self.source_combo.pack(side=tk.LEFT, padx=(0, 15))
         
-        ttk.Label(routing_controls, text="Destination:", style='Header.TLabel').pack(side=tk.LEFT, padx=5)
+        tk.Label(routing_controls, text="Destination:", 
+                bg=self.colors['bg_secondary'],
+                fg=self.colors['text_primary'],
+                font=('Segoe UI', 11, 'bold')).pack(side=tk.LEFT, padx=(0, 5))
+        
         self.dest_var = tk.StringVar()
-        self.dest_combo = ttk.Combobox(routing_controls, textvariable=self.dest_var, width=20)
-        self.dest_combo.pack(side=tk.LEFT, padx=5)
+        self.dest_combo = ttk.Combobox(routing_controls, textvariable=self.dest_var, 
+                                      width=25, font=('Segoe UI', 10))
+        self.dest_combo.pack(side=tk.LEFT, padx=(0, 15))
         
-        ttk.Label(routing_controls, text="Volume:", style='Header.TLabel').pack(side=tk.LEFT, padx=5)
+        tk.Label(routing_controls, text="Volume:", 
+                bg=self.colors['bg_secondary'],
+                fg=self.colors['text_primary'],
+                font=('Segoe UI', 11, 'bold')).pack(side=tk.LEFT, padx=(0, 5))
+        
         self.volume_var = tk.DoubleVar(value=1.0)
-        volume_scale = ttk.Scale(routing_controls, from_=0.0, to=2.0, variable=self.volume_var, length=100)
-        volume_scale.pack(side=tk.LEFT, padx=5)
+        volume_scale = ttk.Scale(routing_controls, from_=0.0, to=2.0, 
+                                variable=self.volume_var, length=100)
+        volume_scale.pack(side=tk.LEFT, padx=(0, 10))
         
-        self.volume_label = ttk.Label(routing_controls, text="1.0", style='Header.TLabel')
-        self.volume_label.pack(side=tk.LEFT, padx=5)
+        self.volume_label = tk.Label(routing_controls, text="1.00",
+                                    bg=self.colors['bg_secondary'],
+                                    fg=self.colors['text_secondary'],
+                                    font=('Segoe UI', 10, 'bold'))
+        self.volume_label.pack(side=tk.LEFT, padx=(0, 15))
         
-        ttk.Button(routing_controls, text="Create Routing", command=self.create_routing, style='Custom.TButton').pack(side=tk.LEFT, padx=5)
-        
-        # Update volume label when scale changes
+        # Update volume label
         volume_scale.configure(command=lambda v: self.volume_label.configure(text=f"{float(v):.2f}"))
         
-        # Log frame
-        log_frame = ttk.LabelFrame(main_frame, text="System Log", style='Custom.TFrame')
-        log_frame.pack(fill=tk.BOTH, expand=True)
+        # Create routing button
+        create_btn = tk.Button(routing_controls, text="🔗 Create Routing",
+                              command=self.create_routing,
+                              bg=self.colors['accent_orange'],
+                              fg=self.colors['text_primary'],
+                              activebackground=self.colors['accent_red'],
+                              font=('Segoe UI', 11, 'bold'),
+                              relief='raised', bd=2,
+                              padx=20, pady=5,
+                              cursor='hand2')
+        create_btn.pack(side=tk.LEFT)
         
-        self.log_text = scrolledtext.ScrolledText(log_frame, height=8, bg='#1e1e1e', fg='#ffffff', font=('Consolas', 9))
-        self.log_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        
-    def start_engine(self):
-        """Start the audio engine"""
-        try:
-            if not self.engine:
-                config = ConfigManager().load_config()
-                self.engine = AudioEngine(
-                    sample_rate=config['engine']['sample_rate'],
-                    buffer_size=config['engine']['buffer_size']
-                )
-                self.engine.initialize()
-            
-            self.engine.start_engine()
-            self.is_running = True
-            self.log_message("✓ Audio engine started successfully")
-            self.refresh_devices()
-            
-        except Exception as e:
-            self.log_message(f"✗ Failed to start engine: {e}")
-            messagebox.showerror("Error", f"Failed to start engine: {e}")
-    
-    def stop_engine(self):
-        """Stop the audio engine"""
-        try:
-            if self.engine:
-                self.engine.stop_engine()
-                self.is_running = False
-                self.log_message("✓ Audio engine stopped")
-        except Exception as e:
-            self.log_message(f"✗ Error stopping engine: {e}")
+        # Refresh routing display
+        self.refresh_routing_display()
     
     def start_network(self):
         """Start network streaming"""
@@ -1415,9 +1655,15 @@ class ToneSphereStudioGUI:
                 ))
                 device_options.append(f"{device['id']}: {device['name']}")
             
-            # Update routing comboboxes
-            self.source_combo['values'] = device_options
-            self.dest_combo['values'] = device_options
+            # Update routing comboboxes if they exist
+            try:
+                if hasattr(self, 'source_combo') and self.source_combo.winfo_exists():
+                    self.source_combo['values'] = device_options
+                if hasattr(self, 'dest_combo') and self.dest_combo.winfo_exists():
+                    self.dest_combo['values'] = device_options
+            except (tk.TclError, AttributeError):
+                # Comboboxes don't exist or routing window is closed
+                pass
             
             self.log_message(f"✓ Found {len(devices)} audio devices")
             
@@ -1425,7 +1671,7 @@ class ToneSphereStudioGUI:
             self.log_message(f"✗ Error refreshing devices: {e}")
     
     def create_routing(self):
-        """Create audio routing"""
+        """Create audio routing with improved feedback"""
         try:
             source_text = self.source_var.get()
             dest_text = self.dest_var.get()
@@ -1439,26 +1685,255 @@ class ToneSphereStudioGUI:
             dest_id = int(dest_text.split(':')[0])
             volume = self.volume_var.get()
             
-            if self.engine and self.engine.create_routing(source_id, dest_id, volume):
-                self.log_message(f"✓ Created routing: {source_id} -> {dest_id} (Volume: {volume:.2f})")
+            if self.engine:
+                success, message = self.engine.create_routing(source_id, dest_id, volume)
+                if success:
+                    self.log_message(f"✅ {message}: {source_id} -> {dest_id} (Volume: {volume:.2f})", "success")
+                    # Refresh routing display if window is open
+                    if hasattr(self, 'routing_canvas'):
+                        self.refresh_routing_display()
+                else:
+                    self.log_message(f"⚠️ {message}", "warning")
             else:
-                self.log_message(f"✗ Failed to create routing")
+                self.log_message("❌ Engine not initialized", "error")
                 
         except Exception as e:
-            self.log_message(f"✗ Error creating routing: {e}")
+            self.log_message(f"❌ Error creating routing: {e}", "error")
             messagebox.showerror("Error", f"Error creating routing: {e}")
     
-    def log_message(self, message: str):
-        """Add message to log"""
+    def log_message(self, message: str, msg_type: str = "info"):
+        """Add message to log with color coding"""
         timestamp = time.strftime("%H:%M:%S")
+        
+        # Color coding based on message type
+        if msg_type == "success":
+            color = self.colors['success']
+        elif msg_type == "warning":
+            color = self.colors['warning']
+        elif msg_type == "error":
+            color = self.colors['error']
+        else:
+            color = self.colors['text_primary']
+        
+        # Insert message with timestamp
         self.log_text.insert(tk.END, f"[{timestamp}] {message}\n")
+        
+        # Apply color to the last line
+        line_start = f"{self.log_text.index(tk.END)}-1l"
+        line_end = f"{self.log_text.index(tk.END)}-1c"
+        
+        # Create tag for this message type if it doesn't exist
+        tag_name = f"msg_{msg_type}"
+        self.log_text.tag_configure(tag_name, foreground=color)
+        self.log_text.tag_add(tag_name, line_start, line_end)
+        
         self.log_text.see(tk.END)
     
+    def refresh_routing_display(self):
+        """Refresh the visual routing display"""
+        if not hasattr(self, 'routing_canvas'):
+            return
+            
+        self.routing_canvas.delete("all")
+        
+        if not self.engine:
+            return
+            
+        # Update device options for comboboxes
+        devices = self.engine.get_devices()
+        device_options = []
+        for device in devices:
+            device_options.append(f"{device['id']}: {device['name']}")
+        
+        try:
+            if hasattr(self, 'source_combo') and self.source_combo.winfo_exists():
+                self.source_combo['values'] = device_options
+            if hasattr(self, 'dest_combo') and self.dest_combo.winfo_exists():
+                self.dest_combo['values'] = device_options
+        except tk.TclError:
+            # Comboboxes don't exist or are invalid, skip updating them
+            pass
+        
+        # Draw device blocks and connections
+        inputs = [d for d in devices if 'input' in d['type']]
+        outputs = [d for d in devices if 'output' in d['type']]
+        
+        # Get canvas dimensions
+        self.routing_canvas.update_idletasks()
+        canvas_width = self.routing_canvas.winfo_width()
+        canvas_height = self.routing_canvas.winfo_height()
+        
+        if canvas_width <= 1 or canvas_height <= 1:
+            # Canvas not ready yet, try again later
+            self.routing_canvas.after(100, self.refresh_routing_display)
+            return
+        
+        # Draw input devices on the left
+        y_pos = 50
+        input_positions = {}
+        for i, device in enumerate(inputs):
+            x = 50
+            y = y_pos + (i * 80)
+            if y + 60 < canvas_height - 50:  # Check if device fits in canvas
+                self._draw_device_block(x, y, device, 'input')
+                input_positions[device['id']] = (x + 160, y + 30)  # Connection point
+        
+        # Draw output devices on the right
+        y_pos = 50
+        output_positions = {}
+        for i, device in enumerate(outputs):
+            x = canvas_width - 210
+            y = y_pos + (i * 80)
+            if y + 60 < canvas_height - 50:  # Check if device fits in canvas
+                self._draw_device_block(x, y, device, 'output')
+                output_positions[device['id']] = (x, y + 30)  # Connection point
+        
+        # Draw routing connections
+        routing_matrix = self.engine.get_routing_matrix()
+        for connection in routing_matrix.values():
+            source_id = connection['source_id']
+            dest_id = connection['destination_id']
+            
+            if source_id in input_positions and dest_id in output_positions:
+                start_pos = input_positions[source_id]
+                end_pos = output_positions[dest_id]
+                self._draw_connection(start_pos, end_pos, connection)
+    
+    def _draw_device_block(self, x, y, device, device_type):
+        """Draw a device block with modern styling"""
+        width, height = 160, 60
+        
+        # Choose color based on device type and status
+        if 'virtual' in device['type']:
+            if device['is_active']:
+                color = self.colors['accent_orange']
+                border_color = self.colors['accent_gold']
+            else:
+                color = '#663311'  # Darker orange for inactive virtual
+                border_color = self.colors['accent_orange']
+        elif device['is_asio']:
+            if device['is_active']:
+                color = self.colors['accent_red']
+                border_color = '#ff6666'
+            else:
+                color = '#661111'  # Darker red for inactive ASIO
+                border_color = self.colors['accent_red']
+        else:
+            if device['is_active']:
+                color = self.colors['bg_tertiary']
+                border_color = self.colors['text_secondary']
+            else:
+                color = '#1a1a1a'  # Very dark for inactive regular devices
+                border_color = self.colors['text_muted']
+        
+        # Draw main block with rounded corners effect
+        self.routing_canvas.create_rectangle(x+2, y+2, x + width-2, y + height-2,
+                                           fill='#000000', outline='', width=0)  # Shadow
+        self.routing_canvas.create_rectangle(x, y, x + width, y + height,
+                                           fill=color, outline=border_color,
+                                           width=2)
+        
+        # Draw device name
+        name = device['name'][:18] + '...' if len(device['name']) > 18 else device['name']
+        self.routing_canvas.create_text(x + width//2, y + height//2 - 8,
+                                      text=name, fill=self.colors['text_primary'],
+                                      font=('Segoe UI', 9, 'bold'))
+        
+        # Draw device info
+        info_text = f"Ch:{device['channels']} | {device['latency_ms']:.0f}ms"
+        if device['is_asio']:
+            info_text = "ASIO | " + info_text
+        
+        self.routing_canvas.create_text(x + width//2, y + height//2 + 8,
+                                      text=info_text, fill=self.colors['text_secondary'],
+                                      font=('Segoe UI', 7))
+        
+        # Draw connection point
+        if device_type == 'input':
+            # Output connection point on the right
+            self.routing_canvas.create_oval(x + width - 8, y + height//2 - 4,
+                                          x + width, y + height//2 + 4,
+                                          fill=self.colors['accent_gold'], outline=border_color, width=2)
+        else:
+            # Input connection point on the left
+            self.routing_canvas.create_oval(x - 8, y + height//2 - 4,
+                                          x, y + height//2 + 4,
+                                          fill=self.colors['accent_gold'], outline=border_color, width=2)
+    
+    def _draw_connection(self, start_pos, end_pos, connection):
+        """Draw a routing connection line like a thread/cable"""
+        x1, y1 = start_pos
+        x2, y2 = end_pos
+        
+        # Choose line color and style based on connection state
+        if connection['muted']:
+            color = self.colors['text_muted']
+            width = 2
+            dash = (5, 5)  # Dashed line for muted
+        elif connection['solo']:
+            color = self.colors['accent_gold']
+            width = 5
+            dash = ()
+        else:
+            # Color based on volume level
+            volume = connection['volume']
+            if volume > 1.5:
+                color = self.colors['accent_red']  # High volume - red
+            elif volume > 1.0:
+                color = self.colors['accent_orange']  # Medium-high volume - orange
+            elif volume > 0.5:
+                color = self.colors['success']  # Normal volume - green
+            else:
+                color = self.colors['text_secondary']  # Low volume - gray
+            width = max(2, int(volume * 3))  # Width based on volume
+            dash = ()
+        
+        # Calculate control points for smooth curve
+        mid_x = (x1 + x2) // 2
+        control_x1 = x1 + (mid_x - x1) * 0.7
+        control_x2 = x2 - (x2 - mid_x) * 0.7
+        
+        # Draw smooth curved connection using multiple line segments
+        points = []
+        segments = 20
+        for i in range(segments + 1):
+            t = i / segments
+            # Cubic Bezier curve calculation
+            x = (1-t)**3 * x1 + 3*(1-t)**2*t * control_x1 + 3*(1-t)*t**2 * control_x2 + t**3 * x2
+            y = (1-t)**3 * y1 + 3*(1-t)**2*t * y1 + 3*(1-t)*t**2 * y2 + t**3 * y2
+            points.extend([x, y])
+        
+        # Draw the curved line
+        if dash:
+            self.routing_canvas.create_line(points, fill=color, width=width, 
+                                          smooth=True, dash=dash, capstyle='round')
+        else:
+            self.routing_canvas.create_line(points, fill=color, width=width, 
+                                          smooth=True, capstyle='round')
+        
+        # Draw volume indicator near the middle of the connection
+        mid_point_x = (x1 + x2) // 2
+        mid_point_y = (y1 + y2) // 2
+        
+        # Volume text
+        volume_text = f"{connection['volume']:.1f}x"
+        text_bg = self.colors['bg_primary']
+        
+        # Create background for volume text
+        self.routing_canvas.create_rectangle(mid_point_x - 15, mid_point_y - 8,
+                                           mid_point_x + 15, mid_point_y + 8,
+                                           fill=text_bg, outline=color, width=1)
+        
+        self.routing_canvas.create_text(mid_point_x, mid_point_y,
+                                      text=volume_text, fill=color,
+                                      font=('Segoe UI', 8, 'bold'))
+
     def update_status(self):
         """Update status information"""
         if self.engine:
             if self.engine.is_running:
-                self.status_label.configure(text="Engine: Running")
+                self.status_label.configure(text="Engine: Running", 
+                                          fg=self.colors['success'])
                 
                 # Update performance stats
                 stats = self.engine.get_performance_stats()
@@ -1468,9 +1943,11 @@ class ToneSphereStudioGUI:
                 clients = self.engine.get_network_clients()
                 self.client_count_label.configure(text=f"Clients: {len(clients)}")
             else:
-                self.status_label.configure(text="Engine: Stopped")
+                self.status_label.configure(text="Engine: Stopped",
+                                          fg=self.colors['text_secondary'])
         else:
-            self.status_label.configure(text="Engine: Not Initialized")
+            self.status_label.configure(text="Engine: Not Initialized",
+                                      fg=self.colors['error'])
     
     def start_updates(self):
         """Start update thread"""
@@ -1753,7 +2230,7 @@ def main():
                 outputs = [d for d in devices if 'output' in d['type']]
                 
                 if len(inputs) > 0 and len(outputs) > 0:
-                    success = engine.create_routing(inputs[0]['id'], outputs[0]['id'])
+                    success, message = engine.create_routing(inputs[0]['id'], outputs[0]['id'])
                     if success:
                         print("✓ Created test routing")
                     else:
