@@ -32,7 +32,7 @@ from contextlib import asynccontextmanager
 import yaml
 from pathlib import Path
 import tkinter as tk
-from tkinter import ttk, messagebox, scrolledtext
+from tkinter import ttk, messagebox, scrolledtext, simpledialog
 import socket
 import struct
 import queue
@@ -1608,6 +1608,73 @@ class ToneSphereStudioGUI:
                               padx=20, pady=5,
                               cursor='hand2')
         create_btn.pack(side=tk.LEFT)
+
+        # Active routes section
+        routes_frame = tk.Frame(main_frame, bg=self.colors['bg_secondary'],
+                               relief='raised', bd=2)
+        routes_frame.pack(fill=tk.BOTH, expand=True, pady=(20, 0))
+        
+        routes_header = tk.Frame(routes_frame, bg=self.colors['bg_secondary'])
+        routes_header.pack(fill=tk.X, padx=20, pady=(15, 10))
+        
+        tk.Label(routes_header, text="Active Routes",
+                bg=self.colors['bg_secondary'],
+                fg=self.colors['accent_orange'],
+                font=('Segoe UI', 14, 'bold')).pack(side=tk.LEFT)
+        
+        # Clear all routes button
+        clear_all_btn = tk.Button(routes_header, text="🗑️ Clear All Routes",
+                                 command=self.clear_all_routes,
+                                 bg=self.colors['error'],
+                                 fg=self.colors['text_primary'],
+                                 activebackground='#cc0000',
+                                 font=('Segoe UI', 10, 'bold'),
+                                 relief='raised', bd=2,
+                                 padx=15, pady=5,
+                                 cursor='hand2')
+        clear_all_btn.pack(side=tk.RIGHT)
+        
+        # Routes listbox with scrollbar
+        routes_list_frame = tk.Frame(routes_frame, bg=self.colors['bg_secondary'])
+        routes_list_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 15))
+        
+        # Create treeview for routes
+        routes_columns = ('Source', 'Destination', 'Volume', 'Status', 'Actions')
+        self.routes_tree = ttk.Treeview(routes_list_frame, columns=routes_columns,
+                                       show='headings', height=8)
+        
+        # Configure routes treeview
+        for col in routes_columns:
+            self.routes_tree.heading(col, text=col)
+            if col == 'Actions':
+                self.routes_tree.column(col, width=100)
+            elif col in ['Volume', 'Status']:
+                self.routes_tree.column(col, width=80)
+            else:
+                self.routes_tree.column(col, width=200)
+        
+        # Routes scrollbar
+        routes_scrollbar = ttk.Scrollbar(routes_list_frame, orient=tk.VERTICAL,
+                                        command=self.routes_tree.yview)
+        self.routes_tree.configure(yscrollcommand=routes_scrollbar.set)
+        
+        self.routes_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        routes_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Bind double-click to delete route
+        self.routes_tree.bind('<Double-1>', self.on_route_double_click)
+        
+        # Context menu for routes
+        self.routes_context_menu = tk.Menu(self.routing_window, tearoff=0,
+                                          bg=self.colors['bg_secondary'],
+                                          fg=self.colors['text_primary'])
+        self.routes_context_menu.add_command(label="Delete Route", command=self.delete_selected_route)
+        self.routes_context_menu.add_command(label="Toggle Mute", command=self.toggle_route_mute)
+        self.routes_context_menu.add_separator()
+        self.routes_context_menu.add_command(label="Set Volume...", command=self.set_route_volume)
+        
+        # Bind right-click to show context menu
+        self.routes_tree.bind('<Button-3>', self.show_routes_context_menu)
         
         # Refresh routing display
         self.refresh_routing_display()
@@ -1692,6 +1759,8 @@ class ToneSphereStudioGUI:
                     # Refresh routing display if window is open
                     if hasattr(self, 'routing_canvas'):
                         self.refresh_routing_display()
+                    if hasattr(self, 'routes_tree'):
+                        self.refresh_active_routes()
                 else:
                     self.log_message(f"⚠️ {message}", "warning")
             else:
@@ -1798,6 +1867,9 @@ class ToneSphereStudioGUI:
                 start_pos = input_positions[source_id]
                 end_pos = output_positions[dest_id]
                 self._draw_connection(start_pos, end_pos, connection)
+        
+        if hasattr(self, 'routes_tree'):
+            self.refresh_active_routes()
     
     def _draw_device_block(self, x, y, device, device_type):
         """Draw a device block with modern styling"""
@@ -1927,6 +1999,145 @@ class ToneSphereStudioGUI:
         self.routing_canvas.create_text(mid_point_x, mid_point_y,
                                       text=volume_text, fill=color,
                                       font=('Segoe UI', 8, 'bold'))
+
+    def refresh_active_routes(self):
+        """Refresh the active routes display"""
+        if not hasattr(self, 'routes_tree'):
+            return
+            
+        # Clear existing items
+        for item in self.routes_tree.get_children():
+            self.routes_tree.delete(item)
+        
+        if not self.engine:
+            return
+            
+        # Get current routing matrix
+        routing_matrix = self.engine.get_routing_matrix()
+        devices = self.engine.get_devices()
+        
+        # Create device lookup for names
+        device_lookup = {d['id']: d['name'] for d in devices}
+        
+        # Populate routes tree
+        for connection in routing_matrix.values():
+            source_name = device_lookup.get(connection['source_id'], f"ID:{connection['source_id']}")
+            dest_name = device_lookup.get(connection['destination_id'], f"ID:{connection['destination_id']}")
+            
+            # Determine status
+            if connection['muted']:
+                status = "MUTED"
+                status_color = self.colors['error']
+            elif connection['solo']:
+                status = "SOLO"
+                status_color = self.colors['accent_gold']
+            else:
+                status = "ACTIVE"
+                status_color = self.colors['success']
+            
+            # Insert route into tree
+            route_id = f"{connection['source_id']}_{connection['destination_id']}"
+            self.routes_tree.insert('', 'end', iid=route_id, values=(
+                source_name[:25] + '...' if len(source_name) > 25 else source_name,
+                dest_name[:25] + '...' if len(dest_name) > 25 else dest_name,
+                f"{connection['volume']:.2f}x",
+                status,
+                "Double-click to delete"
+            ))
+    
+    def delete_selected_route(self):
+        """Delete the selected route"""
+        selection = self.routes_tree.selection()
+        if not selection:
+            messagebox.showwarning("No Selection", "Please select a route to delete")
+            return
+            
+        route_id = selection[0]
+        source_id, dest_id = map(int, route_id.split('_'))
+        
+        # Confirm deletion
+        if messagebox.askyesno("Confirm Deletion", 
+                              f"Delete routing from device {source_id} to device {dest_id}?"):
+            if self.engine and self.engine.remove_routing(source_id, dest_id):
+                self.log_message(f"🗑️ Deleted routing: {source_id} -> {dest_id}", "warning")
+                self.refresh_active_routes()
+                self.refresh_routing_display()
+            else:
+                self.log_message(f"❌ Failed to delete routing: {source_id} -> {dest_id}", "error")
+    
+    def clear_all_routes(self):
+        """Clear all active routes"""
+        if not self.engine:
+            return
+            
+        routing_matrix = self.engine.get_routing_matrix()
+        if not routing_matrix:
+            messagebox.showinfo("No Routes", "No active routes to clear")
+            return
+            
+        # Confirm clearing all routes
+        if messagebox.askyesno("Confirm Clear All", 
+                              f"Delete all {len(routing_matrix)} active routes?"):
+            cleared_count = 0
+            for connection in list(routing_matrix.values()):
+                if self.engine.remove_routing(connection['source_id'], connection['destination_id']):
+                    cleared_count += 1
+            
+            self.log_message(f"🗑️ Cleared {cleared_count} routes", "warning")
+            self.refresh_active_routes()
+            self.refresh_routing_display()
+    
+    def on_route_double_click(self, event):
+        """Handle double-click on route"""
+        self.delete_selected_route()
+    
+    def show_routes_context_menu(self, event):
+        """Show context menu for routes"""
+        # Select the item under cursor
+        item = self.routes_tree.identify('item', event.x, event.y)
+        if item:
+            self.routes_tree.selection_set(item)
+            self.routes_context_menu.post(event.x_root, event.y_root)
+    
+    def toggle_route_mute(self):
+        """Toggle mute for selected route"""
+        selection = self.routes_tree.selection()
+        if not selection:
+            return
+            
+        route_id = selection[0]
+        source_id, dest_id = map(int, route_id.split('_'))
+        
+        if self.engine:
+            self.engine.routing_matrix.toggle_mute(source_id, dest_id)
+            self.log_message(f"🔇 Toggled mute for routing: {source_id} -> {dest_id}", "info")
+            self.refresh_active_routes()
+            self.refresh_routing_display()
+    
+    def set_route_volume(self):
+        """Set volume for selected route"""
+        selection = self.routes_tree.selection()
+        if not selection:
+            return
+            
+        route_id = selection[0]
+        source_id, dest_id = map(int, route_id.split('_'))
+        
+        # Get current volume
+        routing_matrix = self.engine.get_routing_matrix()
+        current_volume = routing_matrix.get(route_id, {}).get('volume', 1.0)
+        
+        # Ask for new volume
+        new_volume = tk.simpledialog.askfloat("Set Volume", 
+                                             f"Enter volume for route {source_id} -> {dest_id}:",
+                                             initialvalue=current_volume,
+                                             minvalue=0.0, maxvalue=2.0)
+        
+        if new_volume is not None:
+            self.engine.set_routing_volume(source_id, dest_id, new_volume)
+            self.log_message(f"🔊 Set volume for routing {source_id} -> {dest_id}: {new_volume:.2f}x", "info")
+            self.refresh_active_routes()
+            self.refresh_routing_display()
 
     def update_status(self):
         """Update status information"""
