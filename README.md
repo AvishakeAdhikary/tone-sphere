@@ -1,5 +1,7 @@
 # Tone Sphere
 
+![Tone Sphere Banner](./assets/images/ToneSphereBanner.gif)
+
 This is not your usual readme.
 
 I am a guitarist, and I recently bought an audio interface, only to find out that playing or recording guitar requires me to pay again.
