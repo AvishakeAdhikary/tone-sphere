@@ -1,0 +1,41 @@
+# ToneSphere Configuration File
+# Professional Audio Routing Engine Settings
+
+# Audio Engine Configuration
+engine:
+  sample_rate: 48000        # Sample rate in Hz (44100, 48000, 96000)
+  buffer_size: 128          # Buffer size in samples (64, 128, 256, 512, 1024)
+  master_volume: 1.0        # Master volume (0.0 to 2.0)
+
+# Virtual Device Configuration
+virtual_devices:
+  default_inputs: 3         # Number of default virtual input devices
+  default_outputs: 3        # Number of default virtual output devices
+  default_channels: 2       # Default channel count (stereo)
+
+# Audio Effects Configuration
+effects:
+  enabled: true             # Enable audio effects processing
+  presets: {}               # Effect presets (can be customized)
+
+# API Server Configuration
+api:
+  host: '127.0.0.1'        # API server host (use '0.0.0.0' for all interfaces)
+  port: 8080                # API server port
+  cors_enabled: true        # Enable CORS for web clients
+
+# Network Audio Streaming Configuration
+network:
+  enabled: false            # Enable network audio streaming on startup
+  port: 9001                # Network streaming port
+  max_clients: 10           # Maximum concurrent clients
+
+# Logging Configuration
+logging:
+  level: 'INFO'             # Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  file: null                # Log file path (null for console only)
+  
+# Performance Monitoring
+performance:
+  monitoring_enabled: true  # Enable performance monitoring
+  update_interval: 1.0      # Update interval in seconds
