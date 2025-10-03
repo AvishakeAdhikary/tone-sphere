@@ -353,40 +353,122 @@ class ToneSphereStudioGUI:
         self._create_routing_interface(self.routing_window)
     
     def _create_routing_interface(self, parent):
-        """Create the visual routing interface with blocks and connections"""
+        """Create the visual routing interface with interactive canvas"""
+        from tonesphere.gui.interactive_canvas import InteractiveRoutingCanvas
+        
         main_frame = tk.Frame(parent, bg=self.colors['bg_primary'])
         main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
         
-        # Title
-        title_label = tk.Label(main_frame, text="Audio Routing Matrix",
+        # Title and controls bar
+        title_frame = tk.Frame(main_frame, bg=self.colors['bg_primary'])
+        title_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        title_label = tk.Label(title_frame, text="Audio Routing Matrix",
                               bg=self.colors['bg_primary'],
                               fg=self.colors['accent_orange'],
                               font=('Segoe UI', 20, 'bold'))
-        title_label.pack(pady=(0, 20))
+        title_label.pack(side=tk.LEFT)
         
-        # Canvas for visual routing
-        canvas_frame = tk.Frame(main_frame, bg=self.colors['bg_secondary'],
-                               relief='raised', bd=2)
-        canvas_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 20))
+        # Canvas controls
+        controls_frame = tk.Frame(title_frame, bg=self.colors['bg_primary'])
+        controls_frame.pack(side=tk.RIGHT)
         
-        self.routing_canvas = tk.Canvas(canvas_frame, 
+        # Zoom controls
+        tk.Label(controls_frame, text="Zoom:",
+                bg=self.colors['bg_primary'],
+                fg=self.colors['text_secondary'],
+                font=('Segoe UI', 10, 'bold')).pack(side=tk.LEFT, padx=(0, 5))
+        
+        zoom_out_btn = tk.Button(controls_frame, text="−",
+                                command=lambda: self.interactive_canvas.zoom_out() if hasattr(self, 'interactive_canvas') else None,
+                                bg=self.colors['bg_tertiary'],
+                                fg=self.colors['text_primary'],
+                                font=('Segoe UI', 14, 'bold'),
+                                width=2, relief='raised', bd=2,
+                                cursor='hand2')
+        zoom_out_btn.pack(side=tk.LEFT, padx=2)
+        
+        zoom_in_btn = tk.Button(controls_frame, text="+",
+                               command=lambda: self.interactive_canvas.zoom_in() if hasattr(self, 'interactive_canvas') else None,
+                               bg=self.colors['bg_tertiary'],
+                               fg=self.colors['text_primary'],
+                               font=('Segoe UI', 14, 'bold'),
+                               width=2, relief='raised', bd=2,
+                               cursor='hand2')
+        zoom_in_btn.pack(side=tk.LEFT, padx=2)
+        
+        # Center button
+        center_btn = tk.Button(controls_frame, text="⊙ Center",
+                              command=lambda: self.interactive_canvas.center_content() if hasattr(self, 'interactive_canvas') else None,
+                              bg=self.colors['accent_orange'],
+                              fg=self.colors['text_primary'],
+                              activebackground=self.colors['accent_red'],
+                              font=('Segoe UI', 10, 'bold'),
+                              relief='raised', bd=2,
+                              padx=15, pady=5,
+                              cursor='hand2')
+        center_btn.pack(side=tk.LEFT, padx=(10, 0))
+        
+        # Canvas container with border
+        canvas_container = tk.Frame(main_frame, bg=self.colors['bg_secondary'],
+                                   relief='raised', bd=2)
+        canvas_container.pack(fill=tk.BOTH, expand=True, pady=(0, 15))
+        
+        # Create canvas
+        self.routing_canvas = tk.Canvas(canvas_container, 
                                        bg=self.colors['bg_primary'],
-                                       highlightthickness=0)
-        self.routing_canvas.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+                                       highlightthickness=0,
+                                       cursor="crosshair")
+        self.routing_canvas.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
-        # Control panel for routing
+        # Initialize interactive canvas controller
+        self.interactive_canvas = InteractiveRoutingCanvas(self.routing_canvas, self.colors)
+        
+        # Set up callbacks
+        self.interactive_canvas.on_connection_created = self._on_canvas_connection_created
+        self.interactive_canvas.on_connection_deleted = self._on_canvas_connection_deleted
+        self.interactive_canvas.on_device_moved = self._on_canvas_device_moved
+        
+        # Instructions panel
+        instructions_frame = tk.Frame(main_frame, bg=self.colors['bg_secondary'],
+                                     relief='raised', bd=2)
+        instructions_frame.pack(fill=tk.X, pady=(0, 15))
+        
+        instructions_inner = tk.Frame(instructions_frame, bg=self.colors['bg_secondary'])
+        instructions_inner.pack(fill=tk.X, padx=15, pady=10)
+        
+        tk.Label(instructions_inner, text="💡 Controls:",
+                bg=self.colors['bg_secondary'],
+                fg=self.colors['accent_orange'],
+                font=('Segoe UI', 11, 'bold')).pack(side=tk.LEFT, padx=(0, 15))
+        
+        instructions_text = (
+            "🖱️ Left-Click & Drag: Move devices  |  "
+            "🔗 Click connection point & drag: Create route  |  "
+            "🗑️ Right-Click connection: Delete  |  "
+            "🖱️ Middle-Click & Drag: Pan  |  "
+            "🔍 Mouse Wheel: Zoom  |  "
+            "⊙ Center button: Reset view"
+        )
+        
+        tk.Label(instructions_inner, text=instructions_text,
+                bg=self.colors['bg_secondary'],
+                fg=self.colors['text_secondary'],
+                font=('Segoe UI', 9)).pack(side=tk.LEFT)
+        
+        # Control panel for manual routing
         control_frame = tk.Frame(main_frame, bg=self.colors['bg_secondary'],
                                 relief='raised', bd=2)
-        control_frame.pack(fill=tk.X, ipady=15)
+        control_frame.pack(fill=tk.X, ipady=10)
         
         control_inner = tk.Frame(control_frame, bg=self.colors['bg_secondary'])
         control_inner.pack(fill=tk.X, padx=20, pady=10)
         
         # Routing controls
-        tk.Label(control_inner, text="Create New Routing",
+        tk.Label(control_inner, text="Manual Routing",
                 bg=self.colors['bg_secondary'],
                 fg=self.colors['accent_orange'],
-                font=('Segoe UI', 14, 'bold')).pack(anchor='w', pady=(0, 10))
+                font=('Segoe UI', 12, 'bold')).pack(anchor='w', pady=(0, 8))
         
         routing_controls = tk.Frame(control_inner, bg=self.colors['bg_secondary'])
         routing_controls.pack(fill=tk.X)
@@ -394,94 +476,98 @@ class ToneSphereStudioGUI:
         tk.Label(routing_controls, text="Source:", 
                 bg=self.colors['bg_secondary'],
                 fg=self.colors['text_primary'],
-                font=('Segoe UI', 11, 'bold')).pack(side=tk.LEFT, padx=(0, 5))
+                font=('Segoe UI', 10, 'bold')).pack(side=tk.LEFT, padx=(0, 5))
         
         self.source_var = tk.StringVar()
         self.source_combo = ttk.Combobox(routing_controls, textvariable=self.source_var, 
-                                        width=25, font=('Segoe UI', 10))
-        self.source_combo.pack(side=tk.LEFT, padx=(0, 15))
+                                        width=20, font=('Segoe UI', 9))
+        self.source_combo.pack(side=tk.LEFT, padx=(0, 10))
+        
+        tk.Label(routing_controls, text="→", 
+                bg=self.colors['bg_secondary'],
+                fg=self.colors['accent_orange'],
+                font=('Segoe UI', 14, 'bold')).pack(side=tk.LEFT, padx=(0, 10))
         
         tk.Label(routing_controls, text="Destination:", 
                 bg=self.colors['bg_secondary'],
                 fg=self.colors['text_primary'],
-                font=('Segoe UI', 11, 'bold')).pack(side=tk.LEFT, padx=(0, 5))
+                font=('Segoe UI', 10, 'bold')).pack(side=tk.LEFT, padx=(0, 5))
         
         self.dest_var = tk.StringVar()
         self.dest_combo = ttk.Combobox(routing_controls, textvariable=self.dest_var, 
-                                      width=25, font=('Segoe UI', 10))
-        self.dest_combo.pack(side=tk.LEFT, padx=(0, 15))
+                                      width=20, font=('Segoe UI', 9))
+        self.dest_combo.pack(side=tk.LEFT, padx=(0, 10))
         
         tk.Label(routing_controls, text="Volume:", 
                 bg=self.colors['bg_secondary'],
                 fg=self.colors['text_primary'],
-                font=('Segoe UI', 11, 'bold')).pack(side=tk.LEFT, padx=(0, 5))
+                font=('Segoe UI', 10, 'bold')).pack(side=tk.LEFT, padx=(0, 5))
         
         self.volume_var = tk.DoubleVar(value=1.0)
         volume_scale = ttk.Scale(routing_controls, from_=0.0, to=2.0, 
-                                variable=self.volume_var, length=100)
-        volume_scale.pack(side=tk.LEFT, padx=(0, 10))
+                                variable=self.volume_var, length=80)
+        volume_scale.pack(side=tk.LEFT, padx=(0, 8))
         
         self.volume_label = tk.Label(routing_controls, text="1.00",
                                     bg=self.colors['bg_secondary'],
                                     fg=self.colors['text_secondary'],
-                                    font=('Segoe UI', 10, 'bold'))
-        self.volume_label.pack(side=tk.LEFT, padx=(0, 15))
+                                    font=('Segoe UI', 10, 'bold'),
+                                    width=4)
+        self.volume_label.pack(side=tk.LEFT, padx=(0, 10))
         
         # Update volume label
         volume_scale.configure(command=lambda v: self.volume_label.configure(text=f"{float(v):.2f}"))
         
         # Create routing button
-        create_btn = tk.Button(routing_controls, text="🔗 Create Routing",
+        create_btn = tk.Button(routing_controls, text="🔗 Create",
                               command=self.create_routing,
                               bg=self.colors['accent_orange'],
                               fg=self.colors['text_primary'],
                               activebackground=self.colors['accent_red'],
-                              font=('Segoe UI', 11, 'bold'),
+                              font=('Segoe UI', 10, 'bold'),
                               relief='raised', bd=2,
-                              padx=20, pady=5,
+                              padx=15, pady=4,
                               cursor='hand2')
-        create_btn.pack(side=tk.LEFT)
-
-        # Active routes section
+        create_btn.pack(side=tk.LEFT, padx=(5, 0))
+        
+        # Clear all button
+        clear_btn = tk.Button(routing_controls, text="🗑️ Clear All",
+                             command=self.clear_all_routes,
+                             bg=self.colors['error'],
+                             fg=self.colors['text_primary'],
+                             activebackground='#cc0000',
+                             font=('Segoe UI', 10, 'bold'),
+                             relief='raised', bd=2,
+                             padx=15, pady=4,
+                             cursor='hand2')
+        clear_btn.pack(side=tk.RIGHT)
+        
+        # Active routes list
         routes_frame = tk.Frame(main_frame, bg=self.colors['bg_secondary'],
                                relief='raised', bd=2)
-        routes_frame.pack(fill=tk.BOTH, expand=True, pady=(20, 0))
+        routes_frame.pack(fill=tk.BOTH, expand=True)
         
         routes_header = tk.Frame(routes_frame, bg=self.colors['bg_secondary'])
-        routes_header.pack(fill=tk.X, padx=20, pady=(15, 10))
+        routes_header.pack(fill=tk.X, padx=15, pady=(10, 8))
         
         tk.Label(routes_header, text="Active Routes",
                 bg=self.colors['bg_secondary'],
                 fg=self.colors['accent_orange'],
-                font=('Segoe UI', 14, 'bold')).pack(side=tk.LEFT)
+                font=('Segoe UI', 12, 'bold')).pack(side=tk.LEFT)
         
-        # Clear all routes button
-        clear_all_btn = tk.Button(routes_header, text="🗑️ Clear All Routes",
-                                 command=self.clear_all_routes,
-                                 bg=self.colors['error'],
-                                 fg=self.colors['text_primary'],
-                                 activebackground='#cc0000',
-                                 font=('Segoe UI', 10, 'bold'),
-                                 relief='raised', bd=2,
-                                 padx=15, pady=5,
-                                 cursor='hand2')
-        clear_all_btn.pack(side=tk.RIGHT)
-        
-        # Routes listbox with scrollbar
+        # Routes list
         routes_list_frame = tk.Frame(routes_frame, bg=self.colors['bg_secondary'])
-        routes_list_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 15))
+        routes_list_frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=(0, 10))
         
         # Create treeview for routes
-        routes_columns = ('Source', 'Destination', 'Volume', 'Status', 'Actions')
+        routes_columns = ('Source', 'Destination', 'Volume', 'Status')
         self.routes_tree = ttk.Treeview(routes_list_frame, columns=routes_columns,
-                                       show='headings', height=8)
+                                       show='headings', height=6)
         
         # Configure routes treeview
         for col in routes_columns:
             self.routes_tree.heading(col, text=col)
-            if col == 'Actions':
-                self.routes_tree.column(col, width=100)
-            elif col in ['Volume', 'Status']:
+            if col in ['Volume', 'Status']:
                 self.routes_tree.column(col, width=80)
             else:
                 self.routes_tree.column(col, width=200)
@@ -509,8 +595,34 @@ class ToneSphereStudioGUI:
         # Bind right-click to show context menu
         self.routes_tree.bind('<Button-3>', self.show_routes_context_menu)
         
-        # Refresh routing display
+        # Initial load
         self.refresh_routing_display()
+
+    def _on_canvas_connection_created(self, source_id: int, dest_id: int):
+        """Handle connection created from canvas"""
+        if self.engine:
+            success, message = self.engine.create_routing(source_id, dest_id, 1.0)
+            if success:
+                self.log_message(f"✅ {message}: {source_id} → {dest_id}", "success")
+                self.refresh_routing_display()
+                self.refresh_active_routes()
+            else:
+                self.log_message(f"⚠️ {message}", "warning")
+    
+    def _on_canvas_connection_deleted(self, source_id: int, dest_id: int):
+        """Handle connection deleted from canvas"""
+        if self.engine:
+            if messagebox.askyesno("Delete Connection", 
+                                  f"Delete routing from device {source_id} to {dest_id}?"):
+                if self.engine.remove_routing(source_id, dest_id):
+                    self.log_message(f"🗑️ Deleted routing: {source_id} → {dest_id}", "warning")
+                    self.refresh_routing_display()
+                    self.refresh_active_routes()
+    
+    def _on_canvas_device_moved(self):
+        """Handle device moved on canvas"""
+        # Optional: Save device positions to config
+        pass
     
     def start_network(self):
         """Start network streaming"""
@@ -632,75 +744,78 @@ class ToneSphereStudioGUI:
         self.log_text.see(tk.END)
     
     def refresh_routing_display(self):
-        """Refresh the visual routing display"""
-        if not hasattr(self, 'routing_canvas'):
+        """Refresh the visual routing display with interactive canvas"""
+        if not hasattr(self, 'interactive_canvas'):
             return
-            
-        self.routing_canvas.delete("all")
         
         if not self.engine:
             return
-            
-        # Update device options for comboboxes
+        
+        # Clear canvas
+        self.interactive_canvas.clear()
+        
+        # Get devices
         devices = self.engine.get_devices()
         device_options = []
+        
         for device in devices:
             device_options.append(f"{device['id']}: {device['name']}")
         
+        # Update comboboxes
         try:
             if hasattr(self, 'source_combo') and self.source_combo.winfo_exists():
                 self.source_combo['values'] = device_options
             if hasattr(self, 'dest_combo') and self.dest_combo.winfo_exists():
                 self.dest_combo['values'] = device_options
         except tk.TclError:
-            # Comboboxes don't exist or are invalid, skip updating them
             pass
         
-        # Draw device blocks and connections
+        # Separate inputs and outputs
         inputs = [d for d in devices if 'input' in d['type']]
         outputs = [d for d in devices if 'output' in d['type']]
         
-        # Get canvas dimensions
-        self.routing_canvas.update_idletasks()
-        canvas_width = self.routing_canvas.winfo_width()
-        canvas_height = self.routing_canvas.winfo_height()
+        # Position devices on canvas
+        # Inputs on the left
+        start_y = 100
+        spacing_y = 120
         
-        if canvas_width <= 1 or canvas_height <= 1:
-            # Canvas not ready yet, try again later
-            self.routing_canvas.after(100, self.refresh_routing_display)
-            return
-        
-        # Draw input devices on the left
-        y_pos = 50
-        input_positions = {}
         for i, device in enumerate(inputs):
-            x = 50
-            y = y_pos + (i * 80)
-            if y + 60 < canvas_height - 50:  # Check if device fits in canvas
-                self._draw_device_block(x, y, device, 'input')
-                input_positions[device['id']] = (x + 160, y + 30)  # Connection point
+            x = 100
+            y = start_y + (i * spacing_y)
+            self.interactive_canvas.add_device(
+                device['id'], 
+                device['name'], 
+                device['type'],
+                x, y
+            )
         
-        # Draw output devices on the right
-        y_pos = 50
-        output_positions = {}
+        # Outputs on the right
         for i, device in enumerate(outputs):
-            x = canvas_width - 210
-            y = y_pos + (i * 80)
-            if y + 60 < canvas_height - 50:  # Check if device fits in canvas
-                self._draw_device_block(x, y, device, 'output')
-                output_positions[device['id']] = (x, y + 30)  # Connection point
+            x = 600
+            y = start_y + (i * spacing_y)
+            self.interactive_canvas.add_device(
+                device['id'], 
+                device['name'], 
+                device['type'],
+                x, y
+            )
         
-        # Draw routing connections
+        # Add connections
         routing_matrix = self.engine.get_routing_matrix()
         for connection in routing_matrix.values():
-            source_id = connection['source_id']
-            dest_id = connection['destination_id']
-            
-            if source_id in input_positions and dest_id in output_positions:
-                start_pos = input_positions[source_id]
-                end_pos = output_positions[dest_id]
-                self._draw_connection(start_pos, end_pos, connection)
+            self.interactive_canvas.add_connection(
+                connection['source_id'],
+                connection['destination_id'],
+                connection['volume'],
+                connection['muted'],
+                connection['solo']
+            )
         
+        # Redraw and center
+        self.interactive_canvas.redraw()
+        self.routing_canvas.after(100, self.interactive_canvas.center_content)
+        
+        # Update routes tree
         if hasattr(self, 'routes_tree'):
             self.refresh_active_routes()
     
