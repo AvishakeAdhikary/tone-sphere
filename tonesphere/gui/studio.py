@@ -13,6 +13,9 @@ class ToneSphereStudioGUI:
         self.root.title("ToneSphere Studio - Professional Audio Routing")
         self.root.geometry("1400x900")
         self.root.configure(bg='#0a0a0a')
+
+        # Set icon
+        self.root.iconphoto(True, tk.PhotoImage(file="./assets/images/ToneSphere.png"))
         
         # Modern color scheme
         self.colors = {
