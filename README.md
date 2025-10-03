@@ -20,7 +20,7 @@ This project is all about that.
 Just run `pip install uv` if you already don't have `uv` installed.
 Then run `uv sync`. That will install everything.
 
-Next just run `uv run audio_engine_backend.py gui` and baby you're gonna love it.
+Next just run `uv run main.py gui` and baby you're gonna love it.
 
 P.S. This is not a rickroll.
 I'll work on executables in the future, for now I am busy working in corporate. Inviting others to contribute.
