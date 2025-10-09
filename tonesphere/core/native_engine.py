@@ -9,8 +9,9 @@ import time
 from typing import Dict, Any, List, Optional
 from tonesphere.core.routing import AudioRoutingMatrix
 from tonesphere.devices.native_virtual import NativeVirtualDeviceManager
+from tonesphere.devices.virtual_device_manager import VirtualDeviceManager
 from tonesphere.network.audio_router import NetworkAudioRouter, NetworkQuality
-from tonesphere.utils.logger import logger
+from tonesphere.utils.logger import get_logger
 from tonesphere.core.models import DeviceType, AudioDevice
 from tonesphere.core.processor import AudioProcessor
 from tonesphere.core.stream_manager import AudioStreamManager
@@ -19,6 +20,8 @@ from tonesphere.core.sample_rate_converter import SampleRateManager
 from tonesphere.drivers.manager import AudioDriverManager
 from tonesphere.drivers.base import AudioDriverType, AudioStreamConfig
 
+logger = get_logger(__name__)
+
 
 class NativeAudioEngine:
     """
@@ -26,8 +29,9 @@ class NativeAudioEngine:
     Supports ASIO, WASAPI, DirectSound, ALSA, PulseAudio, JACK, PipeWire, CoreAudio
     """
     
-    def __init__(self, sample_rate: int = 48000, buffer_size: int = 128, 
-                 preferred_driver: AudioDriverType = AudioDriverType.AUTO):
+    def __init__(self, sample_rate: int = 48000, buffer_size: int = 128,
+                 preferred_driver: AudioDriverType = AudioDriverType.AUTO,
+                 max_virtual_inputs: int = 10, max_virtual_outputs: int = 10):
         self.sample_rate = sample_rate
         self.buffer_size = buffer_size
         
@@ -36,6 +40,7 @@ class NativeAudioEngine:
         self.stream_manager = AudioStreamManager(self.driver_manager)
         self.processor = AudioProcessor(sample_rate, buffer_size)
         self.virtual_device_manager = NativeVirtualDeviceManager(sample_rate, buffer_size)
+        self.virtual_manager = VirtualDeviceManager(sample_rate, buffer_size, max_virtual_inputs, max_virtual_outputs)
         self.routing_matrix = AudioRoutingMatrix()
         self.network_router = NetworkAudioRouter(quality=NetworkQuality.HIGH)
         self.channel_control_manager = ChannelControlManager()
@@ -152,41 +157,47 @@ class NativeAudioEngine:
             logger.error(f"Error scanning audio devices: {e}")
     
     def _create_default_virtual_devices(self):
-        """Create default virtual audio devices"""
-        # Create 3 virtual inputs (like VoiceMeeter Potato)
-        for i in range(3):
-            device_id = self.virtual_device_manager.create_virtual_input(
-                f"ToneSphere Input {i+1}", channels=2
-            )
-            virtual_device = AudioDevice(
-                id=device_id,
-                name=f"ToneSphere Input {i+1}",
-                device_type=DeviceType.VIRTUAL_INPUT,
-                channels=2,
-                sample_rate=self.sample_rate,
-                buffer_size=self.buffer_size,
-                is_active=True
-            )
-            self.all_devices[device_id] = virtual_device
+        """Create default virtual audio devices using the new manager"""
+        # Get config for default counts
+        from tonesphere.utils.config import ConfigManager
+        config = ConfigManager().load_config()
+        vdev_config = config.get('virtual_devices', {})
+        default_inputs = vdev_config.get('default_inputs', 3)
+        default_outputs = vdev_config.get('default_outputs', 3)
         
-        # Create 3 virtual outputs
-        for i in range(3):
-            device_id = self.virtual_device_manager.create_virtual_output(
-                f"ToneSphere Output {i+1}", channels=2
-            )
-            virtual_device = AudioDevice(
-                id=device_id,
-                name=f"ToneSphere Output {i+1}",
-                device_type=DeviceType.VIRTUAL_OUTPUT,
-                channels=2,
-                sample_rate=self.sample_rate,
-                buffer_size=self.buffer_size,
-                is_active=True
-            )
-            self.all_devices[device_id] = virtual_device
+        # Create default virtual inputs using new manager
+        for i in range(default_inputs):
+            device_id = self.virtual_manager.create_input(channels=2)
+            if device_id:
+                virtual_device = AudioDevice(
+                    id=device_id,
+                    name=f"ToneSphere Input {i+1}",
+                    device_type=DeviceType.VIRTUAL_INPUT,
+                    channels=2,
+                    sample_rate=self.sample_rate,
+                    buffer_size=self.buffer_size,
+                    is_active=True
+                )
+                self.all_devices[device_id] = virtual_device
         
-        self.performance_stats['virtual_devices'] = 6
-        logger.info("Created 6 default virtual devices")
+        # Create default virtual outputs using new manager
+        for i in range(default_outputs):
+            device_id = self.virtual_manager.create_output(channels=2)
+            if device_id:
+                virtual_device = AudioDevice(
+                    id=device_id,
+                    name=f"ToneSphere Output {i+1}",
+                    device_type=DeviceType.VIRTUAL_OUTPUT,
+                    channels=2,
+                    sample_rate=self.sample_rate,
+                    buffer_size=self.buffer_size,
+                    is_active=True
+                )
+                self.all_devices[device_id] = virtual_device
+        
+        total_created = default_inputs + default_outputs
+        self.performance_stats['virtual_devices'] = total_created
+        logger.info(f"Created {total_created} default ToneSphere virtual devices")
     
     def start_engine(self):
         """Start the native audio engine"""
@@ -287,44 +298,58 @@ class NativeAudioEngine:
             })
         return devices
     
-    def create_virtual_input(self, name: str, channels: int = 2) -> int:
-        """Create a new virtual input device"""
-        device_id = self.virtual_device_manager.create_virtual_input(name, channels)
+    def create_virtual_input(self, name: str, channels: int = 2) -> Optional[int]:
+        """Create a new virtual input device using new manager"""
+        # Use new manager which handles limits and auto-naming
+        device_id = self.virtual_manager.create_input(channels)
         
-        virtual_device = AudioDevice(
-            id=device_id,
-            name=name,
-            device_type=DeviceType.VIRTUAL_INPUT,
-            channels=channels,
-            sample_rate=self.sample_rate,
-            buffer_size=self.buffer_size,
-            is_active=True
-        )
-        self.all_devices[device_id] = virtual_device
-        self.performance_stats['virtual_devices'] += 1
+        if device_id:
+            # Get the auto-generated name from the manager
+            device_info = self.virtual_manager.get_device_info(device_id)
+            actual_name = device_info.name if device_info else f"ToneSphere Input {len(self.virtual_manager.input_devices)}"
+            
+            virtual_device = AudioDevice(
+                id=device_id,
+                name=actual_name,
+                device_type=DeviceType.VIRTUAL_INPUT,
+                channels=channels,
+                sample_rate=self.sample_rate,
+                buffer_size=self.buffer_size,
+                is_active=True
+            )
+            self.all_devices[device_id] = virtual_device
+            self.performance_stats['virtual_devices'] += 1
+            logger.info(f"Created virtual input: {actual_name} (ID: {device_id})")
         
         return device_id
     
-    def create_virtual_output(self, name: str, channels: int = 2) -> int:
-        """Create a new virtual output device"""
-        device_id = self.virtual_device_manager.create_virtual_output(name, channels)
+    def create_virtual_output(self, name: str, channels: int = 2) -> Optional[int]:
+        """Create a new virtual output device using new manager"""
+        # Use new manager which handles limits and auto-naming
+        device_id = self.virtual_manager.create_output(channels)
         
-        virtual_device = AudioDevice(
-            id=device_id,
-            name=name,
-            device_type=DeviceType.VIRTUAL_OUTPUT,
-            channels=channels,
-            sample_rate=self.sample_rate,
-            buffer_size=self.buffer_size,
-            is_active=True
-        )
-        self.all_devices[device_id] = virtual_device
-        self.performance_stats['virtual_devices'] += 1
+        if device_id:
+            # Get the auto-generated name from the manager
+            device_info = self.virtual_manager.get_device_info(device_id)
+            actual_name = device_info.name if device_info else f"ToneSphere Output {len(self.virtual_manager.output_devices)}"
+            
+            virtual_device = AudioDevice(
+                id=device_id,
+                name=actual_name,
+                device_type=DeviceType.VIRTUAL_OUTPUT,
+                channels=channels,
+                sample_rate=self.sample_rate,
+                buffer_size=self.buffer_size,
+                is_active=True
+            )
+            self.all_devices[device_id] = virtual_device
+            self.performance_stats['virtual_devices'] += 1
+            logger.info(f"Created virtual output: {actual_name} (ID: {device_id})")
         
         return device_id
     
     def remove_virtual_device(self, device_id: int) -> bool:
-        """Remove a virtual device"""
+        """Remove a virtual device using new manager"""
         if device_id not in self.all_devices:
             return False
         
@@ -332,12 +357,49 @@ class NativeAudioEngine:
         if device.device_type not in [DeviceType.VIRTUAL_INPUT, DeviceType.VIRTUAL_OUTPUT]:
             return False
         
-        if self.virtual_device_manager.remove_virtual_device(device_id):
+        # Use new manager to delete
+        if self.virtual_manager.delete_device(device_id):
             del self.all_devices[device_id]
             self.performance_stats['virtual_devices'] -= 1
+            logger.info(f"Removed virtual device: {device.name} (ID: {device_id})")
             return True
         
         return False
+    
+    # Virtual Device Manager Methods
+    def list_virtual_devices(self) -> List[Dict]:
+        """List all virtual devices"""
+        return [
+            {
+                'id': info.id,
+                'name': info.name,
+                'type': info.device_type,
+                'channels': info.channels,
+                'sample_rate': info.sample_rate,
+                'is_running': info.is_running
+            }
+            for info in self.virtual_manager.list_all()
+        ]
+    
+    def get_virtual_device_counts(self) -> Dict:
+        """Get virtual device counts and limits"""
+        return self.virtual_manager.get_counts()
+    
+    def delete_virtual_device(self, device_id: int) -> bool:
+        """Delete a virtual device using the manager"""
+        success = self.virtual_manager.delete_device(device_id)
+        if success and device_id in self.all_devices:
+            del self.all_devices[device_id]
+            self.performance_stats['virtual_devices'] -= 1
+        return success
+    
+    def update_virtual_device_sample_rate(self, device_id: int, sample_rate: int) -> bool:
+        """Update virtual device sample rate"""
+        return self.virtual_manager.update_device_sample_rate(device_id, sample_rate)
+    
+    def update_virtual_device_channels(self, device_id: int, channels: int) -> bool:
+        """Update virtual device channels"""
+        return self.virtual_manager.update_device_channels(device_id, channels)
     
     # Routing Methods
     def create_routing(self, source_id: int, destination_id: int, volume: float = 1.0) -> tuple[bool, str]:

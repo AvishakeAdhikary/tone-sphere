@@ -5,28 +5,61 @@ Main entry point for the application
 """
 
 import sys
-from tonesphere.api.server import run_api_server
-from tonesphere.gui.studio import ToneSphereStudioGUI
-from tonesphere.cli.interface import AudioEngineCLI
-from tonesphere.core.engine_factory import UnifiedAudioEngine
+import logging
+from tonesphere.utils.config import ConfigManager
+from tonesphere.utils.logger import logger_manager, enable_file_logging
+
+
+def setup_logging(config: dict):
+    """Setup logging based on configuration"""
+    log_config = config.get('logging', {})
+    
+    # Get log level
+    level_str = log_config.get('level', 'INFO')
+    level = getattr(logging, level_str.upper(), logging.INFO)
+    
+    # Setup logger with configuration
+    logger_manager.setup_logger(
+        name="tonesphere",
+        level=level,
+        enable_file_logging=log_config.get('enable_file_logging', False),
+        log_file=log_config.get('log_file', 'tonesphere.log'),
+        log_dir=log_config.get('log_dir', 'logs'),
+        max_bytes=log_config.get('max_file_size_mb', 10) * 1024 * 1024,
+        backup_count=log_config.get('backup_count', 5),
+        structured=log_config.get('structured', False),
+        console_colors=log_config.get('colored_console', True)
+    )
 
 
 def main():
     """Main entry point"""
+    config_manager = ConfigManager()
+    config = config_manager.load_config()
+    
+    # Setup logging first
+    setup_logging(config)
+    
+    print("ToneSphere - Professional Audio Routing Engine")
+    print("=" * 50)
     
     if len(sys.argv) > 1:
+        from tonesphere.core.engine_factory import UnifiedAudioEngine
         command = sys.argv[1].lower()
         
         if command == "server":
+            from tonesphere.api.server import run_api_server
             print("Starting ToneSphere API server...")
             run_api_server()
 
         elif command == "gui":
+            from tonesphere.gui.studio import ToneSphereStudioGUI
             print("Starting ToneSphere Studio GUI...")
             gui = ToneSphereStudioGUI()
             gui.run()
             
         elif command == "cli":
+            from tonesphere.cli.interface import AudioEngineCLI
             print("Starting ToneSphere CLI...")
             cli = AudioEngineCLI()
             cli.run_interactive_mode()

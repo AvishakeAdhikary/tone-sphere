@@ -3,20 +3,10 @@
 
 # Audio Engine Configuration
 engine:
-  sample_rate: 48000        # Sample rate in Hz (44100, 48000, 96000)
-  buffer_size: 128          # Buffer size in samples (64, 128, 256, 512, 1024)
-  master_volume: 1.0        # Master volume (0.0 to 2.0)
-  use_native_drivers: true  # Use native audio drivers (true) or fallback to sounddevice (false)
-  preferred_driver: 'auto'  # Preferred driver: auto, asio, wasapi, directsound, alsa, pulseaudio, jack, pipewire, coreaudio
-
-# Virtual Device Configuration
-virtual_devices:
-  default_inputs: 3         # Number of default virtual input devices
-  default_outputs: 3        # Number of default virtual output devices
-  default_channels: 2       # Default channel count (stereo)
-
-# Audio Effects Configuration
-effects:
+  sample_rate: 48000
+  buffer_size: 128
+  use_native_drivers: true
+  preferred_driver: 'auto'  # Options: auto, asio, wasapi, directsound, alsa, pulseaudio, jack, pipewire, coreaudio
   enabled: true             # Enable audio effects processing
   presets: {}               # Effect presets (can be customized)
 
@@ -35,7 +25,20 @@ network:
 # Logging Configuration
 logging:
   level: 'INFO'             # Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL
-  file: null                # Log file path (null for console only)
+  enable_file_logging: false # Enable logging to file
+  log_file: 'tonesphere.log' # Log file name
+  log_dir: 'logs'           # Log directory
+  max_file_size_mb: 10      # Max log file size before rotation
+  backup_count: 5           # Number of backup files to keep
+  colored_console: true     # Use colored console output
+  structured: false         # Use structured JSON logging
+  
+# Virtual Devices Configuration
+virtual_devices:
+  max_inputs: 10            # Maximum number of virtual input devices
+  max_outputs: 10           # Maximum number of virtual output devices
+  default_inputs: 3         # Number of default virtual inputs to create
+  default_outputs: 3        # Number of default virtual outputs to create
   
 # Performance Monitoring
 performance:

@@ -4,6 +4,7 @@ from tonesphere.core.engine_factory import UnifiedAudioEngine
 from tonesphere.utils.config import ConfigManager
 from tonesphere.gui.channel_panel import ChannelControlPanel
 from tonesphere.gui.network_panel import NetworkRoutingPanel
+from tonesphere.gui.virtual_device_panel import VirtualDevicePanel
 import threading
 import time
 
@@ -170,6 +171,7 @@ class ToneSphereStudioGUI:
         self._create_action_button(button_frame, "🔗 Routing Matrix", self.open_routing_window)
         self._create_action_button(button_frame, "🎚️ Channel Controls", self.open_channel_controls)
         self._create_action_button(button_frame, "🌐 Network Routing", self.open_network_panel)
+        self._create_action_button(button_frame, "🎛️ Virtual Devices", self.open_virtual_device_panel)
         self._create_action_button(button_frame, "⚙️ Sample Rate", self.change_sample_rate)
         
         # Network status panel (initially hidden)
@@ -738,6 +740,17 @@ class ToneSphereStudioGUI:
             NetworkRoutingPanel(self.root, self.engine, self.colors)
         except Exception as e:
             messagebox.showerror("Error", f"Failed to open network panel: {e}")
+    
+    def open_virtual_device_panel(self):
+        """Open virtual device management panel"""
+        if not self.engine:
+            messagebox.showwarning("Engine Not Running", "Please start the audio engine first")
+            return
+        
+        try:
+            VirtualDevicePanel(self.root, self.engine, self.colors)
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open virtual device panel: {e}")
     
     def change_sample_rate(self):
         """Change sample rate"""

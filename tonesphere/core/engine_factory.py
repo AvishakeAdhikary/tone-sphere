@@ -246,3 +246,34 @@ class UnifiedAudioEngine:
         if hasattr(self.engine, 'get_network_statistics'):
             return self.engine.get_network_statistics()
         return {}
+    
+    # Virtual Device Manager Methods
+    def list_virtual_devices(self):
+        """List all virtual devices"""
+        if hasattr(self.engine, 'list_virtual_devices'):
+            return self.engine.list_virtual_devices()
+        return []
+    
+    def get_virtual_device_counts(self):
+        """Get virtual device counts and limits"""
+        if hasattr(self.engine, 'get_virtual_device_counts'):
+            return self.engine.get_virtual_device_counts()
+        return {}
+    
+    def delete_virtual_device(self, device_id: int) -> bool:
+        """Delete a virtual device"""
+        if hasattr(self.engine, 'delete_virtual_device'):
+            return self.engine.delete_virtual_device(device_id)
+        return False
+    
+    def update_virtual_device_sample_rate(self, device_id: int, sample_rate: int) -> bool:
+        """Update virtual device sample rate"""
+        if hasattr(self.engine, 'update_virtual_device_sample_rate'):
+            return self.engine.update_virtual_device_sample_rate(device_id, sample_rate)
+        return False
+    
+    def update_virtual_device_channels(self, device_id: int, channels: int) -> bool:
+        """Update virtual device channels"""
+        if hasattr(self.engine, 'update_virtual_device_channels'):
+            return self.engine.update_virtual_device_channels(device_id, channels)
+        return False

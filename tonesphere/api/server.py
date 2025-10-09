@@ -450,6 +450,103 @@ async def get_network_statistics():
         return audio_engine.engine.get_network_statistics()
     return {"error": "Network statistics not available"}
 
+# Virtual Device Management Endpoints
+@app.get("/virtual-devices")
+async def list_virtual_devices():
+    """List all virtual devices"""
+    if not audio_engine:
+        raise HTTPException(status_code=500, detail="Audio engine not initialized")
+    
+    return audio_engine.list_virtual_devices()
+
+@app.get("/virtual-devices/counts")
+async def get_virtual_device_counts():
+    """Get virtual device counts and limits"""
+    if not audio_engine:
+        raise HTTPException(status_code=500, detail="Audio engine not initialized")
+    
+    return audio_engine.get_virtual_device_counts()
+
+@app.post("/virtual-devices/input")
+async def create_virtual_input(channels: int = 2):
+    """Create a new virtual input device"""
+    if not audio_engine:
+        raise HTTPException(status_code=500, detail="Audio engine not initialized")
+    
+    device_id = audio_engine.create_virtual_input(f"Virtual Input", channels)
+    if device_id:
+        return {"device_id": device_id, "message": "Virtual input created"}
+    else:
+        raise HTTPException(status_code=400, detail="Failed to create virtual input (limit reached?)")
+
+@app.post("/virtual-devices/output")
+async def create_virtual_output(channels: int = 2):
+    """Create a new virtual output device"""
+    if not audio_engine:
+        raise HTTPException(status_code=500, detail="Audio engine not initialized")
+    
+    device_id = audio_engine.create_virtual_output(f"Virtual Output", channels)
+    if device_id:
+        return {"device_id": device_id, "message": "Virtual output created"}
+    else:
+        raise HTTPException(status_code=400, detail="Failed to create virtual output (limit reached?)")
+
+@app.delete("/virtual-devices/{device_id}")
+async def delete_virtual_device(device_id: int):
+    """Delete a virtual device"""
+    if not audio_engine:
+        raise HTTPException(status_code=500, detail="Audio engine not initialized")
+    
+    success = audio_engine.delete_virtual_device(device_id)
+    if success:
+        return {"message": f"Virtual device {device_id} deleted"}
+    else:
+        raise HTTPException(status_code=404, detail="Virtual device not found or cannot be deleted")
+
+@app.put("/virtual-devices/{device_id}/sample-rate")
+async def update_virtual_device_sample_rate(device_id: int, sample_rate: int):
+    """Update virtual device sample rate"""
+    if not audio_engine:
+        raise HTTPException(status_code=500, detail="Audio engine not initialized")
+    
+    if sample_rate < 8000 or sample_rate > 192000:
+        raise HTTPException(status_code=400, detail="Sample rate must be between 8000 and 192000")
+    
+    success = audio_engine.update_virtual_device_sample_rate(device_id, sample_rate)
+    if success:
+        return {"message": f"Sample rate updated to {sample_rate}Hz"}
+    else:
+        raise HTTPException(status_code=404, detail="Virtual device not found")
+
+@app.put("/virtual-devices/{device_id}/channels")
+async def update_virtual_device_channels(device_id: int, channels: int):
+    """Update virtual device channels"""
+    if not audio_engine:
+        raise HTTPException(status_code=500, detail="Audio engine not initialized")
+    
+    if channels < 1 or channels > 32:
+        raise HTTPException(status_code=400, detail="Channels must be between 1 and 32")
+    
+    success = audio_engine.update_virtual_device_channels(device_id, channels)
+    if success:
+        return {"message": f"Channels updated to {channels}"}
+    else:
+        raise HTTPException(status_code=404, detail="Virtual device not found")
+
+# Logging Control Endpoints
+@app.post("/logging/enable")
+async def enable_file_logging():
+    """Enable file logging"""
+    from tonesphere.utils.logger import enable_file_logging
+    enable_file_logging()
+    return {"message": "File logging enabled"}
+
+@app.get("/logging/stats")
+async def get_logging_stats():
+    """Get logging statistics"""
+    from tonesphere.utils.logger import get_log_stats
+    return get_log_stats()
+
 def run_api_server():
     """Run the FastAPI server"""
     config = config_manager.load_config()
