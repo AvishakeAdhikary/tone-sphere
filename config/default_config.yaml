@@ -6,6 +6,8 @@ engine:
   sample_rate: 48000        # Sample rate in Hz (44100, 48000, 96000)
   buffer_size: 128          # Buffer size in samples (64, 128, 256, 512, 1024)
   master_volume: 1.0        # Master volume (0.0 to 2.0)
+  use_native_drivers: true  # Use native audio drivers (true) or fallback to sounddevice (false)
+  preferred_driver: 'auto'  # Preferred driver: auto, asio, wasapi, directsound, alsa, pulseaudio, jack, pipewire, coreaudio
 
 # Virtual Device Configuration
 virtual_devices:

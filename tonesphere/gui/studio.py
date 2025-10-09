@@ -1,7 +1,9 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
-from tonesphere.core.engine import AudioEngine
+from tkinter import ttk, messagebox, simpledialog
+from tonesphere.core.engine_factory import UnifiedAudioEngine
 from tonesphere.utils.config import ConfigManager
+from tonesphere.gui.channel_panel import ChannelControlPanel
+from tonesphere.gui.network_panel import NetworkRoutingPanel
 import threading
 import time
 
@@ -14,8 +16,11 @@ class ToneSphereStudioGUI:
         self.root.geometry("1400x900")
         self.root.configure(bg='#0a0a0a')
 
-        # Set icon
-        self.root.iconphoto(True, tk.PhotoImage(file="./assets/images/ToneSphere.png"))
+        # Set icon (handle error if file doesn't exist)
+        try:
+            self.root.iconphoto(True, tk.PhotoImage(file="./assets/images/ToneSphere.png"))
+        except:
+            pass
         
         # Modern color scheme
         self.colors = {
@@ -35,6 +40,7 @@ class ToneSphereStudioGUI:
         
         # Engine state
         self.engine = None
+        self.config_manager = ConfigManager()
         self.is_running = False
         self.engine_toggle_state = False
         self.routing_window = None
@@ -162,7 +168,9 @@ class ToneSphereStudioGUI:
         # Modern action buttons
         self._create_action_button(button_frame, "🔄 Refresh Devices", self.refresh_devices)
         self._create_action_button(button_frame, "🔗 Routing Matrix", self.open_routing_window)
-        self._create_action_button(button_frame, "🌐 Network Panel", self.toggle_network_panel)
+        self._create_action_button(button_frame, "🎚️ Channel Controls", self.open_channel_controls)
+        self._create_action_button(button_frame, "🌐 Network Routing", self.open_network_panel)
+        self._create_action_button(button_frame, "⚙️ Sample Rate", self.change_sample_rate)
         
         # Network status panel (initially hidden)
         self.network_panel = tk.Frame(main_frame, bg=self.colors['bg_secondary'],
@@ -200,6 +208,13 @@ class ToneSphereStudioGUI:
                 bg=self.colors['bg_secondary'],
                 fg=self.colors['accent_orange'],
                 font=('Segoe UI', 16, 'bold')).pack(side=tk.LEFT)
+        
+        # Driver info label
+        self.driver_label = tk.Label(devices_header, text="Driver: Not initialized",
+                                     bg=self.colors['bg_secondary'],
+                                     fg=self.colors['text_secondary'],
+                                     font=('Segoe UI', 10))
+        self.driver_label.pack(side=tk.RIGHT, padx=10)
         
         # Modern devices treeview
         devices_frame = tk.Frame(devices_panel, bg=self.colors['bg_secondary'])
@@ -277,11 +292,7 @@ class ToneSphereStudioGUI:
             if not self.engine_toggle_state:
                 # Start engine
                 if not self.engine:
-                    config = ConfigManager().load_config()
-                    self.engine = AudioEngine(
-                        sample_rate=config['engine']['sample_rate'],
-                        buffer_size=config['engine']['buffer_size']
-                    )
+                    self.engine = UnifiedAudioEngine(self.config_manager)
                     self.engine.initialize()
                 
                 self.engine.start_engine()
@@ -295,7 +306,11 @@ class ToneSphereStudioGUI:
                     activebackground=self.colors['accent_orange']
                 )
                 
-                self.log_message("✅ Audio engine started successfully", "success")
+                # Get driver info
+                driver_info = self.engine.get_driver_info()
+                driver_name = driver_info.get('active_driver', 'unknown')
+                
+                self.log_message(f"✅ Audio engine started with {driver_name} driver", "success")
                 self.refresh_devices()
                 
             else:
@@ -680,10 +695,75 @@ class ToneSphereStudioGUI:
                 # Comboboxes don't exist or routing window is closed
                 pass
             
+            # Update driver info
+            try:
+                driver_info = self.engine.get_driver_info()
+                driver_name = driver_info.get('active_driver', 'unknown')
+                self.driver_label.config(text=f"Driver: {driver_name}")
+            except:
+                pass
+            
             self.log_message(f"✓ Found {len(devices)} audio devices")
             
         except Exception as e:
             self.log_message(f"✗ Error refreshing devices: {e}")
+    
+    def open_channel_controls(self):
+        """Open channel control panel for selected device"""
+        if not self.engine:
+            messagebox.showwarning("Engine Not Running", "Please start the audio engine first")
+            return
+        
+        selection = self.devices_tree.selection()
+        if not selection:
+            messagebox.showwarning("No Selection", "Please select a device from the list")
+            return
+        
+        item = self.devices_tree.item(selection[0])
+        device_id = item['values'][0]
+        device_name = item['values'][1]
+        
+        try:
+            ChannelControlPanel(self.root, self.engine, device_id, device_name, self.colors)
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open channel controls: {e}")
+    
+    def open_network_panel(self):
+        """Open network routing panel"""
+        if not self.engine:
+            messagebox.showwarning("Engine Not Running", "Please start the audio engine first")
+            return
+        
+        try:
+            NetworkRoutingPanel(self.root, self.engine, self.colors)
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open network panel: {e}")
+    
+    def change_sample_rate(self):
+        """Change sample rate"""
+        if not self.engine:
+            messagebox.showwarning("Engine Not Running", "Please start the audio engine first")
+            return
+        
+        current_rate = self.engine.sample_rate
+        new_rate = simpledialog.askinteger(
+            "Change Sample Rate",
+            f"Current sample rate: {current_rate}Hz\n\nEnter new sample rate:",
+            initialvalue=current_rate,
+            minvalue=8000,
+            maxvalue=192000,
+            parent=self.root
+        )
+        
+        if new_rate and new_rate != current_rate:
+            try:
+                self.engine.set_sample_rate(new_rate)
+                messagebox.showinfo("Success", 
+                                  f"Sample rate changed to {new_rate}Hz\n\n"
+                                  "Note: Some devices may require engine restart")
+                self.log_message(f"✓ Sample rate changed to {new_rate}Hz")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to change sample rate: {e}")
     
     def create_routing(self):
         """Create audio routing with improved feedback"""

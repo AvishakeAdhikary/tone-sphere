@@ -8,7 +8,7 @@ import sys
 from tonesphere.api.server import run_api_server
 from tonesphere.gui.studio import ToneSphereStudioGUI
 from tonesphere.cli.interface import AudioEngineCLI
-from tonesphere.core.engine import AudioEngine
+from tonesphere.core.engine_factory import UnifiedAudioEngine
 
 
 def main():
@@ -34,9 +34,14 @@ def main():
         elif command == "test":
             print("Running basic engine tests...")
             try:
-                engine = AudioEngine()
+                engine = UnifiedAudioEngine()
                 engine.initialize()
                 engine.start_engine()
+                
+                # Display driver info
+                driver_info = engine.get_driver_info()
+                print(f"✓ Using driver: {driver_info.get('active_driver', 'unknown')}")
+                print(f"✓ Available drivers: {', '.join(engine.get_available_drivers())}")
                 
                 devices = engine.get_devices()
                 print(f"✓ Found {len(devices)} audio devices")
@@ -56,6 +61,11 @@ def main():
                         print("✓ Created test routing")
                     else:
                         print("✗ Failed to create routing")
+                
+                # Display performance stats
+                stats = engine.get_performance_stats()
+                print(f"✓ Latency: {stats.get('latency_ms', 0):.2f}ms")
+                print(f"✓ CPU Usage: {stats.get('cpu_usage', 0):.1f}%")
                 
                 engine.stop_engine()
                 print("✓ All tests passed")
@@ -79,12 +89,14 @@ def main():
         print("  python main.py test    - Run basic tests")
         print()
         print("Features:")
-        print("  ✓ Low-latency ASIO driver support")
-        print("  ✓ Virtual audio cable creation")
+        print("  ✓ Native audio driver support (ASIO, WASAPI, ALSA, PulseAudio, JACK, etc.)")
+        print("  ✓ Virtual audio device creation")
         print("  ✓ Advanced routing matrix")
         print("  ✓ Real-time audio effects")
         print("  ✓ RESTful API with WebSocket events")
         print("  ✓ VoiceMeeter Potato-like functionality")
+        print("  ✓ Cross-platform support (Windows, Linux, macOS)")
+        print("  ✓ Low-latency professional audio processing")
 
 
 if __name__ == "__main__":

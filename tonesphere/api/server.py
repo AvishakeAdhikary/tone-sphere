@@ -1,4 +1,4 @@
-from tonesphere.core.engine import AudioEngine
+from tonesphere.core.engine_factory import UnifiedAudioEngine
 from tonesphere.utils.logger import logger
 from tonesphere.utils.config import ConfigManager
 from tonesphere.api.models import DeviceInfo, CreateVirtualDeviceRequest, CreateRoutingRequest, SetVolumeRequest, PerformanceStats
@@ -10,7 +10,7 @@ import asyncio
 import uvicorn
 
 # Global audio engine instance
-audio_engine: Optional[AudioEngine] = None
+audio_engine: Optional[UnifiedAudioEngine] = None
 config_manager = ConfigManager()
 connected_websockets: set = set()
 
@@ -20,11 +20,7 @@ async def lifespan(app: FastAPI):
     global audio_engine
     
     # Startup
-    config = config_manager.load_config()
-    audio_engine = AudioEngine(
-        sample_rate=config['engine']['sample_rate'],
-        buffer_size=config['engine']['buffer_size']
-    )
+    audio_engine = UnifiedAudioEngine(config_manager)
     
     try:
         audio_engine.initialize()
@@ -179,12 +175,15 @@ async def get_engine_status():
     if not audio_engine:
         return {"status": "not_initialized"}
     
-    return {
+    status = {
         "status": "running" if audio_engine.is_running else "stopped",
         "sample_rate": audio_engine.sample_rate,
         "buffer_size": audio_engine.buffer_size,
-        "master_volume": audio_engine.master_volume
+        "master_volume": audio_engine.master_volume,
+        "driver_info": audio_engine.get_driver_info(),
+        "available_drivers": audio_engine.get_available_drivers()
     }
+    return status
 
 @app.websocket("/ws/events")
 async def websocket_endpoint(websocket: WebSocket):
@@ -246,6 +245,210 @@ async def get_network_clients():
     
     clients = audio_engine.get_network_clients()
     return {"clients": clients, "count": len(clients)}
+
+@app.get("/drivers")
+async def get_available_drivers():
+    """Get available audio drivers"""
+    if not audio_engine:
+        raise HTTPException(status_code=500, detail="Audio engine not initialized")
+    
+    return {
+        "available_drivers": audio_engine.get_available_drivers(),
+        "current_driver": audio_engine.get_driver_info()
+    }
+
+@app.post("/drivers/switch/{driver_type}")
+async def switch_driver(driver_type: str):
+    """Switch to a different audio driver"""
+    if not audio_engine:
+        raise HTTPException(status_code=500, detail="Audio engine not initialized")
+    
+    success = audio_engine.switch_driver(driver_type)
+    if success:
+        return {"message": f"Switched to {driver_type} driver", "driver_info": audio_engine.get_driver_info()}
+    else:
+        raise HTTPException(status_code=400, detail=f"Failed to switch to {driver_type} driver")
+
+# Channel Control Endpoints
+@app.get("/devices/{device_id}/channels")
+async def get_device_channels(device_id: int):
+    """Get channel information for a device"""
+    if not audio_engine:
+        raise HTTPException(status_code=500, detail="Audio engine not initialized")
+    
+    if hasattr(audio_engine.engine, 'channel_control_manager'):
+        info = audio_engine.engine.channel_control_manager.get_device_info(device_id)
+        if info:
+            return info
+    raise HTTPException(status_code=404, detail="Device not found or no channel control")
+
+@app.put("/devices/{device_id}/channels/{channel}/volume")
+async def set_channel_volume(device_id: int, channel: int, volume: float):
+    """Set volume for specific channel"""
+    if not audio_engine:
+        raise HTTPException(status_code=500, detail="Audio engine not initialized")
+    
+    if hasattr(audio_engine.engine, 'channel_control_manager'):
+        audio_engine.engine.channel_control_manager.set_device_channel_volume(device_id, channel, volume)
+        return {"message": f"Channel {channel} volume set to {volume}"}
+    raise HTTPException(status_code=400, detail="Channel control not available")
+
+@app.put("/devices/{device_id}/channels/{channel}/mute")
+async def set_channel_mute(device_id: int, channel: int, muted: bool):
+    """Mute/unmute specific channel"""
+    if not audio_engine:
+        raise HTTPException(status_code=500, detail="Audio engine not initialized")
+    
+    if hasattr(audio_engine.engine, 'channel_control_manager'):
+        audio_engine.engine.channel_control_manager.set_device_channel_mute(device_id, channel, muted)
+        return {"message": f"Channel {channel} muted: {muted}"}
+    raise HTTPException(status_code=400, detail="Channel control not available")
+
+@app.put("/devices/{device_id}/channels/{channel}/solo")
+async def set_channel_solo(device_id: int, channel: int, solo: bool):
+    """Solo specific channel"""
+    if not audio_engine:
+        raise HTTPException(status_code=500, detail="Audio engine not initialized")
+    
+    if hasattr(audio_engine.engine, 'channel_control_manager'):
+        audio_engine.engine.channel_control_manager.set_device_channel_solo(device_id, channel, solo)
+        return {"message": f"Channel {channel} solo: {solo}"}
+    raise HTTPException(status_code=400, detail="Channel control not available")
+
+@app.put("/devices/{device_id}/channels/{channel}/pan")
+async def set_channel_pan(device_id: int, channel: int, pan: float):
+    """Set pan for specific channel"""
+    if not audio_engine:
+        raise HTTPException(status_code=500, detail="Audio engine not initialized")
+    
+    if hasattr(audio_engine.engine, 'channel_control_manager'):
+        audio_engine.engine.channel_control_manager.set_device_channel_pan(device_id, channel, pan)
+        return {"message": f"Channel {channel} pan set to {pan}"}
+    raise HTTPException(status_code=400, detail="Channel control not available")
+
+@app.post("/devices/{device_id}/channels/swap")
+async def swap_channels(device_id: int):
+    """Swap L/R channels"""
+    if not audio_engine:
+        raise HTTPException(status_code=500, detail="Audio engine not initialized")
+    
+    if hasattr(audio_engine.engine, 'channel_control_manager'):
+        audio_engine.engine.channel_control_manager.swap_device_channels(device_id)
+        return {"message": "Channels swapped"}
+    raise HTTPException(status_code=400, detail="Channel control not available")
+
+@app.put("/devices/{device_id}/master/volume")
+async def set_device_master_volume(device_id: int, volume: float):
+    """Set master volume for device"""
+    if not audio_engine:
+        raise HTTPException(status_code=500, detail="Audio engine not initialized")
+    
+    if hasattr(audio_engine.engine, 'channel_control_manager'):
+        audio_engine.engine.channel_control_manager.set_device_master_volume(device_id, volume)
+        return {"message": f"Master volume set to {volume}"}
+    raise HTTPException(status_code=400, detail="Channel control not available")
+
+@app.put("/devices/{device_id}/master/mute")
+async def set_device_master_mute(device_id: int, muted: bool):
+    """Mute/unmute entire device"""
+    if not audio_engine:
+        raise HTTPException(status_code=500, detail="Audio engine not initialized")
+    
+    if hasattr(audio_engine.engine, 'channel_control_manager'):
+        audio_engine.engine.channel_control_manager.set_device_master_mute(device_id, muted)
+        return {"message": f"Device muted: {muted}"}
+    raise HTTPException(status_code=400, detail="Channel control not available")
+
+# Sample Rate Control Endpoints
+@app.get("/engine/sample-rate")
+async def get_sample_rate():
+    """Get current sample rate"""
+    if not audio_engine:
+        raise HTTPException(status_code=500, detail="Audio engine not initialized")
+    
+    return {"sample_rate": audio_engine.sample_rate}
+
+@app.put("/engine/sample-rate")
+async def set_sample_rate(sample_rate: int):
+    """Set sample rate (requires engine restart)"""
+    if not audio_engine:
+        raise HTTPException(status_code=500, detail="Audio engine not initialized")
+    
+    if hasattr(audio_engine.engine, 'sample_rate_manager'):
+        audio_engine.engine.sample_rate_manager.set_master_sample_rate(sample_rate)
+        return {"message": f"Sample rate set to {sample_rate}Hz", "note": "Some devices may require restart"}
+    raise HTTPException(status_code=400, detail="Sample rate control not available")
+
+# Network Audio Routing Endpoints
+@app.post("/network/connect")
+async def connect_to_network(host: str, port: int = 9001):
+    """Connect to another ToneSphere instance"""
+    if not audio_engine:
+        raise HTTPException(status_code=500, detail="Audio engine not initialized")
+    
+    if hasattr(audio_engine.engine, 'connect_to_network'):
+        success = audio_engine.engine.connect_to_network(host, port)
+        if success:
+            return {"message": f"Connected to {host}:{port}"}
+        else:
+            raise HTTPException(status_code=400, detail=f"Failed to connect to {host}:{port}")
+    raise HTTPException(status_code=400, detail="Network routing not available")
+
+@app.post("/network/disconnect/{conn_id}")
+async def disconnect_from_network(conn_id: str):
+    """Disconnect from network instance"""
+    if not audio_engine:
+        raise HTTPException(status_code=500, detail="Audio engine not initialized")
+    
+    if hasattr(audio_engine.engine, 'disconnect_from_network'):
+        audio_engine.engine.disconnect_from_network(conn_id)
+        return {"message": f"Disconnected from {conn_id}"}
+    raise HTTPException(status_code=400, detail="Network routing not available")
+
+@app.get("/network/connections")
+async def get_network_connections():
+    """Get all network connections"""
+    if not audio_engine:
+        raise HTTPException(status_code=500, detail="Audio engine not initialized")
+    
+    if hasattr(audio_engine.engine, 'get_network_connections'):
+        return {
+            "incoming": audio_engine.get_network_clients(),
+            "outgoing": audio_engine.engine.get_network_connections()
+        }
+    return {"incoming": audio_engine.get_network_clients(), "outgoing": []}
+
+@app.post("/network/send/{device_id}")
+async def send_device_to_network(device_id: int, target: Optional[str] = None):
+    """Send device audio over network"""
+    if not audio_engine:
+        raise HTTPException(status_code=500, detail="Audio engine not initialized")
+    
+    if hasattr(audio_engine.engine, 'send_device_audio_to_network'):
+        audio_engine.engine.send_device_audio_to_network(device_id, target)
+        return {"message": f"Sending device {device_id} audio to network"}
+    raise HTTPException(status_code=400, detail="Network routing not available")
+
+@app.post("/network/receive/{device_id}")
+async def register_network_receive(device_id: int):
+    """Register device to receive network audio"""
+    if not audio_engine:
+        raise HTTPException(status_code=500, detail="Audio engine not initialized")
+    
+    if hasattr(audio_engine.engine, 'register_network_receive'):
+        audio_engine.engine.register_network_receive(device_id)
+        return {"message": f"Device {device_id} registered for network receive"}
+    raise HTTPException(status_code=400, detail="Network routing not available")
+
+@app.get("/network/statistics")
+async def get_network_statistics():
+    """Get network statistics"""
+    if not audio_engine:
+        raise HTTPException(status_code=500, detail="Audio engine not initialized")
+    
+    if hasattr(audio_engine.engine, 'get_network_statistics'):
+        return audio_engine.engine.get_network_statistics()
+    return {"error": "Network statistics not available"}
 
 def run_api_server():
     """Run the FastAPI server"""

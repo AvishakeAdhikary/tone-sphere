@@ -1,5 +1,5 @@
 from tonesphere.utils.config import ConfigManager
-from tonesphere.core.engine import AudioEngine
+from tonesphere.core.engine_factory import UnifiedAudioEngine
 
 class AudioEngineCLI:
     """Command-line interface for the audio engine"""
@@ -11,14 +11,15 @@ class AudioEngineCLI:
     def initialize_engine(self):
         """Initialize the audio engine"""
         try:
-            config = self.config_manager.load_config()
-            self.engine = AudioEngine(
-                sample_rate=config['engine']['sample_rate'],
-                buffer_size=config['engine']['buffer_size']
-            )
+            self.engine = UnifiedAudioEngine(self.config_manager)
             self.engine.initialize()
             self.engine.start_engine()
+            
+            # Show driver info
+            driver_info = self.engine.get_driver_info()
             print("✓ Audio engine initialized successfully")
+            print(f"  Driver: {driver_info.get('active_driver', 'unknown')}")
+            print(f"  Available: {', '.join(self.engine.get_available_drivers())}")
         except Exception as e:
             print(f"✗ Failed to initialize audio engine: {e}")
             return False
@@ -101,13 +102,39 @@ class AudioEngineCLI:
         print(f"Buffer Underruns: {stats['buffer_underruns']}")
         print(f"Latency: {stats['latency_ms']:.1f}ms")
     
+    def show_network_info(self):
+        """Show network information"""
+        if not self.engine:
+            print("Engine not initialized")
+            return
+        
+        clients = self.engine.get_network_clients()
+        connections = self.engine.get_network_connections()
+        stats = self.engine.get_network_statistics()
+        
+        print("\nNetwork Information:")
+        print(f"Incoming clients: {len(clients)}")
+        for client in clients:
+            print(f"  - {client}")
+        
+        print(f"Outgoing connections: {len(connections)}")
+        for conn in connections:
+            print(f"  - {conn}")
+        
+        if stats:
+            print(f"\nNetwork Statistics:")
+            print(f"  Packets sent: {stats.get('packets_sent', 0)}")
+            print(f"  Packets received: {stats.get('packets_received', 0)}")
+            print(f"  Bytes sent: {stats.get('bytes_sent', 0)}")
+            print(f"  Quality: {stats.get('quality', 'unknown')}")
+    
     def run_interactive_mode(self):
         """Run interactive CLI mode"""
         if not self.initialize_engine():
             return
             
-        print("\nPyAudioEngine Interactive Mode")
-        print("Commands: devices, routing, matrix, performance, quit")
+        print("\nToneSphere Interactive Mode")
+        print("Commands: devices, routing, matrix, performance, network, drivers, help, quit")
         
         while True:
             try:
@@ -123,13 +150,22 @@ class AudioEngineCLI:
                     self.show_routing_matrix()
                 elif command in ["performance", "stats"]:
                     self.show_performance()
+                elif command == "network":
+                    self.show_network_info()
+                elif command == "drivers":
+                    driver_info = self.engine.get_driver_info()
+                    print(f"\nActive driver: {driver_info.get('active_driver', 'unknown')}")
+                    print(f"Available drivers: {', '.join(self.engine.get_available_drivers())}")
                 elif command == "help":
                     print("Available commands:")
-                    print("  devices    - List all audio devices")
-                    print("  routing    - Create test routing")
-                    print("  matrix     - Show routing matrix")
-                    print("  performance- Show performance stats")
-                    print("  quit       - Exit")
+                    print("  devices     - List all audio devices")
+                    print("  routing     - Create test routing")
+                    print("  matrix      - Show routing matrix")
+                    print("  performance - Show performance stats")
+                    print("  network     - Show network information")
+                    print("  drivers     - Show driver information")
+                    print("  help        - Show this help")
+                    print("  quit        - Exit")
                 else:
                     print(f"Unknown command: {command}")
                     
