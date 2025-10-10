@@ -33,7 +33,7 @@ class NetworkRoutingPanel(tk.Toplevel):
         header.pack_propagate(False)
         
         tk.Label(header, text="Network Audio Routing",
-                bg=self.colors['bg_secondary'], fg=self.colors['accent_orange'],
+                bg=self.colors['bg_secondary'], fg=self.colors['accent_primary'],
                 font=('Segoe UI', 16, 'bold')).pack(expand=True)
         
         # Main content
@@ -53,7 +53,7 @@ class NetworkRoutingPanel(tk.Toplevel):
         
         tk.Button(conn_buttons, text="➕ Connect to Instance",
                  command=self._connect_to_instance,
-                 bg=self.colors['accent_orange'], fg=self.colors['text_primary'],
+                 bg=self.colors['accent_primary'], fg=self.colors['text_primary'],
                  font=('Segoe UI', 10, 'bold'), padx=10, pady=5).pack(side=tk.LEFT, padx=5)
         
         tk.Button(conn_buttons, text="🔄 Refresh",
@@ -72,7 +72,7 @@ class NetworkRoutingPanel(tk.Toplevel):
                                           bg=self.colors['bg_primary'],
                                           fg=self.colors['text_primary'],
                                           font=('Consolas', 10),
-                                          selectbackground=self.colors['accent_orange'])
+                                          selectbackground=self.colors['accent_primary'])
         self.incoming_listbox.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
         # Outgoing connections
@@ -89,7 +89,7 @@ class NetworkRoutingPanel(tk.Toplevel):
                                           bg=self.colors['bg_primary'],
                                           fg=self.colors['text_primary'],
                                           font=('Consolas', 10),
-                                          selectbackground=self.colors['accent_orange'])
+                                          selectbackground=self.colors['accent_primary'])
         self.outgoing_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
         
         outgoing_buttons = tk.Frame(outgoing_inner, bg=self.colors['bg_tertiary'])
@@ -126,7 +126,7 @@ class NetworkRoutingPanel(tk.Toplevel):
         
         tk.Button(routing_buttons, text="📤 Send to Network",
                  command=self._send_device_to_network,
-                 bg=self.colors['accent_orange'], fg=self.colors['text_primary'],
+                 bg=self.colors['accent_primary'], fg=self.colors['text_primary'],
                  font=('Segoe UI', 10, 'bold'), padx=15, pady=8).pack(side=tk.LEFT, padx=5)
         
         tk.Button(routing_buttons, text="📥 Receive from Network",

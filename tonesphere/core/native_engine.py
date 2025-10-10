@@ -156,6 +156,44 @@ class NativeAudioEngine:
         except Exception as e:
             logger.error(f"Error scanning audio devices: {e}")
     
+    def refresh_devices(self):
+        """Refresh device list to detect newly connected devices or launched applications"""
+        try:
+            # Store current virtual devices to preserve them
+            virtual_devices = {
+                device_id: device 
+                for device_id, device in self.all_devices.items() 
+                if device.device_type in [DeviceType.VIRTUAL_INPUT, DeviceType.VIRTUAL_OUTPUT]
+            }
+            
+            # Clear physical devices
+            physical_device_ids = [
+                device_id 
+                for device_id, device in self.all_devices.items() 
+                if device.device_type in [DeviceType.PHYSICAL_INPUT, DeviceType.PHYSICAL_OUTPUT]
+            ]
+            for device_id in physical_device_ids:
+                del self.all_devices[device_id]
+            
+            # Re-scan physical devices (including applications)
+            self._scan_audio_devices()
+            
+            # Restore virtual devices
+            for device_id, device in virtual_devices.items():
+                self.all_devices[device_id] = device
+            
+            # Update channel controls for new devices
+            for device_id, device in self.all_devices.items():
+                if device_id not in self.channel_control_manager.device_controls:
+                    self.channel_control_manager.add_device(device_id, device.channels)
+            
+            logger.info(f"Device list refreshed: {len(self.all_devices)} total devices")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error refreshing devices: {e}")
+            return False
+    
     def _create_default_virtual_devices(self):
         """Create default virtual audio devices using the new manager"""
         # Get config for default counts

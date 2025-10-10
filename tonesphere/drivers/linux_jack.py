@@ -76,7 +76,7 @@ class JACKDriver(AudioDriverBase):
         logger.info("JACK driver terminated")
     
     def enumerate_devices(self) -> List[AudioDeviceInfo]:
-        """Enumerate JACK devices"""
+        """Enumerate JACK devices including connected applications"""
         devices = []
         device_id = 500  # Start JACK devices at 500
         
@@ -84,9 +84,7 @@ class JACKDriver(AudioDriverBase):
             try:
                 import jack
                 
-                # JACK uses a single "device" - the JACK server
-                # Applications create ports and connect them
-                
+                # Add main JACK Audio Server device
                 devices.append(AudioDeviceInfo(
                     id=device_id,
                     name="JACK Audio Server",
@@ -104,10 +102,101 @@ class JACKDriver(AudioDriverBase):
                     is_asio=False,
                     host_api="JACK",
                     supports_exclusive_mode=True,
-                    supports_shared_mode=True,
                     supports_callback_mode=True,
                     supports_blocking_mode=False
                 ))
+                device_id += 1
+                
+                # Enumerate JACK clients using native app detection
+            try:
+                import subprocess
+                
+                # Use jack_lsp to list all ports
+                result = subprocess.run(['jack_lsp', '-c'], capture_output=True, text=True, timeout=2)
+                
+                if result.returncode == 0:
+                    lines = result.stdout.strip().split('\n')
+                    clients = {}
+                    current_port = None
+                    
+                    for line in lines:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        
+                        if not line.startswith(' '):
+                            # This is a port name
+                            current_port = line
+                            if ':' in current_port:
+                                client_name = current_port.split(':')[0]
+                                # Skip system and ToneSphere ports
+                                if client_name not in ['system', 'ToneSphere']:
+                                    if client_name not in clients:
+                                        clients[client_name] = {'input_ports': 0, 'output_ports': 0}
+                                    
+                                    # Determine if it's input or output based on port name
+                                    if 'output' in current_port.lower() or 'playback' in current_port.lower():
+                                        clients[client_name]['output_ports'] += 1
+                                    elif 'input' in current_port.lower() or 'capture' in current_port.lower():
+                                        clients[client_name]['input_ports'] += 1
+                    
+                    # Create device entries for each client
+                    for client_name, ports in clients.items():
+                        if ports['output_ports'] > 0:
+                            # Client outputs audio (we receive it as input)
+                            devices.append(AudioDeviceInfo(
+                                id=device_id,
+                                name=f"{client_name} (JACK Input)",
+                                driver_type=AudioDriverType.JACK,
+                                max_input_channels=ports['output_ports'],
+                                max_output_channels=0,
+                                default_sample_rate=48000,
+                                supported_sample_rates=[44100, 48000, 96000, 192000],
+                                default_buffer_size=128,
+                                supported_buffer_sizes=[64, 128, 256, 512],
+                                is_default_input=False,
+                                is_default_output=False,
+                                latency_input_ms=2.67,
+                                latency_output_ms=0.0,
+                                is_asio=False,
+                                host_api="JACK Client",
+                                supports_exclusive_mode=True,
+                                supports_shared_mode=True,
+                                supports_callback_mode=True,
+                                supports_blocking_mode=False
+                            ))
+                            device_id += 1
+                        
+                        if ports['input_ports'] > 0:
+                            # Client receives audio (we send it as output)
+                            devices.append(AudioDeviceInfo(
+                                id=device_id,
+                                name=f"{client_name} (JACK Output)",
+                                driver_type=AudioDriverType.JACK,
+                                max_input_channels=0,
+                                max_output_channels=ports['input_ports'],
+                                default_sample_rate=48000,
+                                supported_sample_rates=[44100, 48000, 96000, 192000],
+                                default_buffer_size=128,
+                                supported_buffer_sizes=[64, 128, 256, 512],
+                                is_default_input=False,
+                                is_default_output=False,
+                                latency_input_ms=0.0,
+                                latency_output_ms=2.67,
+                                is_asio=False,
+                                host_api="JACK Client",
+                                supports_exclusive_mode=True,
+                                supports_shared_mode=True,
+                                supports_callback_mode=True,
+                                supports_blocking_mode=False
+                            ))
+                            device_id += 1
+                    
+                    if clients:
+                        logger.info(f"Detected {len(clients)} JACK clients")
+                    
+            except Exception as e:
+                logger.debug(f"Could not enumerate JACK clients: {e}")
                 
             except ImportError:
                 # Fallback: create default JACK device

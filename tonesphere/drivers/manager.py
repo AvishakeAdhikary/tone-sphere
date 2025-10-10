@@ -66,6 +66,15 @@ class AudioDriverManager:
                 logger.info("DirectSound driver available")
         except Exception as e:
             logger.debug(f"DirectSound driver not available: {e}")
+        
+        try:
+            from .wireless_audio import WirelessAudioDriver
+            wireless = WirelessAudioDriver()
+            if wireless.is_available():
+                self.available_drivers[AudioDriverType.AUTO] = wireless
+                logger.info("Wireless audio driver available")
+        except Exception as e:
+            logger.debug(f"Wireless audio driver not available: {e}")
     
     def _register_linux_drivers(self):
         """Register Linux audio drivers"""
@@ -104,6 +113,15 @@ class AudioDriverManager:
                 logger.info("ALSA driver available")
         except Exception as e:
             logger.debug(f"ALSA driver not available: {e}")
+        
+        try:
+            from .wireless_audio import WirelessAudioDriver
+            wireless = WirelessAudioDriver()
+            if wireless.is_available():
+                self.available_drivers[AudioDriverType.AUTO] = wireless
+                logger.info("Wireless audio driver available")
+        except Exception as e:
+            logger.debug(f"Wireless audio driver not available: {e}")
     
     def _register_macos_drivers(self):
         """Register macOS audio drivers"""
@@ -125,6 +143,15 @@ class AudioDriverManager:
                 logger.info("JACK driver available on macOS")
         except Exception as e:
             logger.debug(f"JACK driver not available on macOS: {e}")
+        
+        try:
+            from .wireless_audio import WirelessAudioDriver
+            wireless = WirelessAudioDriver()
+            if wireless.is_available():
+                self.available_drivers[AudioDriverType.AUTO] = wireless
+                logger.info("Wireless audio driver available")
+        except Exception as e:
+            logger.debug(f"Wireless audio driver not available: {e}")
     
     def _select_driver(self):
         """Select the best available driver"""

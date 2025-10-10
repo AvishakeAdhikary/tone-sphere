@@ -255,7 +255,7 @@ class InteractiveRoutingCanvas:
                 # Draw new temp line
                 self.temp_connection_line = self.canvas.create_line(
                     screen_start[0], screen_start[1], event.x, event.y,
-                    fill=self.colors['accent_orange'], width=3, dash=(5, 5)
+                    fill=self.colors['accent_primary'], width=3, dash=(5, 5)
                 )
     
     def _on_left_release(self, event):
@@ -472,7 +472,7 @@ class InteractiveRoutingCanvas:
         
         # Choose colors based on device type
         if 'virtual' in device.device_type:
-            color = self.colors['accent_orange']
+            color = self.colors['accent_primary']
             border_color = self.colors['accent_gold']
         elif 'input' in device.device_type:
             color = self.colors['success']
@@ -546,7 +546,7 @@ class InteractiveRoutingCanvas:
             if volume > 1.5:
                 color = self.colors['accent_red']
             elif volume > 1.0:
-                color = self.colors['accent_orange']
+                color = self.colors['accent_primary']
             elif volume > 0.5:
                 color = self.colors['success']
             else:

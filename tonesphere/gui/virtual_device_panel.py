@@ -33,7 +33,7 @@ class VirtualDevicePanel(tk.Toplevel):
         header.pack_propagate(False)
         
         tk.Label(header, text="Virtual Device Manager",
-                bg=self.colors['bg_secondary'], fg=self.colors['accent_orange'],
+                bg=self.colors['bg_secondary'], fg=self.colors['accent_primary'],
                 font=('Segoe UI', 16, 'bold')).pack(side=tk.LEFT, padx=20, expand=True)
         
         # Limits info
@@ -117,7 +117,7 @@ class VirtualDevicePanel(tk.Toplevel):
         
         tk.Button(create_inner, text="➕ Create Input",
                  command=self._create_input,
-                 bg=self.colors['accent_orange'], fg=self.colors['text_primary'],
+                 bg=self.colors['accent_primary'], fg=self.colors['text_primary'],
                  font=('Segoe UI', 9, 'bold'), padx=15, pady=5).grid(row=1, column=0, columnspan=2, pady=5)
         
         tk.Button(create_inner, text="➕ Create Output",

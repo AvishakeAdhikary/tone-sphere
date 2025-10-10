@@ -42,6 +42,22 @@ class AudioEngineCLI:
                   f"{device['channels']:<3} {'✓' if device['is_asio'] else '✗':<6} "
                   f"{device['latency_ms']:.1f}ms")
     
+    def refresh_devices(self):
+        """Refresh device list to detect newly launched applications"""
+        if not self.engine:
+            print("Engine not initialized")
+            return
+        
+        print("\n🔄 Refreshing device list...")
+        success = self.engine.refresh_devices()
+        
+        if success:
+            devices = self.engine.get_devices()
+            print(f"✓ Device list refreshed: {len(devices)} devices found")
+            print("\nTip: Run 'devices' command to see the updated list")
+        else:
+            print("✗ Failed to refresh devices")
+    
     def create_test_routing(self):
         """Create a test routing setup"""
         if not self.engine:
@@ -344,6 +360,8 @@ class AudioEngineCLI:
                     break
                 elif command == "devices":
                     self.list_devices()
+                elif command == "refresh":
+                    self.refresh_devices()
                 elif command == "routing":
                     self.create_test_routing()
                 elif command == "matrix":
@@ -378,6 +396,7 @@ class AudioEngineCLI:
                     print("="*60)
                     print("\nDevice Management:")
                     print("  devices      - List all audio devices")
+                    print("  refresh      - Refresh device list (detect new apps)")
                     print("  virtual      - Manage virtual devices (CRUD)")
                     print("\nAudio Routing:")
                     print("  routing      - Create test routing")

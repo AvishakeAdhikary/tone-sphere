@@ -75,6 +75,24 @@ async def get_devices():
     devices = audio_engine.get_devices()
     return [DeviceInfo(**device) for device in devices]
 
+@app.post("/devices/refresh")
+async def refresh_devices():
+    """Refresh device list to detect newly launched applications"""
+    if not audio_engine:
+        raise HTTPException(status_code=500, detail="Audio engine not initialized")
+    
+    success = audio_engine.refresh_devices()
+    
+    if success:
+        devices = audio_engine.get_devices()
+        return {
+            "success": True,
+            "message": "Device list refreshed successfully",
+            "device_count": len(devices)
+        }
+    else:
+        raise HTTPException(status_code=500, detail="Failed to refresh devices")
+
 @app.post("/devices/virtual")
 async def create_virtual_device(request: CreateVirtualDeviceRequest):
     """Create a new virtual audio device"""

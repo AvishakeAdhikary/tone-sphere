@@ -5,6 +5,7 @@ from tonesphere.utils.config import ConfigManager
 from tonesphere.gui.channel_panel import ChannelControlPanel
 from tonesphere.gui.network_panel import NetworkRoutingPanel
 from tonesphere.gui.virtual_device_panel import VirtualDevicePanel
+from tonesphere.gui.modern_theme import ModernTheme
 import threading
 import time
 
@@ -14,30 +15,20 @@ class ToneSphereStudioGUI:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("ToneSphere Studio - Professional Audio Routing")
-        self.root.geometry("1400x900")
-        self.root.configure(bg='#0a0a0a')
+        self.root.geometry("1600x1000")
+        
+        # Apply modern theme
+        ModernTheme.apply_to_root(self.root)
+        self.colors = ModernTheme.COLORS
+        self.fonts = ModernTheme.FONTS
+        
+        self.root.configure(bg=self.colors['bg_primary'])
 
         # Set icon (handle error if file doesn't exist)
         try:
             self.root.iconphoto(True, tk.PhotoImage(file="./assets/images/ToneSphere.png"))
         except:
             pass
-        
-        # Modern color scheme
-        self.colors = {
-            'bg_primary': '#0a0a0a',
-            'bg_secondary': '#1a1a1a', 
-            'bg_tertiary': '#2a2a2a',
-            'accent_red': '#ff4444',
-            'accent_orange': '#ff8844',
-            'accent_gold': '#ffaa44',
-            'text_primary': '#ffffff',
-            'text_secondary': '#cccccc',
-            'text_muted': '#888888',
-            'success': '#44ff44',
-            'warning': '#ffaa44',
-            'error': '#ff4444'
-        }
         
         # Engine state
         self.engine = None
@@ -65,7 +56,7 @@ class ToneSphereStudioGUI:
         """Create modern application menu"""
         menubar = tk.Menu(self.root, bg=self.colors['bg_secondary'], 
                         fg=self.colors['text_primary'], 
-                        activebackground=self.colors['accent_orange'])
+                        activebackground=self.colors['accent_primary'])
         self.root.config(menu=menubar)
         
         # Engine menu
@@ -97,71 +88,83 @@ class ToneSphereStudioGUI:
     
     def _create_modern_widgets(self):
         """Create modern GUI widgets with professional styling"""
-        # Main container
+        # Main container with gradient effect
         main_frame = tk.Frame(self.root, bg=self.colors['bg_primary'])
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=30, pady=30)
         
-        # Title with modern styling
-        title_frame = tk.Frame(main_frame, bg=self.colors['bg_primary'], height=80)
-        title_frame.pack(fill=tk.X, pady=(0, 20))
+        # Title with modern styling and subtitle
+        title_frame = tk.Frame(main_frame, bg=self.colors['bg_primary'], height=100)
+        title_frame.pack(fill=tk.X, pady=(0, 25))
         title_frame.pack_propagate(False)
         
-        title_label = tk.Label(title_frame, text="ToneSphere Studio", 
+        title_container = tk.Frame(title_frame, bg=self.colors['bg_primary'])
+        title_container.pack(expand=True)
+        
+        title_label = tk.Label(title_container, text="ToneSphere Studio", 
                             bg=self.colors['bg_primary'],
-                            fg=self.colors['accent_orange'],
-                            font=('Segoe UI', 28, 'bold'))
-        title_label.pack(expand=True)
+                            fg=self.colors['accent_primary'],
+                            font=self.fonts['title'])
+        title_label.pack()
+        
+        subtitle_label = tk.Label(title_container, text="Professional Audio Routing & Processing", 
+                            bg=self.colors['bg_primary'],
+                            fg=self.colors['text_muted'],
+                            font=self.fonts['body'])
+        subtitle_label.pack()
         
         # Status card with toggle button
-        status_card = tk.Frame(main_frame, bg=self.colors['bg_secondary'], 
-                            relief='raised', bd=2)
-        status_card.pack(fill=tk.X, pady=(0, 20), ipady=15)
+        status_card = ModernTheme.create_card(main_frame)
+        status_card.pack(fill=tk.X, pady=(0, 25), ipady=20)
         
         status_inner = tk.Frame(status_card, bg=self.colors['bg_secondary'])
         status_inner.pack(fill=tk.X, padx=20, pady=10)
         
-        # Main toggle button
-        self.engine_button = tk.Button(status_inner, 
-                                    text="⚡ START ENGINE",
-                                    command=self.toggle_engine,
-                                    bg=self.colors['bg_tertiary'],
-                                    fg=self.colors['text_primary'],
-                                    activebackground=self.colors['accent_red'],
-                                    font=('Segoe UI', 14, 'bold'),
-                                    relief='raised', bd=3,
-                                    padx=40, pady=15,
-                                    cursor='hand2')
+        # Main toggle button with modern styling
+        self.engine_button = ModernTheme.create_button(
+            status_inner,
+            text="⚡ START ENGINE",
+            command=self.toggle_engine,
+            style='success',
+            font=self.fonts['button_large'],
+            padx=50,
+            pady=18
+        )
         self.engine_button.pack(side=tk.LEFT)
         
         # Status info
         status_info_frame = tk.Frame(status_inner, bg=self.colors['bg_secondary'])
         status_info_frame.pack(side=tk.RIGHT)
         
-        self.status_label = tk.Label(status_info_frame, text="Engine: Stopped",
-                                    bg=self.colors['bg_secondary'],
-                                    fg=self.colors['text_secondary'],
-                                    font=('Segoe UI', 12, 'bold'))
-        self.status_label.pack(anchor='e')
+        self.status_label = ModernTheme.create_label(
+            status_info_frame,
+            text="Engine: Stopped",
+            style='subheading',
+            fg=self.colors['text_secondary']
+        )
+        self.status_label.pack(anchor='e', pady=(0, 5))
         
-        self.performance_label = tk.Label(status_info_frame, text="CPU: 0% | Latency: 0ms",
-                                        bg=self.colors['bg_secondary'],
-                                        fg=self.colors['text_muted'],
-                                        font=('Segoe UI', 10))
+        self.performance_label = ModernTheme.create_label(
+            status_info_frame,
+            text="CPU: 0% | Latency: 0ms",
+            style='body',
+            fg=self.colors['text_muted']
+        )
         self.performance_label.pack(anchor='e')
 
                 
         # Control panel
-        control_panel = tk.Frame(main_frame, bg=self.colors['bg_secondary'],
-                                relief='raised', bd=2)
-        control_panel.pack(fill=tk.X, pady=(0, 20), ipady=10)
+        control_panel = ModernTheme.create_card(main_frame)
+        control_panel.pack(fill=tk.X, pady=(0, 25), ipady=15)
         
         control_inner = tk.Frame(control_panel, bg=self.colors['bg_secondary'])
         control_inner.pack(fill=tk.X, padx=20, pady=10)
         
-        tk.Label(control_inner, text="Quick Actions", 
-                bg=self.colors['bg_secondary'],
-                fg=self.colors['accent_orange'],
-                font=('Segoe UI', 14, 'bold')).pack(anchor='w', pady=(0, 10))
+        ModernTheme.create_label(
+            control_inner,
+            text="Quick Actions",
+            style='subheading',
+            fg=self.colors['accent_primary']
+        ).pack(anchor='w', pady=(0, 12))
         
         button_frame = tk.Frame(control_inner, bg=self.colors['bg_secondary'])
         button_frame.pack(fill=tk.X)
@@ -181,10 +184,12 @@ class ToneSphereStudioGUI:
         network_inner = tk.Frame(self.network_panel, bg=self.colors['bg_secondary'])
         network_inner.pack(fill=tk.X, padx=20, pady=15)
         
-        tk.Label(network_inner, text="Network Streaming", 
-                bg=self.colors['bg_secondary'],
-                fg=self.colors['accent_orange'],
-                font=('Segoe UI', 14, 'bold')).pack(anchor='w', pady=(0, 10))
+        ModernTheme.create_label(
+            network_inner,
+            text="Network Streaming",
+            style='subheading',
+            fg=self.colors['accent_primary']
+        ).pack(anchor='w', pady=(0, 10))
         
         network_buttons = tk.Frame(network_inner, bg=self.colors['bg_secondary'])
         network_buttons.pack(fill=tk.X)
@@ -199,17 +204,29 @@ class ToneSphereStudioGUI:
         self.client_count_label.pack(side=tk.RIGHT, padx=10)
         
         # Devices panel
-        devices_panel = tk.Frame(main_frame, bg=self.colors['bg_secondary'],
-                                relief='raised', bd=2)
-        devices_panel.pack(fill=tk.BOTH, expand=True, pady=(0, 20))
+        devices_panel = ModernTheme.create_card(main_frame)
+        devices_panel.pack(fill=tk.BOTH, expand=True, pady=(0, 25))
         
         devices_header = tk.Frame(devices_panel, bg=self.colors['bg_secondary'])
         devices_header.pack(fill=tk.X, padx=20, pady=(15, 10))
         
-        tk.Label(devices_header, text="Audio Devices", 
-                bg=self.colors['bg_secondary'],
-                fg=self.colors['accent_orange'],
-                font=('Segoe UI', 16, 'bold')).pack(side=tk.LEFT)
+        ModernTheme.create_label(
+            devices_header,
+            text="Audio Devices",
+            style='heading',
+            fg=self.colors['accent_primary']
+        ).pack(side=tk.LEFT)
+        
+        # Refresh button
+        refresh_btn = ModernTheme.create_button(
+            devices_header,
+            text="🔄 Refresh",
+            command=self.refresh_devices,
+            style='secondary',
+            padx=20,
+            pady=8
+        )
+        refresh_btn.pack(side=tk.RIGHT, padx=10)
         
         # Driver info label
         self.driver_label = tk.Label(devices_header, text="Driver: Not initialized",
@@ -234,7 +251,7 @@ class ToneSphereStudioGUI:
                        fieldbackground=self.colors['bg_tertiary'])
         style.configure('Treeview.Heading',
                        background=self.colors['bg_secondary'],
-                       foreground=self.colors['accent_orange'],
+                       foreground=self.colors['accent_primary'],
                        font=('Segoe UI', 11, 'bold'))
         
         for col in columns:
@@ -255,28 +272,23 @@ class ToneSphereStudioGUI:
         devices_scrollbar_y.pack(side=tk.RIGHT, fill=tk.Y)
         
         # Log panel
-        log_panel = tk.Frame(main_frame, bg=self.colors['bg_secondary'],
-                            relief='raised', bd=2)
+        log_panel = ModernTheme.create_card(main_frame)
         log_panel.pack(fill=tk.BOTH, expand=True)
         
         log_header = tk.Frame(log_panel, bg=self.colors['bg_secondary'])
         log_header.pack(fill=tk.X, padx=20, pady=(15, 10))
         
-        tk.Label(log_header, text="System Log", 
-                bg=self.colors['bg_secondary'],
-                fg=self.colors['accent_orange'],
-                font=('Segoe UI', 14, 'bold')).pack(side=tk.LEFT)
+        ModernTheme.create_label(
+            log_header,
+            text="System Log",
+            style='subheading',
+            fg=self.colors['accent_primary']
+        ).pack(side=tk.LEFT)
         
         log_frame = tk.Frame(log_panel, bg=self.colors['bg_secondary'])
         log_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 15))
         
-        self.log_text = tk.Text(log_frame, height=8, 
-                               bg=self.colors['bg_primary'], 
-                               fg=self.colors['text_primary'],
-                               font=('Consolas', 10),
-                               insertbackground=self.colors['accent_orange'],
-                               selectbackground=self.colors['accent_red'],
-                               relief='sunken', bd=2)
+        self.log_text = ModernTheme.create_text(log_frame, height=8)
         
         log_scrollbar = ttk.Scrollbar(log_frame, orient=tk.VERTICAL, 
                                      command=self.log_text.yview)
@@ -304,8 +316,7 @@ class ToneSphereStudioGUI:
                 # Update button appearance
                 self.engine_button.configure(
                     text="⏹️ STOP ENGINE",
-                    bg=self.colors['accent_red'],
-                    activebackground=self.colors['accent_orange']
+                    bg=self.colors['error']
                 )
                 
                 # Get driver info
@@ -325,8 +336,7 @@ class ToneSphereStudioGUI:
                     # Update button appearance
                     self.engine_button.configure(
                         text="⚡ START ENGINE",
-                        bg=self.colors['bg_tertiary'],
-                        activebackground=self.colors['accent_red']
+                        bg=self.colors['success']
                     )
                     
                     self.log_message("⏹️ Audio engine stopped", "warning")
@@ -337,16 +347,15 @@ class ToneSphereStudioGUI:
 
     def _create_action_button(self, parent, text, command):
         """Create a modern action button"""
-        btn = tk.Button(parent, text=text, command=command,
-                       bg=self.colors['bg_tertiary'],
-                       fg=self.colors['text_primary'],
-                       activebackground=self.colors['accent_orange'],
-                       activeforeground=self.colors['text_primary'],
-                       font=('Segoe UI', 10, 'bold'),
-                       relief='raised', bd=2,
-                       padx=15, pady=8,
-                       cursor='hand2')
-        btn.pack(side=tk.LEFT, padx=(0, 10))
+        btn = ModernTheme.create_button(
+            parent,
+            text=text,
+            command=command,
+            style='secondary',
+            padx=18,
+            pady=10
+        )
+        btn.pack(side=tk.LEFT, padx=(0, 12))
         return btn
     
     def toggle_network_panel(self):
@@ -383,10 +392,13 @@ class ToneSphereStudioGUI:
         title_frame = tk.Frame(main_frame, bg=self.colors['bg_primary'])
         title_frame.pack(fill=tk.X, pady=(0, 10))
         
-        title_label = tk.Label(title_frame, text="Audio Routing Matrix",
-                              bg=self.colors['bg_primary'],
-                              fg=self.colors['accent_orange'],
-                              font=('Segoe UI', 20, 'bold'))
+        title_label = ModernTheme.create_label(
+            title_frame,
+            text="Audio Routing Matrix",
+            style='heading',
+            bg=self.colors['bg_primary'],
+            fg=self.colors['accent_primary']
+        )
         title_label.pack(side=tk.LEFT)
         
         # Canvas controls
@@ -418,15 +430,14 @@ class ToneSphereStudioGUI:
         zoom_in_btn.pack(side=tk.LEFT, padx=2)
         
         # Center button
-        center_btn = tk.Button(controls_frame, text="⊙ Center",
-                              command=lambda: self.interactive_canvas.center_content() if hasattr(self, 'interactive_canvas') else None,
-                              bg=self.colors['accent_orange'],
-                              fg=self.colors['text_primary'],
-                              activebackground=self.colors['accent_red'],
-                              font=('Segoe UI', 10, 'bold'),
-                              relief='raised', bd=2,
-                              padx=15, pady=5,
-                              cursor='hand2')
+        center_btn = ModernTheme.create_button(
+            controls_frame,
+            text="⊙ Center",
+            command=lambda: self.interactive_canvas.center_content() if hasattr(self, 'interactive_canvas') else None,
+            style='primary',
+            padx=15,
+            pady=5
+        )
         center_btn.pack(side=tk.LEFT, padx=(10, 0))
         
         # Canvas container with border
@@ -457,10 +468,12 @@ class ToneSphereStudioGUI:
         instructions_inner = tk.Frame(instructions_frame, bg=self.colors['bg_secondary'])
         instructions_inner.pack(fill=tk.X, padx=15, pady=10)
         
-        tk.Label(instructions_inner, text="💡 Controls:",
-                bg=self.colors['bg_secondary'],
-                fg=self.colors['accent_orange'],
-                font=('Segoe UI', 11, 'bold')).pack(side=tk.LEFT, padx=(0, 15))
+        ModernTheme.create_label(
+            instructions_inner,
+            text="💡 Controls:",
+            style='body_bold',
+            fg=self.colors['accent_primary']
+        ).pack(side=tk.LEFT, padx=(0, 15))
         
         instructions_text = (
             "🖱️ Left-Click & Drag: Move devices  |  "
@@ -485,10 +498,12 @@ class ToneSphereStudioGUI:
         control_inner.pack(fill=tk.X, padx=20, pady=10)
         
         # Routing controls
-        tk.Label(control_inner, text="Manual Routing",
-                bg=self.colors['bg_secondary'],
-                fg=self.colors['accent_orange'],
-                font=('Segoe UI', 12, 'bold')).pack(anchor='w', pady=(0, 8))
+        ModernTheme.create_label(
+            control_inner,
+            text="Manual Routing",
+            style='subheading',
+            fg=self.colors['accent_primary']
+        ).pack(anchor='w', pady=(0, 8))
         
         routing_controls = tk.Frame(control_inner, bg=self.colors['bg_secondary'])
         routing_controls.pack(fill=tk.X)
@@ -503,10 +518,12 @@ class ToneSphereStudioGUI:
                                         width=20, font=('Segoe UI', 9))
         self.source_combo.pack(side=tk.LEFT, padx=(0, 10))
         
-        tk.Label(routing_controls, text="→", 
-                bg=self.colors['bg_secondary'],
-                fg=self.colors['accent_orange'],
-                font=('Segoe UI', 14, 'bold')).pack(side=tk.LEFT, padx=(0, 10))
+        ModernTheme.create_label(
+            routing_controls,
+            text="→",
+            style='button_large',
+            fg=self.colors['accent_primary']
+        ).pack(side=tk.LEFT, padx=(0, 10))
         
         tk.Label(routing_controls, text="Destination:", 
                 bg=self.colors['bg_secondary'],
@@ -539,27 +556,25 @@ class ToneSphereStudioGUI:
         volume_scale.configure(command=lambda v: self.volume_label.configure(text=f"{float(v):.2f}"))
         
         # Create routing button
-        create_btn = tk.Button(routing_controls, text="🔗 Create",
-                              command=self.create_routing,
-                              bg=self.colors['accent_orange'],
-                              fg=self.colors['text_primary'],
-                              activebackground=self.colors['accent_red'],
-                              font=('Segoe UI', 10, 'bold'),
-                              relief='raised', bd=2,
-                              padx=15, pady=4,
-                              cursor='hand2')
+        create_btn = ModernTheme.create_button(
+            routing_controls,
+            text="🔗 Create",
+            command=self.create_routing,
+            style='primary',
+            padx=15,
+            pady=4
+        )
         create_btn.pack(side=tk.LEFT, padx=(5, 0))
         
         # Clear all button
-        clear_btn = tk.Button(routing_controls, text="🗑️ Clear All",
-                             command=self.clear_all_routes,
-                             bg=self.colors['error'],
-                             fg=self.colors['text_primary'],
-                             activebackground='#cc0000',
-                             font=('Segoe UI', 10, 'bold'),
-                             relief='raised', bd=2,
-                             padx=15, pady=4,
-                             cursor='hand2')
+        clear_btn = ModernTheme.create_button(
+            routing_controls,
+            text="🗑️ Clear All",
+            command=self.clear_all_routes,
+            style='danger',
+            padx=15,
+            pady=4
+        )
         clear_btn.pack(side=tk.RIGHT)
         
         # Active routes list
@@ -570,10 +585,12 @@ class ToneSphereStudioGUI:
         routes_header = tk.Frame(routes_frame, bg=self.colors['bg_secondary'])
         routes_header.pack(fill=tk.X, padx=15, pady=(10, 8))
         
-        tk.Label(routes_header, text="Active Routes",
-                bg=self.colors['bg_secondary'],
-                fg=self.colors['accent_orange'],
-                font=('Segoe UI', 12, 'bold')).pack(side=tk.LEFT)
+        ModernTheme.create_label(
+            routes_header,
+            text="Active Routes",
+            style='subheading',
+            fg=self.colors['accent_primary']
+        ).pack(side=tk.LEFT)
         
         # Routes list
         routes_list_frame = tk.Frame(routes_frame, bg=self.colors['bg_secondary'])
@@ -922,18 +939,18 @@ class ToneSphereStudioGUI:
         # Choose color based on device type and status
         if 'virtual' in device['type']:
             if device['is_active']:
-                color = self.colors['accent_orange']
+                color = self.colors['accent_primary']
                 border_color = self.colors['accent_gold']
             else:
                 color = '#663311'  # Darker orange for inactive virtual
-                border_color = self.colors['accent_orange']
+                border_color = self.colors['accent_primary']
         elif device['is_asio']:
             if device['is_active']:
-                color = self.colors['accent_red']
+                color = self.colors['error']
                 border_color = '#ff6666'
             else:
                 color = '#661111'  # Darker red for inactive ASIO
-                border_color = self.colors['accent_red']
+                border_color = self.colors['error']
         else:
             if device['is_active']:
                 color = self.colors['bg_tertiary']
@@ -994,9 +1011,9 @@ class ToneSphereStudioGUI:
             # Color based on volume level
             volume = connection['volume']
             if volume > 1.5:
-                color = self.colors['accent_red']  # High volume - red
+                color = self.colors['error']  # High volume - red
             elif volume > 1.0:
-                color = self.colors['accent_orange']  # Medium-high volume - orange
+                color = self.colors['accent_secondary']  # Medium-high volume - orange
             elif volume > 0.5:
                 color = self.colors['success']  # Normal volume - green
             else:
@@ -1183,6 +1200,42 @@ class ToneSphereStudioGUI:
             self.refresh_active_routes()
             self.refresh_routing_display()
 
+    def refresh_devices(self):
+        """Refresh device list to detect newly launched applications"""
+        if not self.engine:
+            messagebox.showwarning("Engine Not Running", "Please start the engine first")
+            return
+        
+        try:
+            self.log_message("🔄 Refreshing device list...", "info")
+            success = self.engine.refresh_devices()
+            
+            if success:
+                # Update device list display
+                devices = self.engine.get_devices()
+                self.devices_tree.delete(*self.devices_tree.get_children())
+                
+                for device in devices:
+                    self.devices_tree.insert('', 'end', values=(
+                        device['id'],
+                        device['name'],
+                        device['type'],
+                        device['channels'],
+                        '✓' if device['is_asio'] else '✗',
+                        f"{device['latency_ms']:.1f}ms"
+                    ))
+                
+                self.log_message(f"✓ Device list refreshed: {len(devices)} devices found", "success")
+                messagebox.showinfo("Devices Refreshed", 
+                                  f"Device list updated!\n{len(devices)} devices detected.")
+            else:
+                self.log_message("✗ Failed to refresh devices", "error")
+                messagebox.showerror("Refresh Failed", "Could not refresh device list")
+                
+        except Exception as e:
+            self.log_message(f"❌ Error refreshing devices: {e}", "error")
+            messagebox.showerror("Error", f"Failed to refresh devices: {e}")
+    
     def update_status(self):
         """Update status information"""
         if self.engine:

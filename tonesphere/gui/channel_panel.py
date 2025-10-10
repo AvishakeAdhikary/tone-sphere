@@ -38,7 +38,7 @@ class ChannelControlPanel(tk.Toplevel):
         header.pack_propagate(False)
         
         tk.Label(header, text=f"Device {self.device_id} Channel Controls",
-                bg=self.colors['bg_secondary'], fg=self.colors['accent_orange'],
+                bg=self.colors['bg_secondary'], fg=self.colors['accent_primary'],
                 font=('Segoe UI', 14, 'bold')).pack(expand=True)
         
         # Master controls
@@ -82,7 +82,7 @@ class ChannelControlPanel(tk.Toplevel):
         if self.channel_info['num_channels'] == 2:
             swap_btn = tk.Button(master_inner, text="⇄ Swap L/R",
                                command=self._on_swap_channels,
-                               bg=self.colors['accent_orange'], fg=self.colors['text_primary'],
+                               bg=self.colors['accent_primary'], fg=self.colors['text_primary'],
                                font=('Segoe UI', 9, 'bold'), padx=10)
             swap_btn.grid(row=0, column=4, padx=5)
             
@@ -131,7 +131,7 @@ class ChannelControlPanel(tk.Toplevel):
         # Channel label
         ch_name = "Left" if ch_idx == 0 else "Right" if ch_idx == 1 else f"Ch {ch_idx}"
         tk.Label(inner, text=f"{ch_name}:",
-                bg=self.colors['bg_tertiary'], fg=self.colors['accent_orange'],
+                bg=self.colors['bg_tertiary'], fg=self.colors['accent_primary'],
                 font=('Segoe UI', 10, 'bold'), width=8).grid(row=0, column=0, sticky='w')
         
         # Volume control

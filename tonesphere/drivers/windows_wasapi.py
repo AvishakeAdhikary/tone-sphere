@@ -98,7 +98,7 @@ class WASAPIDriver(AudioDriverBase):
         return devices
     
     def _enumerate_windows_devices(self) -> List[AudioDeviceInfo]:
-        """Enumerate Windows audio devices using MMDevice API"""
+        """Enumerate Windows audio devices using MMDevice API and detect audio applications"""
         devices = []
         device_id = 100  # Start WASAPI devices at 100
         
@@ -158,6 +158,68 @@ class WASAPIDriver(AudioDriverBase):
                 supports_callback_mode=True,
                 supports_blocking_mode=True
             ))
+            device_id += 1
+            
+            # Detect running audio applications using native detection
+            try:
+                from tonesphere.utils.app_detector import NativeAppDetector
+                detector = NativeAppDetector()
+                audio_apps = detector.get_audio_applications()
+                
+                for app in audio_apps:
+                    # Create input device (receive audio from app)
+                    devices.append(AudioDeviceInfo(
+                        id=device_id,
+                        name=f"{app.name} (WASAPI Input)",
+                        driver_type=AudioDriverType.WASAPI,
+                        max_input_channels=2,
+                        max_output_channels=0,
+                        default_sample_rate=48000,
+                        supported_sample_rates=[44100, 48000, 96000],
+                        default_buffer_size=480,
+                        supported_buffer_sizes=[240, 480, 960],
+                        is_default_input=False,
+                        is_default_output=False,
+                        latency_input_ms=10.0,
+                        latency_output_ms=0.0,
+                        is_asio=False,
+                        host_api="WASAPI Application",
+                        supports_exclusive_mode=False,
+                        supports_shared_mode=True,
+                        supports_callback_mode=True,
+                        supports_blocking_mode=True
+                    ))
+                    device_id += 1
+                    
+                    # Create output device (send audio to app)
+                    devices.append(AudioDeviceInfo(
+                        id=device_id,
+                        name=f"{app.name} (WASAPI Output)",
+                        driver_type=AudioDriverType.WASAPI,
+                        max_input_channels=0,
+                        max_output_channels=2,
+                        default_sample_rate=48000,
+                        supported_sample_rates=[44100, 48000, 96000],
+                        default_buffer_size=480,
+                        supported_buffer_sizes=[240, 480, 960],
+                        is_default_input=False,
+                        is_default_output=False,
+                        latency_input_ms=0.0,
+                        latency_output_ms=10.0,
+                        is_asio=False,
+                        host_api="WASAPI Application",
+                        supports_exclusive_mode=False,
+                        supports_shared_mode=True,
+                        supports_callback_mode=True,
+                        supports_blocking_mode=True
+                    ))
+                    device_id += 1
+                
+                if audio_apps:
+                    logger.info(f"Detected {len(audio_apps)} audio applications via WASAPI")
+                    
+            except Exception as e:
+                logger.debug(f"Could not detect audio applications: {e}")
             
         except Exception as e:
             logger.error(f"Error in _enumerate_windows_devices: {e}")

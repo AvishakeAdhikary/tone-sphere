@@ -72,7 +72,7 @@ class PulseAudioDriver(AudioDriverBase):
         logger.info("PulseAudio driver terminated")
     
     def enumerate_devices(self) -> List[AudioDeviceInfo]:
-        """Enumerate PulseAudio devices"""
+        """Enumerate PulseAudio devices and detect running audio applications"""
         devices = []
         device_id = 400  # Start PulseAudio devices at 400
         
@@ -131,6 +131,82 @@ class PulseAudioDriver(AudioDriverBase):
                                 supports_blocking_mode=True
                             ))
                             device_id += 1
+                    
+                    # Detect running audio applications via sink inputs and source outputs
+                    app_streams = {}
+                    
+                    # Check sink inputs (applications playing audio)
+                    for sink_input in pulse.sink_input_list():
+                        app_name = sink_input.proplist.get('application.name', 'Unknown')
+                        if app_name and app_name not in ['ToneSphere', 'tonesphere']:
+                            if app_name not in app_streams:
+                                app_streams[app_name] = {'has_output': True, 'has_input': False}
+                            else:
+                                app_streams[app_name]['has_output'] = True
+                    
+                    # Check source outputs (applications recording audio)
+                    for source_output in pulse.source_output_list():
+                        app_name = source_output.proplist.get('application.name', 'Unknown')
+                        if app_name and app_name not in ['ToneSphere', 'tonesphere']:
+                            if app_name not in app_streams:
+                                app_streams[app_name] = {'has_output': False, 'has_input': True}
+                            else:
+                                app_streams[app_name]['has_input'] = True
+                    
+                    # Create device entries for detected applications
+                    for app_name, stream_info in app_streams.items():
+                        if stream_info['has_output']:
+                            # Application is playing audio (we can receive it as input)
+                            devices.append(AudioDeviceInfo(
+                                id=device_id,
+                                name=f"{app_name} (PulseAudio Input)",
+                                driver_type=AudioDriverType.PULSEAUDIO,
+                                max_input_channels=2,
+                                max_output_channels=0,
+                                default_sample_rate=48000,
+                                supported_sample_rates=[44100, 48000, 96000],
+                                default_buffer_size=512,
+                                supported_buffer_sizes=[256, 512, 1024],
+                                is_default_input=False,
+                                is_default_output=False,
+                                latency_input_ms=10.67,
+                                latency_output_ms=0.0,
+                                is_asio=False,
+                                host_api="PulseAudio Stream",
+                                supports_exclusive_mode=False,
+                                supports_shared_mode=True,
+                                supports_callback_mode=True,
+                                supports_blocking_mode=True
+                            ))
+                            device_id += 1
+                        
+                        if stream_info['has_input']:
+                            # Application is recording audio (we can send it as output)
+                            devices.append(AudioDeviceInfo(
+                                id=device_id,
+                                name=f"{app_name} (PulseAudio Output)",
+                                driver_type=AudioDriverType.PULSEAUDIO,
+                                max_input_channels=0,
+                                max_output_channels=2,
+                                default_sample_rate=48000,
+                                supported_sample_rates=[44100, 48000, 96000],
+                                default_buffer_size=512,
+                                supported_buffer_sizes=[256, 512, 1024],
+                                is_default_input=False,
+                                is_default_output=False,
+                                latency_input_ms=0.0,
+                                latency_output_ms=10.67,
+                                is_asio=False,
+                                host_api="PulseAudio Stream",
+                                supports_exclusive_mode=False,
+                                supports_shared_mode=True,
+                                supports_callback_mode=True,
+                                supports_blocking_mode=True
+                            ))
+                            device_id += 1
+                    
+                    if app_streams:
+                        logger.info(f"Detected {len(app_streams)} PulseAudio application streams")
                             
             except ImportError:
                 # Fallback: create default devices

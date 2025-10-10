@@ -112,10 +112,11 @@ class ASIODriver(AudioDriverBase):
         logger.info("ASIO driver terminated")
     
     def enumerate_devices(self) -> List[AudioDeviceInfo]:
-        """Enumerate ASIO devices"""
+        """Enumerate ASIO devices and detect running audio applications"""
         devices = []
         device_id = 0
         
+        # Add ASIO hardware drivers
         for driver_name, driver_info in self.asio_drivers.items():
             try:
                 # Create device info for each ASIO driver
@@ -145,6 +146,67 @@ class ASIODriver(AudioDriverBase):
                 device_id += 1
             except Exception as e:
                 logger.error(f"Error querying ASIO device {driver_name}: {e}")
+        
+        # Detect running audio applications using native detection
+        try:
+            from tonesphere.utils.app_detector import NativeAppDetector
+            detector = NativeAppDetector()
+            audio_apps = detector.get_audio_applications()
+            
+            for app in audio_apps:
+                # Create input device
+                devices.append(AudioDeviceInfo(
+                    id=device_id,
+                    name=f"{app.name} (ASIO Input)",
+                    driver_type=AudioDriverType.ASIO,
+                    max_input_channels=2,
+                    max_output_channels=0,
+                    default_sample_rate=48000,
+                    supported_sample_rates=[44100, 48000, 96000],
+                    default_buffer_size=128,
+                    supported_buffer_sizes=[64, 128, 256, 512],
+                    is_default_input=False,
+                    is_default_output=False,
+                    latency_input_ms=2.67,
+                    latency_output_ms=0.0,
+                    is_asio=True,
+                    host_api="ASIO Application",
+                    supports_exclusive_mode=True,
+                    supports_shared_mode=False,
+                    supports_callback_mode=True,
+                    supports_blocking_mode=False
+                ))
+                device_id += 1
+                
+                # Create output device
+                devices.append(AudioDeviceInfo(
+                    id=device_id,
+                    name=f"{app.name} (ASIO Output)",
+                    driver_type=AudioDriverType.ASIO,
+                    max_input_channels=0,
+                    max_output_channels=2,
+                    default_sample_rate=48000,
+                    supported_sample_rates=[44100, 48000, 96000],
+                    default_buffer_size=128,
+                    supported_buffer_sizes=[64, 128, 256, 512],
+                    is_default_input=False,
+                    is_default_output=False,
+                    latency_input_ms=0.0,
+                    latency_output_ms=2.67,
+                    is_asio=True,
+                    host_api="ASIO Application",
+                    supports_exclusive_mode=True,
+                    supports_shared_mode=False,
+                    supports_callback_mode=True,
+                    supports_blocking_mode=False
+                ))
+                device_id += 1
+            
+            if audio_apps:
+                logger.info(f"Detected {len(audio_apps)} running audio applications via ASIO")
+                
+        except Exception as e:
+            logger.debug(f"Could not detect audio applications: {e}")
         
         self.devices_cache = devices
         return devices

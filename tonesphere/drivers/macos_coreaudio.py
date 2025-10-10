@@ -107,6 +107,68 @@ class CoreAudioDriver(AudioDriverBase):
                 supports_callback_mode=True,
                 supports_blocking_mode=True
             ))
+            device_id += 1
+            
+            # Detect running audio applications using native detection
+            try:
+                from tonesphere.utils.app_detector import NativeAppDetector
+                detector = NativeAppDetector()
+                audio_apps = detector.get_audio_applications()
+                
+                for app in audio_apps:
+                    # Create input device
+                    devices.append(AudioDeviceInfo(
+                        id=device_id,
+                        name=f"{app.name} (CoreAudio Input)",
+                        driver_type=AudioDriverType.COREAUDIO,
+                        max_input_channels=2,
+                        max_output_channels=0,
+                        default_sample_rate=48000,
+                        supported_sample_rates=[44100, 48000, 96000],
+                        default_buffer_size=256,
+                        supported_buffer_sizes=[128, 256, 512],
+                        is_default_input=False,
+                        is_default_output=False,
+                        latency_input_ms=5.33,
+                        latency_output_ms=0.0,
+                        is_asio=False,
+                        host_api="CoreAudio Application",
+                        supports_exclusive_mode=True,
+                        supports_shared_mode=True,
+                        supports_callback_mode=True,
+                        supports_blocking_mode=True
+                    ))
+                    device_id += 1
+                    
+                    # Create output device
+                    devices.append(AudioDeviceInfo(
+                        id=device_id,
+                        name=f"{app.name} (CoreAudio Output)",
+                        driver_type=AudioDriverType.COREAUDIO,
+                        max_input_channels=0,
+                        max_output_channels=2,
+                        default_sample_rate=48000,
+                        supported_sample_rates=[44100, 48000, 96000],
+                        default_buffer_size=256,
+                        supported_buffer_sizes=[128, 256, 512],
+                        is_default_input=False,
+                        is_default_output=False,
+                        latency_input_ms=0.0,
+                        latency_output_ms=5.33,
+                        is_asio=False,
+                        host_api="CoreAudio Application",
+                        supports_exclusive_mode=True,
+                        supports_shared_mode=True,
+                        supports_callback_mode=True,
+                        supports_blocking_mode=True
+                    ))
+                    device_id += 1
+                
+                if audio_apps:
+                    logger.info(f"Detected {len(audio_apps)} audio applications via CoreAudio")
+                    
+            except Exception as e:
+                logger.debug(f"Could not detect audio applications: {e}")
             
         except Exception as e:
             logger.error(f"Error enumerating CoreAudio devices: {e}")

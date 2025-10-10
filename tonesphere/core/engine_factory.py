@@ -82,6 +82,12 @@ class UnifiedAudioEngine:
         """Get all available devices"""
         return self.engine.get_devices()
     
+    def refresh_devices(self):
+        """Refresh device list to detect newly launched applications"""
+        if hasattr(self.engine, 'refresh_devices'):
+            return self.engine.refresh_devices()
+        return False
+    
     def create_virtual_input(self, name: str, channels: int = 2) -> int:
         """Create a virtual input device"""
         return self.engine.create_virtual_input(name, channels)
