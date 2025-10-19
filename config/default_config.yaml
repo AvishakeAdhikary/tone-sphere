@@ -5,7 +5,6 @@
 engine:
   sample_rate: 48000
   buffer_size: 128
-  use_native_drivers: true
   preferred_driver: 'auto'  # Options: auto, asio, wasapi, directsound, alsa, pulseaudio, jack, pipewire, coreaudio
   enabled: true             # Enable audio effects processing
   presets: {}               # Effect presets (can be customized)
