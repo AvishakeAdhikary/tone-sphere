@@ -1,6 +1,19 @@
 """
-Network Audio Router
-Advanced network audio routing with compression and quality control
+Network audio streaming.
+
+Scope, stated plainly: this is TCP with zlib, which is fine for moving audio between
+machines where a little buffering is acceptable, and wrong for low-latency monitoring.
+TCP retransmits and blocks the head of the line, so one lost packet stalls everything
+behind it — exactly the wrong failure mode for realtime audio, which would rather drop a
+packet than wait for it. A realtime version needs UDP with sequence numbers, a jitter
+buffer and Opus. That is not what this is.
+
+It is kept because it works for its actual use, and it is labelled so nobody plugs a
+guitar through it and wonders why the latency is terrible.
+
+The framing was broken until now: the header carried no payload length, so the receiver
+retried zlib.decompress until it succeeded, consuming bytes from the following packet and
+desynchronising the stream permanently.
 """
 
 import numpy as np
@@ -15,6 +28,11 @@ from typing import Dict, List, Optional, Callable
 from dataclasses import dataclass, asdict
 from enum import Enum
 from tonesphere.utils.logger import logger
+
+
+# Largest payload we will accept from a peer. A malformed or hostile header claiming a
+# huge length would otherwise make the receiver allocate until the process dies.
+MAX_PACKET_BYTES = 8 * 1024 * 1024
 
 
 class AudioCodec(Enum):
@@ -45,7 +63,16 @@ class AudioPacket:
     compressed: bool = False
     
     def to_bytes(self) -> bytes:
-        """Serialize packet to bytes"""
+        """
+        Serialise to the wire format.
+
+        `data_length` is the important field. Without it the receiver cannot know where a
+        packet ends: the original format wrote only the header length, so the reader had to
+        guess the payload boundary by retrying zlib.decompress until it succeeded — which
+        consumes bytes belonging to the next packet and desynchronises the stream for good.
+
+        Wire format: [4-byte header length][JSON header][payload]
+        """
         header = {
             'device_id': self.device_id,
             'channels': self.channels,
@@ -53,13 +80,12 @@ class AudioPacket:
             'frames': self.frames,
             'codec': self.codec,
             'timestamp': self.timestamp,
-            'compressed': self.compressed
+            'compressed': self.compressed,
+            'data_length': len(self.data),
         }
         header_json = json.dumps(header).encode('utf-8')
-        header_length = len(header_json)
-        
-        # Pack: header_length (4 bytes) + header + data
-        return struct.pack('!I', header_length) + header_json + self.data
+
+        return struct.pack('!I', len(header_json)) + header_json + self.data
     
     @staticmethod
     def from_bytes(data: bytes) -> 'AudioPacket':
@@ -409,39 +435,34 @@ class NetworkAudioRouter:
                 return None
             
             header = json.loads(header_bytes.decode('utf-8'))
-            
-            # Calculate data length
-            if header['codec'] == AudioCodec.PCM_FLOAT32.value:
-                dtype_size = 4
-            else:
-                dtype_size = 2
-            
-            if header['compressed']:
-                # For compressed data, we need to receive until we get all data
-                # This is a simplified approach - in production, include data length in header
-                data_bytes = b''
-                sock.settimeout(1.0)
-                while True:
-                    try:
-                        chunk = sock.recv(4096)
-                        if not chunk:
-                            break
-                        data_bytes += chunk
-                        # Try to decompress to see if we have all data
-                        try:
-                            zlib.decompress(data_bytes)
-                            break
-                        except:
-                            continue
-                    except socket.timeout:
-                        break
-                sock.settimeout(None)
-            else:
-                data_length = header['frames'] * header['channels'] * dtype_size
-                data_bytes = self._recv_exact(sock, data_length)
-                if not data_bytes:
+
+            # Read exactly the number of bytes the sender declared.
+            data_length = header.get('data_length')
+
+            if data_length is None:
+                # A sender predating the length field. Its payload boundary is
+                # unknowable for compressed data, so refuse rather than corrupt the
+                # stream by guessing.
+                if header.get('compressed'):
+                    logger.error(
+                        "Peer is using the old framing, which had no payload length. "
+                        "Compressed packets cannot be read reliably; upgrade the sender."
+                    )
                     return None
-            
+
+                dtype_size = 4 if header['codec'] == AudioCodec.PCM_FLOAT32.value else 2
+                data_length = header['frames'] * header['channels'] * dtype_size
+
+            if data_length < 0 or data_length > MAX_PACKET_BYTES:
+                # Guards against a malformed or hostile header claiming a huge payload,
+                # which would otherwise make us allocate until the process dies.
+                logger.error(f"Rejecting packet claiming {data_length} bytes")
+                return None
+
+            data_bytes = self._recv_exact(sock, data_length) if data_length else b''
+            if data_length and not data_bytes:
+                return None
+
             return AudioPacket(
                 device_id=header['device_id'],
                 channels=header['channels'],

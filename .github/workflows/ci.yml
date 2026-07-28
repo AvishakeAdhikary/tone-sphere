@@ -27,9 +27,21 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-groups
 
+      - name: Install Qt runtime libraries
+        # PySide6 needs X11/EGL libraries that a headless Ubuntu runner does not ship.
+        # Without them every UI test errors on import rather than on anything real.
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libxkbcommon-x11-0 libxcb-cursor0 \
+            libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libgl1
+
       - name: Run tests
         # CI runners have no audio hardware, so hardware-marked tests are excluded.
         # Everything else must pass on every platform.
+        env:
+          # Qt needs an offscreen platform plugin with no display attached.
+          QT_QPA_PLATFORM: offscreen
         run: uv run pytest -m "not hardware"
 
       - name: Check the package imports on this platform
@@ -37,3 +49,9 @@ jobs:
 
       - name: Check the CLI entry point runs
         run: uv run python main.py
+
+      - name: Check diagnostics run without crashing
+        # Exits non-zero when it finds no hardware, which is expected on CI — we only care
+        # that it runs to completion rather than raising.
+        continue-on-error: true
+        run: uv run python main.py test
