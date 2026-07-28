@@ -204,55 +204,11 @@ def main():
             run_api_server()
 
         elif command == "gui":
-            from tonesphere.gui.studio import ToneSphereStudioGUI
-            from tonesphere.gui.system_tray import SystemTrayIcon
-            print("Starting ToneSphere Studio GUI...")
-            
-            gui = ToneSphereStudioGUI()
-            
-            # Setup system tray with engine access
-            def show_gui():
-                gui.root.deiconify()
-                gui.root.lift()
-            
-            def exit_app():
-                # Stop engine if running
-                if gui.engine and gui.is_running:
-                    gui.engine.stop_engine()
-                gui.root.quit()
-            
-            # Create a simple wrapper to access the GUI's engine dynamically
-            class EngineAccessor:
-                @property
-                def is_running(self):
-                    return gui.engine.is_running if gui.engine else False
-                
-                def start_engine(self):
-                    if not gui.engine:
-                        gui.toggle_engine()
-                    elif not gui.engine.is_running:
-                        gui.engine.start_engine()
-                
-                def stop_engine(self):
-                    if gui.engine and gui.engine.is_running:
-                        gui.engine.stop_engine()
-                
-                def refresh_devices(self):
-                    if gui.engine:
-                        gui.refresh_devices()
-            
-            # Pass the engine accessor to the system tray
-            tray = SystemTrayIcon(show_gui, exit_app, engine=EngineAccessor())
-            tray.start()
-            
-            # Handle window close to minimize to tray
-            def on_closing():
-                gui.root.withdraw()
-            
-            gui.root.protocol("WM_DELETE_WINDOW", on_closing)
-            
-            gui.run()
-            
+            from tonesphere.ui import run
+
+            print("Starting ToneSphere...")
+            return run(config_manager)
+
         elif command == "cli":
             from tonesphere.cli.interface import AudioEngineCLI
             print("Starting ToneSphere CLI...")

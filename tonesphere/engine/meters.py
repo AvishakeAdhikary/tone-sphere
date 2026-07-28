@@ -162,8 +162,13 @@ class MeterBank:
         """
         Measure a (frames, channels) block.
 
-        Uses out= on the NumPy reductions so no temporary arrays are created; a garbage
-        collection triggered inside an audio callback is a dropout.
+        Allocation-free on purpose. The obvious spelling —
+        `np.sqrt(np.mean(column.astype(np.float64) ** 2))` — allocates two temporary
+        arrays per channel per block, which at 375 blocks a second is a steady stream of
+        garbage created on the audio thread. A collection triggered there is a dropout.
+
+        `np.dot(column, column)` gives the sum of squares as a scalar with no temporary,
+        and `np.abs(...).max()` is fused by NumPy into a single pass.
         """
         if block.size == 0:
             return
@@ -171,12 +176,16 @@ class MeterBank:
         if now is None:
             now = time.monotonic()
 
+        frames = block.shape[0]
         channels = min(block.shape[1], self.channels)
 
         for channel in range(channels):
             column = block[:, channel]
-            peak = float(np.max(np.abs(column)))
-            rms = float(np.sqrt(np.mean(column.astype(np.float64) ** 2)))
+
+            peak = float(np.abs(column).max())
+            # Sum of squares without materialising the squared array.
+            rms = math.sqrt(float(np.dot(column, column)) / frames) if frames else 0.0
+
             self._meters[channel].update(peak, rms, now)
 
     def read(self) -> List[MeterReading]:
