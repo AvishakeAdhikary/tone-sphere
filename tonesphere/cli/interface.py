@@ -34,14 +34,19 @@ class AudioEngineCLI:
             
         devices = self.engine.get_devices()
         print("\nAvailable Audio Devices:")
-        print("-" * 80)
-        print(f"{'ID':<4} {'Name':<40} {'Type':<15} {'Ch':<3} {'ASIO':<6} {'Latency':<8}")
-        print("-" * 80)
-        
+        print("-" * 96)
+        # 'Backend' replaces the old 'ASIO' column: with PortAudio the backend actually in
+        # use is the useful fact, and the old column reported ASIO on devices without it.
+        print(f"{'ID':<4} {'Name':<44} {'Dir':<7} {'Ch':<3} {'Backend':<22} {'Latency':<8}")
+        print("-" * 96)
+
         for device in devices:
-            print(f"{device['id']:<4} {device['name']:<40} {device['type']:<15} "
-                  f"{device['channels']:<3} {'✓' if device['is_asio'] else '✗':<6} "
-                  f"{device['latency_ms']:.1f}ms")
+            name = device['name']
+            if len(name) > 43:
+                name = name[:40] + '...'
+            print(f"{device['id']:<4} {name:<44} {device['direction']:<7} "
+                  f"{device['channels']:<3} {device['host_api'][:21]:<22} "
+                  f"{device['latency_ms']:.1f} ms")
     
     def refresh_devices(self):
         """Refresh device list to detect newly launched applications"""

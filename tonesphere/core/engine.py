@@ -1,621 +1,904 @@
 """
-ToneSphere Audio Engine
-Professional audio routing engine with native driver support
-Supports ASIO, WASAPI, DirectSound, ALSA, PulseAudio, JACK, PipeWire, CoreAudio
+ToneSphere audio engine.
+
+A facade over `tonesphere.engine.AudioHost` that keeps the integer-device-id surface the
+GUI, CLI and REST API were written against, while the audio itself runs on real
+PortAudio streams.
+
+What changed from the version this replaces: it had eight "driver" classes that returned
+arrays of zeros, two disjoint device registries, and a polling thread that moved nothing.
+Audio now runs in the driver's own callback, routing is an immutable graph swapped by
+reference, and every statistic is either measured or reported as None.
+
+Ids
+---
+Callers use ints. The engine owns the mapping from int to graph node, because PortAudio's
+device indices shift when hardware is plugged or unplugged, and a UI holding a stale int
+must not silently start controlling a different device. Physical ids are derived from the
+device key, buses are allocated from a separate range.
 """
 
-import numpy as np
 import threading
 import time
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+
+import numpy as np
+
+from tonesphere.core.channel_control import ChannelControlManager
+from tonesphere.core.models import AudioDevice, DeviceType
+from tonesphere.core.processor import AudioProcessor
 from tonesphere.core.routing import AudioRoutingMatrix
-from tonesphere.devices.virtual_device_manager import VirtualDeviceManager
+from tonesphere.engine import (
+    AudioBackendUnavailable, AudioHost, Connection, DeviceInfo, HostApi, RoutingGraph,
+    bus_node, db_to_linear, device_node, enumerate_devices, linear_to_db, preferred_host_api,
+)
 from tonesphere.network.audio_router import NetworkAudioRouter, NetworkQuality
 from tonesphere.utils.logger import get_logger
-from tonesphere.core.models import DeviceType, AudioDevice
-from tonesphere.core.processor import AudioProcessor
-from tonesphere.core.stream_manager import AudioStreamManager
-from tonesphere.core.channel_control import ChannelControlManager
-from tonesphere.core.sample_rate_converter import SampleRateManager
-from tonesphere.drivers.manager import AudioDriverManager
-from tonesphere.drivers.base import AudioDriverType, AudioStreamConfig
 
 logger = get_logger(__name__)
 
+# Buses get ids from here up, so a bus id can never be mistaken for a device id.
+BUS_ID_BASE = 10000
+
 
 class AudioEngine:
-    """
-    ToneSphere Audio Engine - Professional audio routing with native driver support
-    Supports ASIO, WASAPI, DirectSound, ALSA, PulseAudio, JACK, PipeWire, CoreAudio
-    """
-    
-    def __init__(self, sample_rate: int = 48000, buffer_size: int = 128,
-                 preferred_driver: AudioDriverType = AudioDriverType.AUTO,
-                 max_virtual_inputs: int = 10, max_virtual_outputs: int = 10):
+    """Routing engine over real audio hardware."""
+
+    def __init__(
+        self,
+        sample_rate: int = 48000,
+        buffer_size: int = 256,
+        preferred_driver: Optional[HostApi] = None,
+        max_virtual_inputs: int = 10,
+        max_virtual_outputs: int = 10,
+        exclusive: bool = True,
+    ):
         self.sample_rate = sample_rate
         self.buffer_size = buffer_size
-        
-        # Core components
-        self.driver_manager = AudioDriverManager(preferred_driver)
-        self.stream_manager = AudioStreamManager(self.driver_manager)
-        self.processor = AudioProcessor(sample_rate, buffer_size)
-        self.virtual_manager = VirtualDeviceManager(sample_rate, buffer_size, max_virtual_inputs, max_virtual_outputs)
+        self.max_virtual_inputs = max_virtual_inputs
+        self.max_virtual_outputs = max_virtual_outputs
+
+        self.host = AudioHost(
+            samplerate=sample_rate,
+            blocksize=buffer_size,
+            host_api=preferred_driver,
+            exclusive=exclusive,
+        )
+
+        # Kept from the previous implementation: these state models were always sound,
+        # they were simply never connected to any audio.
         self.routing_matrix = AudioRoutingMatrix()
-        self.network_router = NetworkAudioRouter(quality=NetworkQuality.HIGH)
         self.channel_control_manager = ChannelControlManager()
-        self.sample_rate_manager = SampleRateManager(sample_rate)
-        
-        # Device management
-        self.all_devices: Dict[int, AudioDevice] = {}
-        
-        # State
-        self.is_running = False
+        self.processor = AudioProcessor(sample_rate, buffer_size)
+        self.network_router = NetworkAudioRouter(quality=NetworkQuality.HIGH)
+
+        # Id bookkeeping.
+        self._devices: List[DeviceInfo] = []
+        self._id_to_node: Dict[int, Any] = {}
+        self._node_to_id: Dict[str, int] = {}
+        self._device_by_id: Dict[int, DeviceInfo] = {}
+        self._bus_meta: Dict[int, Dict[str, Any]] = {}
+        self._next_bus_id = BUS_ID_BASE
+
+        self._lock = threading.RLock()
+        self._initialized = False
+        self._started = False
+        self._backend_error: Optional[str] = None
+        self._problems: List[str] = []
+
         self.master_volume = 1.0
-        
-        # Performance monitoring.
-        #
-        # `cpu_usage` is None, not 0.0. The drivers report no CPU load, so a 0.0
-        # here would render in the UI as "CPU: 0%" — a measurement we never took
-        # presented as a good result. None means "not measured"; the UI shows "--".
-        #
-        # `nominal_latency_ms` is buffer/rate, which is arithmetic, not the true
-        # round-trip latency. It is named to say so.
-        self.performance_stats = {
-            'cpu_usage': None,
-            'buffer_underruns': 0,
-            'nominal_latency_ms': 0.0,
-            'measured_latency_ms': None,
-            'audio_path_active': False,
-            'active_driver': None,
-            'total_devices': 0,
-            'virtual_devices': 0,
-            'active_streams': 0
-        }
-        
-        # Threading
-        self.monitor_thread: Optional[threading.Thread] = None
-        self.audio_thread: Optional[threading.Thread] = None
-        
+
+    # --- Lifecycle ---
+
     def initialize(self):
-        """Initialize the audio engine"""
-        try:
-            # Initialize driver manager
-            if not self.driver_manager.initialize():
-                raise Exception("Failed to initialize audio driver")
-            
-            # Scan for audio devices
-            self._scan_audio_devices()
-            
-            # Create default virtual devices
-            self._create_default_virtual_devices()
-            
-            # Initialize channel controls for all devices
-            for device_id, device in self.all_devices.items():
-                self.channel_control_manager.add_device(device_id, device.channels)
-            
-            # Update performance stats
-            active_driver = self.driver_manager.get_active_driver()
-            if active_driver:
-                self.performance_stats['active_driver'] = active_driver.driver_type.value
-            
-            logger.info(f"Audio engine initialized with {len(self.all_devices)} devices")
-            
-        except Exception as e:
-            logger.error(f"Failed to initialize audio engine: {e}")
-            raise
-    
-    def _scan_audio_devices(self):
-        """Scan for available audio devices using native drivers"""
-        try:
-            # Get devices from driver manager
-            device_infos = self.driver_manager.enumerate_devices()
-            
-            for device_info in device_infos:
-                # Determine device type
-                if device_info.max_input_channels > 0 and device_info.max_output_channels == 0:
-                    device_type = DeviceType.PHYSICAL_INPUT
-                elif device_info.max_output_channels > 0 and device_info.max_input_channels == 0:
-                    device_type = DeviceType.PHYSICAL_OUTPUT
-                else:
-                    # Device supports both - create two entries
-                    if device_info.max_input_channels > 0:
-                        input_device = AudioDevice(
-                            id=device_info.id * 2,
-                            name=f"{device_info.name} (Input)",
-                            device_type=DeviceType.PHYSICAL_INPUT,
-                            channels=device_info.max_input_channels,
-                            sample_rate=device_info.default_sample_rate,
-                            buffer_size=device_info.default_buffer_size,
-                            is_asio=device_info.is_asio,
-                            latency=device_info.latency_input_ms
-                        )
-                        self.all_devices[input_device.id] = input_device
-                    
-                    if device_info.max_output_channels > 0:
-                        output_device = AudioDevice(
-                            id=device_info.id * 2 + 1,
-                            name=f"{device_info.name} (Output)",
-                            device_type=DeviceType.PHYSICAL_OUTPUT,
-                            channels=device_info.max_output_channels,
-                            sample_rate=device_info.default_sample_rate,
-                            buffer_size=device_info.default_buffer_size,
-                            is_asio=device_info.is_asio,
-                            latency=device_info.latency_output_ms
-                        )
-                        self.all_devices[output_device.id] = output_device
-                    continue
-                
-                # Create single device
-                audio_device = AudioDevice(
-                    id=device_info.id,
-                    name=device_info.name,
-                    device_type=device_type,
-                    channels=max(device_info.max_input_channels, device_info.max_output_channels),
-                    sample_rate=device_info.default_sample_rate,
-                    buffer_size=device_info.default_buffer_size,
-                    is_asio=device_info.is_asio,
-                    latency=max(device_info.latency_input_ms, device_info.latency_output_ms)
-                )
-                self.all_devices[device_info.id] = audio_device
-            
-            self.performance_stats['total_devices'] = len(self.all_devices)
-            logger.info(f"Scanned {len(self.all_devices)} physical audio devices")
-            
-        except Exception as e:
-            logger.error(f"Error scanning audio devices: {e}")
-    
-    def refresh_devices(self):
-        """Refresh device list to detect newly connected devices or launched applications"""
-        try:
-            # Store current virtual devices to preserve them
-            virtual_devices = {
-                device_id: device 
-                for device_id, device in self.all_devices.items() 
-                if device.device_type in [DeviceType.VIRTUAL_INPUT, DeviceType.VIRTUAL_OUTPUT]
-            }
-            
-            # Clear physical devices
-            physical_device_ids = [
-                device_id 
-                for device_id, device in self.all_devices.items() 
-                if device.device_type in [DeviceType.PHYSICAL_INPUT, DeviceType.PHYSICAL_OUTPUT]
-            ]
-            for device_id in physical_device_ids:
-                del self.all_devices[device_id]
-            
-            # Re-scan physical devices (including applications)
-            self._scan_audio_devices()
-            
-            # Restore virtual devices
-            for device_id, device in virtual_devices.items():
-                self.all_devices[device_id] = device
-            
-            # Update channel controls for new devices
-            for device_id, device in self.all_devices.items():
-                if device_id not in self.channel_control_manager.device_controls:
-                    self.channel_control_manager.add_device(device_id, device.channels)
-            
-            logger.info(f"Device list refreshed: {len(self.all_devices)} total devices")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error refreshing devices: {e}")
-            return False
-    
-    def _create_default_virtual_devices(self):
-        """Create default virtual audio devices using the new manager"""
-        # Get config for default counts
-        from tonesphere.utils.config import ConfigManager
-        config = ConfigManager().load_config()
-        vdev_config = config.get('virtual_devices', {})
-        default_inputs = vdev_config.get('default_inputs', 3)
-        default_outputs = vdev_config.get('default_outputs', 3)
-        
-        # Create default virtual inputs using new manager
-        for i in range(default_inputs):
-            device_id = self.virtual_manager.create_input(channels=2)
-            if device_id:
-                virtual_device = AudioDevice(
-                    id=device_id,
-                    name=f"ToneSphere Input {i+1}",
-                    device_type=DeviceType.VIRTUAL_INPUT,
-                    channels=2,
-                    sample_rate=self.sample_rate,
-                    buffer_size=self.buffer_size,
-                    is_active=True
-                )
-                self.all_devices[device_id] = virtual_device
-        
-        # Create default virtual outputs using new manager
-        for i in range(default_outputs):
-            device_id = self.virtual_manager.create_output(channels=2)
-            if device_id:
-                virtual_device = AudioDevice(
-                    id=device_id,
-                    name=f"ToneSphere Output {i+1}",
-                    device_type=DeviceType.VIRTUAL_OUTPUT,
-                    channels=2,
-                    sample_rate=self.sample_rate,
-                    buffer_size=self.buffer_size,
-                    is_active=True
-                )
-                self.all_devices[device_id] = virtual_device
-        
-        total_created = default_inputs + default_outputs
-        self.performance_stats['virtual_devices'] = total_created
-        logger.info(f"Created {total_created} default ToneSphere virtual devices")
-    
+        """Enumerate hardware and pick a backend. Does not open any stream."""
+        with self._lock:
+            try:
+                self._devices = enumerate_devices()
+                self._backend_error = None
+            except AudioBackendUnavailable as e:
+                # A missing PortAudio is a real, reportable condition, not something to
+                # paper over with an empty device list that looks like "no hardware".
+                self._backend_error = str(e)
+                self._devices = []
+                logger.error(f"Audio backend unavailable: {e}")
+                self._initialized = True
+                return
+
+            if self.host.host_api is None:
+                self.host.host_api = preferred_host_api()
+
+            self.host._devices = self._devices
+            self._reindex()
+
+            for device_id, device in self._device_by_id.items():
+                channels = max(device.max_input_channels, device.max_output_channels)
+                self.channel_control_manager.add_device(device_id, channels)
+
+            self._initialized = True
+            api = self.host.host_api.value if self.host.host_api else 'none'
+            logger.info(f"Engine initialized: {len(self._devices)} devices, {api}")
+
     def start_engine(self):
-        """Start the audio engine"""
-        if self.is_running:
-            return
-        
-        try:
-            self.is_running = True
-            
-            # Start stream manager
-            self.stream_manager.start_processing()
-            
-            # Start monitoring thread
-            self.monitor_thread = threading.Thread(target=self._performance_monitor, daemon=True)
-            self.monitor_thread.start()
-            
-            # Start audio processing thread
-            self.audio_thread = threading.Thread(target=self._audio_processing_loop, daemon=True)
-            self.audio_thread.start()
-            
-            logger.info("Audio engine started")
-            
-        except Exception as e:
-            logger.error(f"Failed to start audio engine: {e}")
-            self.is_running = False
-            raise
-    
+        """
+        Open and start the streams the current routing needs.
+
+        With no routes there is nothing to open, and that is a legitimate idle state rather
+        than a failure — `has_routes` distinguishes it so the UI can say "running, nothing
+        patched" instead of the contradiction of a stopped engine behind a STOP button.
+        """
+        with self._lock:
+            if not self._initialized:
+                self.initialize()
+
+            if self._backend_error:
+                raise RuntimeError(f"Cannot start: {self._backend_error}")
+
+            if self.host.is_running:
+                return
+
+            self._started = True
+
+            if not self.routing_matrix.connections:
+                self._problems = []
+                logger.info("Engine started with no routes — patch something to hear audio")
+                return
+
+            self._problems = self.host.configure(self._build_graph())
+            self._problems += self.host.start()
+
+            for problem in self._problems:
+                logger.warning(f"Engine start: {problem}")
+
+    @property
+    def has_routes(self) -> bool:
+        return bool(self.routing_matrix.connections)
+
+    @property
+    def state(self) -> str:
+        """
+        One word for the UI. Distinguishes the three real states so 'Stopped' is never
+        shown while the start button reads STOP.
+        """
+        if self.host.is_running:
+            return 'degraded' if self.host.failed_streams() else 'running'
+        if self._started:
+            return 'idle'
+        return 'stopped'
+
+    def create_monitor_patch(self, muted: bool = True) -> Tuple[bool, str]:
+        """
+        Patch the default input straight to the default output.
+
+        This is the guitarist's path: plug into the interface, hear yourself through the
+        headphones. Created muted by default on purpose — on a laptop the default input is
+        the built-in microphone and the default output is the built-in speakers, and
+        unmuting that combination is an acoustic feedback loop at whatever volume the
+        machine happens to be set to. The caller unmutes once it knows the devices are
+        safe, or once the user asks.
+        """
+        with self._lock:
+            source_id = self.default_input_id()
+            dest_id = self.default_output_id()
+
+            if source_id is None:
+                return False, "No input device available"
+            if dest_id is None:
+                return False, "No output device available"
+
+            success, message = self.create_routing(source_id, dest_id, volume=1.0)
+            if not success:
+                return False, message
+
+            if muted:
+                self.set_routing_mute(source_id, dest_id, True)
+
+            source = self._device_by_id[source_id]
+            dest = self._device_by_id[dest_id]
+            suffix = " (muted — unmute when you know it will not feed back)" if muted else ""
+
+            return True, f"{source.name} -> {dest.name}{suffix}"
+
     def stop_engine(self):
-        """Stop the audio engine"""
-        if not self.is_running:
-            return
-        
-        self.is_running = False
-        
-        # Stop stream manager
-        self.stream_manager.stop_processing()
+        with self._lock:
+            self._started = False
+            self.host.stop()
 
-        # Stop virtual devices
-        self.virtual_manager.stop_all()
-        
-        # Wait for threads
-        if self.monitor_thread:
-            self.monitor_thread.join(timeout=2.0)
-        if self.audio_thread:
-            self.audio_thread.join(timeout=2.0)
-        
-        logger.info("Audio engine stopped")
-    
-    def _performance_monitor(self):
-        """
-        Publish the stats we can actually measure.
+    @property
+    def is_running(self) -> bool:
+        return self.host.is_running
 
-        Anything we cannot measure stays None so the UI renders "--" instead of a
-        confident zero. CPU load in particular is left None until a real driver
-        callback exists to report it.
+    def cleanup(self):
+        with self._lock:
+            self.host.cleanup()
+            logger.info("Engine cleanup complete")
+
+    # --- Id mapping ---
+
+    def _reindex(self):
         """
-        while self.is_running:
+        Rebuild the int-id mapping, preserving ids for devices that are still present.
+
+        Preserving matters: a UI holding id 7 must keep pointing at the same speakers
+        after an unrelated USB interface is unplugged.
+        """
+        preserved = {
+            node_key: device_id
+            for node_key, device_id in self._node_to_id.items()
+            if node_key.startswith('device:')
+        }
+
+        self._device_by_id.clear()
+        next_id = 0
+
+        for device in self._devices:
+            node = device_node(device.key)
+            node_key = str(node)
+
+            device_id = preserved.get(node_key)
+            if device_id is None:
+                while next_id in self._device_by_id or next_id >= BUS_ID_BASE:
+                    next_id += 1
+                device_id = next_id
+                next_id += 1
+
+            self._id_to_node[device_id] = node
+            self._node_to_id[node_key] = device_id
+            self._device_by_id[device_id] = device
+
+    def _node_for(self, device_id: int):
+        return self._id_to_node.get(device_id)
+
+    def _id_for(self, node) -> Optional[int]:
+        return self._node_to_id.get(str(node))
+
+    # --- Devices ---
+
+    def refresh_devices(self) -> bool:
+        """
+        Re-enumerate hardware, dropping routes to anything that disappeared.
+
+        Leaving routes pointing at an unplugged device would make the engine fail to
+        configure on the next start with a confusing error, so they are pruned here.
+        """
+        with self._lock:
             try:
-                stream_stats = self.stream_manager.get_statistics()
+                self._devices = enumerate_devices()
+            except AudioBackendUnavailable as e:
+                self._backend_error = str(e)
+                return False
 
-                self.performance_stats['active_streams'] = stream_stats['running_streams']
-                self.performance_stats['nominal_latency_ms'] = (
-                    self.buffer_size / self.sample_rate * 1000
-                )
+            self.host._devices = self._devices
+            live_keys = {device_node(d.key) for d in self._devices}
 
-                # Underruns from the virtual buses are real counts, so report them.
-                self.performance_stats['buffer_underruns'] = sum(
-                    device.buffer_underruns
-                    for device in self.virtual_manager.all_devices().values()
-                )
+            self._reindex()
 
-                time.sleep(1.0)
+            graph = self.host.graph_holder.current()
+            for node in graph.nodes():
+                if node.kind == 'device' and node not in live_keys:
+                    graph = graph.without_node(node)
+                    logger.info(f"Dropped routes to removed device: {node.ref}")
 
-            except Exception as e:
-                logger.error(f"Performance monitor error: {e}")
-    
-    def _audio_processing_loop(self):
-        """
-        Pump virtual-to-virtual buses.
+            self.host.apply_graph(graph)
 
-        Stopgap only: this is a polling loop, not an audio callback, and it does
-        not reach real hardware. It is paced at the nominal buffer period rather
-        than the old fixed 1 ms, which was ~1000 wakeups/second of pure overhead.
-        Phase 1 replaces this with a driver-owned callback.
-        """
-        period = self.buffer_size / self.sample_rate
+            for device_id, device in self._device_by_id.items():
+                if device_id not in self.channel_control_manager.device_controls:
+                    channels = max(device.max_input_channels, device.max_output_channels)
+                    self.channel_control_manager.add_device(device_id, channels)
 
-        while self.is_running:
-            try:
-                self.virtual_manager.process_routing()
-                time.sleep(period)
-            except Exception as e:
-                logger.error(f"Audio processing error: {e}")
-    
-    # Device Management Methods
-    def get_devices(self) -> List[Dict]:
-        """Get all available devices"""
-        devices = []
-        for device in self.all_devices.values():
-            devices.append({
-                'id': device.id,
-                'name': device.name,
-                'type': device.device_type.value,
-                'channels': device.channels,
-                'sample_rate': device.sample_rate,
-                'is_asio': device.is_asio,
-                'is_active': device.is_active,
-                'latency_ms': device.latency
-            })
-        return devices
-    
-    def create_virtual_input(self, name: str, channels: int = 2) -> Optional[int]:
-        """Create a new virtual input device using new manager"""
-        # Use new manager which handles limits and auto-naming
-        device_id = self.virtual_manager.create_input(channels)
-        
-        if device_id:
-            # Get the auto-generated name from the manager
-            device_info = self.virtual_manager.get_device_info(device_id)
-            actual_name = device_info.name if device_info else f"ToneSphere Input {len(self.virtual_manager.input_devices)}"
-            
-            virtual_device = AudioDevice(
-                id=device_id,
-                name=actual_name,
-                device_type=DeviceType.VIRTUAL_INPUT,
-                channels=channels,
-                sample_rate=self.sample_rate,
-                buffer_size=self.buffer_size,
-                is_active=True
-            )
-            self.all_devices[device_id] = virtual_device
-            self.performance_stats['virtual_devices'] += 1
-            logger.info(f"Created virtual input: {actual_name} (ID: {device_id})")
-        
-        return device_id
-    
-    def create_virtual_output(self, name: str, channels: int = 2) -> Optional[int]:
-        """Create a new virtual output device using new manager"""
-        # Use new manager which handles limits and auto-naming
-        device_id = self.virtual_manager.create_output(channels)
-        
-        if device_id:
-            # Get the auto-generated name from the manager
-            device_info = self.virtual_manager.get_device_info(device_id)
-            actual_name = device_info.name if device_info else f"ToneSphere Output {len(self.virtual_manager.output_devices)}"
-            
-            virtual_device = AudioDevice(
-                id=device_id,
-                name=actual_name,
-                device_type=DeviceType.VIRTUAL_OUTPUT,
-                channels=channels,
-                sample_rate=self.sample_rate,
-                buffer_size=self.buffer_size,
-                is_active=True
-            )
-            self.all_devices[device_id] = virtual_device
-            self.performance_stats['virtual_devices'] += 1
-            logger.info(f"Created virtual output: {actual_name} (ID: {device_id})")
-        
-        return device_id
-    
-    def remove_virtual_device(self, device_id: int) -> bool:
-        """Remove a virtual device using new manager"""
-        if device_id not in self.all_devices:
-            return False
-        
-        device = self.all_devices[device_id]
-        if device.device_type not in [DeviceType.VIRTUAL_INPUT, DeviceType.VIRTUAL_OUTPUT]:
-            return False
-        
-        # Use new manager to delete
-        if self.virtual_manager.delete_device(device_id):
-            del self.all_devices[device_id]
-            self.performance_stats['virtual_devices'] -= 1
-            logger.info(f"Removed virtual device: {device.name} (ID: {device_id})")
+            logger.info(f"Refreshed: {len(self._devices)} devices")
             return True
-        
-        return False
-    
-    # Virtual Device Manager Methods
+
+    def get_devices(self, include_all_backends: bool = False) -> List[Dict]:
+        """
+        Routable endpoints on the active backend.
+
+        Filtered by host API by default, because the same speakers are enumerated once per
+        backend — this machine reports 24 devices that are really 3 pieces of hardware
+        seen through MME, DirectSound, WASAPI and WDM-KS. Showing all of them invites the
+        user to pick the 120 ms DirectSound copy of the device they wanted. Every serious
+        audio application picks a driver first, then its devices; `include_all_backends`
+        is there for a settings screen that wants to offer the choice.
+
+        `latency_ms` is what the driver reports for the device. It is not
+        `measured_latency_ms` from the engine statistics — that is what the open stream
+        actually achieved, and the two differ substantially.
+        """
+        with self._lock:
+            devices: List[Dict] = []
+            active_api = self.host.host_api
+
+            for device_id, device in sorted(self._device_by_id.items()):
+                if (not include_all_backends and active_api is not None
+                        and device.host_api != active_api):
+                    continue
+
+                if device.can_input:
+                    devices.append({
+                        'id': device_id,
+                        'name': f"{device.name} (In)" if device.is_duplex else device.name,
+                        'type': DeviceType.PHYSICAL_INPUT.value,
+                        'channels': device.max_input_channels,
+                        'sample_rate': device.default_samplerate,
+                        'is_asio': device.host_api == HostApi.ASIO,
+                        'is_active': self.host.is_running,
+                        'latency_ms': device.default_low_input_latency_ms,
+                        'host_api': device.host_api_name,
+                        'supports_exclusive': device.supports_exclusive,
+                        'direction': 'input',
+                    })
+
+                if device.can_output:
+                    devices.append({
+                        'id': device_id,
+                        'name': f"{device.name} (Out)" if device.is_duplex else device.name,
+                        'type': DeviceType.PHYSICAL_OUTPUT.value,
+                        'channels': device.max_output_channels,
+                        'sample_rate': device.default_samplerate,
+                        'is_asio': device.host_api == HostApi.ASIO,
+                        'is_active': self.host.is_running,
+                        'latency_ms': device.default_low_output_latency_ms,
+                        'host_api': device.host_api_name,
+                        'supports_exclusive': device.supports_exclusive,
+                        'direction': 'output',
+                    })
+
+            for bus_id, meta in sorted(self._bus_meta.items()):
+                devices.append({
+                    'id': bus_id,
+                    'name': meta['name'],
+                    'type': meta['type'],
+                    'channels': meta['channels'],
+                    'sample_rate': self.sample_rate,
+                    'is_asio': False,
+                    'is_active': self.host.is_running,
+                    'latency_ms': 0.0,
+                    'host_api': 'ToneSphere bus (in-process)',
+                    'supports_exclusive': False,
+                    'direction': meta['direction'],
+                })
+
+            return devices
+
+    def get_device_info(self, device_id: int) -> Optional[DeviceInfo]:
+        return self._device_by_id.get(device_id)
+
+    def default_output_id(self) -> Optional[int]:
+        """
+        The device a user would expect audio to come out of.
+
+        Prefers the OS default on the active backend, then any output on it. Avoids
+        picking, say, MME's "Microsoft Sound Mapper", which is a routing shim rather than
+        a real endpoint.
+        """
+        return self._default_id(want_output=True)
+
+    def default_input_id(self) -> Optional[int]:
+        return self._default_id(want_output=False)
+
+    def _default_id(self, want_output: bool) -> Optional[int]:
+        active_api = self.host.host_api
+
+        candidates = [
+            (device_id, device)
+            for device_id, device in sorted(self._device_by_id.items())
+            if (device.can_output if want_output else device.can_input)
+            and (active_api is None or device.host_api == active_api)
+        ]
+
+        if not candidates:
+            return None
+
+        for device_id, device in candidates:
+            if device.is_default_output if want_output else device.is_default_input:
+                return device_id
+
+        # "Sound Mapper" and "Primary Sound Driver" are host-API shims, not hardware.
+        for device_id, device in candidates:
+            lowered = device.name.lower()
+            if 'sound mapper' not in lowered and 'primary sound' not in lowered:
+                return device_id
+
+        return candidates[0][0]
+
+    # --- Buses (previously called "virtual devices") ---
+
+    def create_virtual_input(self, name: str, channels: int = 2) -> Optional[int]:
+        """
+        Create an input bus.
+
+        Note this is an in-process summing point, not an operating-system device: other
+        applications cannot select it. The name is kept for API compatibility.
+        """
+        return self._create_bus(name, channels, direction='input')
+
+    def create_virtual_output(self, name: str, channels: int = 2) -> Optional[int]:
+        return self._create_bus(name, channels, direction='output')
+
+    def _create_bus(self, name: str, channels: int, direction: str) -> Optional[int]:
+        with self._lock:
+            existing = sum(1 for m in self._bus_meta.values() if m['direction'] == direction)
+            limit = self.max_virtual_inputs if direction == 'input' else self.max_virtual_outputs
+
+            if existing >= limit:
+                logger.warning(f"Bus limit reached ({limit} {direction}s)")
+                return None
+
+            bus_id = self._next_bus_id
+            self._next_bus_id += 1
+
+            bus_name = name or f"ToneSphere {direction.title()} {existing + 1}"
+            internal = f"{direction}_{bus_id}"
+
+            self.host.create_bus(internal, channels)
+
+            node = bus_node(internal)
+            self._id_to_node[bus_id] = node
+            self._node_to_id[str(node)] = bus_id
+            self._bus_meta[bus_id] = {
+                'name': bus_name,
+                'internal': internal,
+                'channels': channels,
+                'direction': direction,
+                'type': (DeviceType.VIRTUAL_INPUT if direction == 'input'
+                         else DeviceType.VIRTUAL_OUTPUT).value,
+            }
+
+            self.channel_control_manager.add_device(bus_id, channels)
+            logger.info(f"Created {direction} bus '{bus_name}' (id {bus_id})")
+            return bus_id
+
+    def remove_virtual_device(self, device_id: int) -> bool:
+        with self._lock:
+            meta = self._bus_meta.pop(device_id, None)
+            if meta is None:
+                return False
+
+            node = self._id_to_node.pop(device_id, None)
+            if node is not None:
+                self._node_to_id.pop(str(node), None)
+                self.host.apply_graph(self.host.graph_holder.current().without_node(node))
+
+            self.host.remove_bus(meta['internal'])
+            logger.info(f"Removed bus '{meta['name']}'")
+            return True
+
+    delete_virtual_device = remove_virtual_device
+
     def list_virtual_devices(self) -> List[Dict]:
-        """List all virtual devices"""
         return [
             {
-                'id': info.id,
-                'name': info.name,
-                'type': info.device_type,
-                'channels': info.channels,
-                'sample_rate': info.sample_rate,
-                'is_running': info.is_running
+                'id': bus_id,
+                'name': meta['name'],
+                'type': meta['direction'],
+                'channels': meta['channels'],
+                'sample_rate': self.sample_rate,
+                'is_running': self.host.is_running,
             }
-            for info in self.virtual_manager.list_all()
+            for bus_id, meta in sorted(self._bus_meta.items())
         ]
-    
+
     def get_virtual_device_counts(self) -> Dict:
-        """Get virtual device counts and limits"""
-        return self.virtual_manager.get_counts()
-    
-    def delete_virtual_device(self, device_id: int) -> bool:
-        """Delete a virtual device using the manager"""
-        success = self.virtual_manager.delete_device(device_id)
-        if success and device_id in self.all_devices:
-            del self.all_devices[device_id]
-            self.performance_stats['virtual_devices'] -= 1
-        return success
-    
-    def update_virtual_device_sample_rate(self, device_id: int, sample_rate: int) -> bool:
-        """Update virtual device sample rate"""
-        return self.virtual_manager.update_device_sample_rate(device_id, sample_rate)
-    
+        inputs = sum(1 for m in self._bus_meta.values() if m['direction'] == 'input')
+        outputs = sum(1 for m in self._bus_meta.values() if m['direction'] == 'output')
+        return {
+            'input_count': inputs,
+            'output_count': outputs,
+            'total_count': inputs + outputs,
+            'max_inputs': self.max_virtual_inputs,
+            'max_outputs': self.max_virtual_outputs,
+            'inputs_available': self.max_virtual_inputs - inputs,
+            'outputs_available': self.max_virtual_outputs - outputs,
+        }
+
     def update_virtual_device_channels(self, device_id: int, channels: int) -> bool:
-        """Update virtual device channels"""
-        return self.virtual_manager.update_device_channels(device_id, channels)
-    
-    # Routing Methods
-    def create_routing(self, source_id: int, destination_id: int, volume: float = 1.0) -> tuple[bool, str]:
+        with self._lock:
+            meta = self._bus_meta.get(device_id)
+            if meta is None or channels < 1:
+                return False
+
+            was_running = self.host.is_running
+            if was_running:
+                self.host.stop()
+
+            self.host.remove_bus(meta['internal'])
+            meta['channels'] = channels
+            self.host.create_bus(meta['internal'], channels)
+            self.channel_control_manager.add_device(device_id, channels)
+
+            if was_running:
+                self.start_engine()
+            return True
+
+    def update_virtual_device_sample_rate(self, device_id: int, sample_rate: int) -> bool:
         """
-        Create a routing connection.
+        Buses run at the engine's rate.
 
-        Audio only flows for virtual-to-virtual routes today; a route touching a
-        physical device is recorded in the matrix but carries no audio yet, and the
-        returned message says so rather than reporting a bare success.
+        A bus is a summing point inside one graph; giving it its own rate would mean
+        resampling on every route into and out of it. Changing the engine rate is the
+        honest operation, so say so rather than silently doing nothing.
         """
-        success, message = self.routing_matrix.create_routing(source_id, destination_id, volume)
+        if device_id not in self._bus_meta:
+            return False
 
-        if not success:
-            return success, message
+        logger.warning(
+            "Buses run at the engine sample rate; use set_sample_rate() to change it"
+        )
+        return False
 
-        if self.virtual_manager.route_audio(source_id, destination_id, volume):
+    def write_to_bus(self, device_id: int, audio: np.ndarray) -> int:
+        """Feed audio into a bus from outside the audio callback."""
+        meta = self._bus_meta.get(device_id)
+        if meta is None:
+            return 0
+        return self.host.write_bus(meta['internal'], audio)
+
+    # --- Routing ---
+
+    def _build_graph(self) -> RoutingGraph:
+        """Translate the int-keyed routing matrix into a graph the host can run."""
+        connections = []
+
+        for (source_id, dest_id), route in self.routing_matrix.connections.items():
+            source = self._node_for(source_id)
+            dest = self._node_for(dest_id)
+            if source is None or dest is None:
+                continue
+
+            connections.append(Connection(
+                source=source,
+                dest=dest,
+                gain=route.volume,
+                muted=route.muted,
+            ))
+
+        soloed = frozenset(
+            node for node in (
+                self._node_for(cid)
+                for cid, channel in self.routing_matrix.channels.items()
+                if channel.solo
+            ) if node is not None
+        )
+
+        return RoutingGraph(
+            connections=tuple(connections),
+            soloed=soloed,
+            master_gain=self.master_volume,
+        )
+
+    def create_routing(self, source_id: int, destination_id: int,
+                       volume: float = 1.0) -> Tuple[bool, str]:
+        """
+        Route source to destination.
+
+        Rejects cycles: a feedback loop in an audio graph is not a subtle bug, it is a
+        runaway howl at whatever volume the user's headphones were set to.
+        """
+        with self._lock:
+            source = self._node_for(source_id)
+            dest = self._node_for(destination_id)
+
+            if source is None:
+                return False, f"Unknown source device {source_id}"
+            if dest is None:
+                return False, f"Unknown destination device {destination_id}"
+
+            if self.host.graph_holder.current().would_feedback(source, dest):
+                return False, "Refused: this would create a feedback loop"
+
+            success, message = self.routing_matrix.create_routing(source_id, destination_id, volume)
+            if not success:
+                return success, message
+
+            problems = self._publish_graph()
+
+            # A route whose stream would not open carries no audio, so it is not a
+            # success. Roll it back and say what went wrong, rather than returning True
+            # with the error tucked into the message where a caller will ignore it.
+            if self._route_is_dead(source, dest):
+                self.routing_matrix.remove_routing(source_id, destination_id)
+                self._publish_graph()
+                detail = problems[0] if problems else "device could not be opened"
+                return False, f"Could not open the audio path: {detail}"
+
+            if problems:
+                return True, f"{message} ({problems[0]})"
+
             return True, message
 
-        return True, f"{message} (recorded only — no audio path to physical devices yet)"
+    def _route_is_dead(self, source, dest) -> bool:
+        """Whether either end of a route failed to open a stream."""
+        if not self.host.is_running:
+            return False
+        dead = set(self.host.dead_nodes())
+        return source in dead or dest in dead
 
     def remove_routing(self, source_id: int, destination_id: int) -> bool:
-        """Remove a routing connection"""
-        success = self.routing_matrix.remove_routing(source_id, destination_id)
-
-        if success:
-            self.virtual_manager.unroute_audio(source_id, destination_id)
-
-        return success
+        with self._lock:
+            if not self.routing_matrix.remove_routing(source_id, destination_id):
+                return False
+            self._publish_graph()
+            return True
 
     def set_routing_volume(self, source_id: int, destination_id: int, volume: float):
-        """Set volume for a routing connection"""
-        self.routing_matrix.set_routing_volume(source_id, destination_id, volume)
+        """Change a route's gain. Takes effect on the next block, ramped, no restart."""
+        with self._lock:
+            self.routing_matrix.set_routing_volume(source_id, destination_id, volume)
+            self._publish_graph()
 
-        # Keep the virtual bus gain in step with the matrix.
-        source_device = self.virtual_manager.get_device(source_id)
-        if source_device and destination_id in source_device.connected_devices:
-            source_device.connected_devices[destination_id] = volume
-    
+    def set_routing_volume_db(self, source_id: int, destination_id: int, gain_db: float):
+        self.set_routing_volume(source_id, destination_id, db_to_linear(gain_db))
+
+    def set_routing_mute(self, source_id: int, destination_id: int, muted: bool):
+        with self._lock:
+            route = self.routing_matrix.connections.get((source_id, destination_id))
+            if route is None:
+                return
+            route.muted = muted
+            self._publish_graph()
+
+    def clear_all_routing(self):
+        with self._lock:
+            self.routing_matrix.connections.clear()
+            self._publish_graph()
+
+    def _publish_graph(self) -> List[str]:
+        """
+        Hand the current routing to the host.
+
+        Gain, mute and solo changes apply on the next block with no interruption. A route
+        to a device with no open stream needs that stream opening, which means a
+        reconfigure — handled here so callers never have to know which kind of change they
+        just made.
+        """
+        graph = self._build_graph()
+        problems = self.host.apply_graph(graph)
+
+        # No routes means nothing to keep open. Leaving streams running would hold devices
+        # exclusively for no reason and keep reporting 'degraded' from a config that is
+        # no longer in effect.
+        if not graph.connections:
+            if self.host.is_running:
+                self.host.stop()
+            self._problems = []
+            return []
+
+        needs_streams = self._started and graph.connections
+        must_reconfigure = bool(problems) and self.host.is_running
+
+        if needs_streams and (must_reconfigure or not self.host.is_running):
+            if self.host.is_running:
+                logger.info("Reconfiguring streams for new routing")
+                self.host.stop()
+
+            problems = self.host.configure(graph)
+            problems += self.host.start()
+
+            for problem in problems:
+                logger.warning(f"Routing change: {problem}")
+
+        self._problems = problems
+        return problems
+
     def get_routing_matrix(self) -> Dict:
-        """Get current routing matrix state"""
         connections = {}
-        for (source, dest), connection in self.routing_matrix.connections.items():
-            key = f"{source}_{dest}"
-            connections[key] = {
-                'source_id': connection.source_id,
-                'destination_id': connection.destination_id,
-                'state': connection.state.value,
-                'volume': connection.volume,
-                'muted': connection.muted,
-                'solo': connection.solo
+        for (source, dest), route in self.routing_matrix.connections.items():
+            connections[f"{source}_{dest}"] = {
+                'source_id': route.source_id,
+                'destination_id': route.destination_id,
+                'state': route.state.value,
+                'volume': route.volume,
+                'volume_db': round(linear_to_db(route.volume), 1),
+                'muted': route.muted,
+                'solo': route.solo,
             }
         return connections
-    
+
+    # --- Metering ---
+
+    def get_meters(self) -> Dict[int, Dict[str, float]]:
+        """
+        Current levels per device id, in dBFS.
+
+        Returns nothing when stopped rather than zeros: a meter reading of 0.0 while no
+        audio is running would suggest silence was measured, when nothing was.
+        """
+        if not self.host.is_running:
+            return {}
+
+        meters: Dict[int, Dict[str, float]] = {}
+
+        for key, reading in self.host.meters.read_summaries().items():
+            device_id = self._meter_key_to_id(key)
+            if device_id is None:
+                continue
+
+            meters[device_id] = {
+                'peak_db': reading.peak_db,
+                'rms_db': reading.rms_db,
+                'peak_hold_db': reading.peak_hold_db,
+                'clipped': reading.clipped,
+            }
+
+        return meters
+
+    def _meter_key_to_id(self, key: str) -> Optional[int]:
+        if key.startswith('bus::'):
+            return self._node_to_id.get(f"bus:{key[5:]}")
+
+        device_key = key.rsplit('::', 1)[0]
+        return self._node_to_id.get(f"device:{device_key}")
+
+    def clear_clip_indicators(self):
+        self.host.meters.clear_clips()
+
+    # --- Statistics ---
+
     def get_performance_stats(self) -> Dict:
-        """Get engine performance statistics"""
-        return self.performance_stats.copy()
-    
-    # Stream Management
-    def open_device_stream(self, device_id: int, is_input: bool = True) -> int:
-        """Open a stream for a physical device"""
-        device = self.all_devices.get(device_id)
-        if not device:
-            logger.error(f"Device {device_id} not found")
-            return -1
-        
-        config = AudioStreamConfig(
-            device_id=device_id,
-            sample_rate=self.sample_rate,
-            buffer_size=self.buffer_size,
-            channels=device.channels,
-            input_channels=device.channels if is_input else 0,
-            output_channels=device.channels if not is_input else 0
-        )
-        
-        return self.stream_manager.create_stream(device_id, config)
-    
-    def close_device_stream(self, stream_id: int) -> bool:
-        """Close a device stream"""
-        return self.stream_manager.destroy_stream(stream_id)
-    
-    # Network Streaming
-    def start_network_streaming(self):
-        """Start network audio streaming"""
-        self.network_router.start_server()
-    
-    def stop_network_streaming(self):
-        """Stop network audio streaming"""
-        self.network_router.stop_server()
-    
-    def get_network_clients(self) -> List[str]:
-        """Get connected network clients"""
-        return self.network_router.get_connected_clients()
-    
-    def connect_to_network(self, host: str, port: int) -> bool:
-        """Connect to another ToneSphere instance"""
-        return self.network_router.connect_to(host, port)
-    
-    def disconnect_from_network(self, conn_id: str):
-        """Disconnect from network instance"""
-        self.network_router.disconnect_from(conn_id)
-    
-    def get_network_connections(self) -> List[str]:
-        """Get outgoing network connections"""
-        return self.network_router.get_connections()
-    
-    def send_device_audio_to_network(self, device_id: int, target: Optional[str] = None):
-        """Send device audio over network"""
-        device = self.all_devices.get(device_id)
-        if not device:
-            return
-        
-        # Get audio from virtual device
-        virtual_device = self.virtual_manager.get_device(device_id)
-        if virtual_device:
-            audio_data = virtual_device.read_audio()
-            self.network_router.send_audio(device_id, audio_data, self.sample_rate, target)
-    
-    def register_network_receive(self, device_id: int):
-        """Register device to receive network audio"""
-        def receive_callback(audio_data: np.ndarray, packet):
-            virtual_device = self.virtual_manager.get_device(device_id)
-            if virtual_device:
-                virtual_device.write_audio(audio_data)
-        
-        self.network_router.register_receive_callback(device_id, receive_callback)
-    
-    def get_network_statistics(self) -> Dict:
-        """Get network statistics"""
-        return self.network_router.get_statistics()
-    
-    # Driver Management
+        """
+        Measured engine statistics.
+
+        Unmeasured values are None, never 0.0 — see `utils.formatting`. `xruns` is
+        PortAudio's own count of dropouts, and `drift_corrections` counts how often two
+        device clocks had to be resynchronised.
+        """
+        stats = self.host.statistics().as_dict()
+
+        stats['total_devices'] = len(self._device_by_id)
+        stats['virtual_devices'] = len(self._bus_meta)
+        stats['active_streams'] = stats.pop('stream_count', 0)
+        stats['buffer_underruns'] = stats['xruns']
+        stats['active_driver'] = stats.get('host_api')
+        stats['backend_error'] = self._backend_error
+        stats['problems'] = list(self._problems)
+
+        return stats
+
+    def get_ring_statistics(self) -> Dict[str, dict]:
+        return self.host.ring_statistics()
+
+    # --- Backend info ---
+
     def get_driver_info(self) -> Dict[str, Any]:
-        """Get information about the audio driver"""
-        return self.driver_manager.get_driver_info()
-    
+        from tonesphere.engine.devices import describe_backend
+
+        info = describe_backend()
+        info['active_driver'] = self.host.host_api.value if self.host.host_api else None
+        info['exclusive_mode'] = self.host.exclusive
+        info['platform'] = __import__('platform').system()
+        if self._backend_error:
+            info['error'] = self._backend_error
+        return info
+
     def get_available_drivers(self) -> List[str]:
-        """Get list of available drivers"""
-        return [dt.value for dt in self.driver_manager.get_available_drivers()]
-    
-    def switch_driver(self, driver_type: str) -> bool:
-        """Switch to a different audio driver"""
+        from tonesphere.engine.devices import available_host_apis
+
         try:
-            dt = AudioDriverType(driver_type)
-            success = self.driver_manager.switch_driver(dt)
-            
-            if success:
-                # Rescan devices
-                self.all_devices.clear()
-                self._scan_audio_devices()
-                self.performance_stats['active_driver'] = driver_type
-            
-            return success
-        except ValueError:
-            logger.error(f"Invalid driver type: {driver_type}")
-            return False
-    
-    def cleanup(self):
-        """Cleanup and terminate engine"""
-        self.stop_engine()
-        self.stream_manager.cleanup()
-        self.driver_manager.terminate()
-        logger.info("Audio engine cleanup complete")
+            return [api.value for api in available_host_apis()]
+        except AudioBackendUnavailable:
+            return []
+
+    def switch_driver(self, driver_type: str) -> bool:
+        """
+        Change backend. Requires a restart, because streams belong to a backend.
+
+        Existing routes are dropped: a device key includes its host API, so the same
+        speakers are a different node under WASAPI than under WDM-KS.
+        """
+        with self._lock:
+            try:
+                api = HostApi.from_name(driver_type)
+                if api == HostApi.UNKNOWN:
+                    api = HostApi(driver_type)
+            except ValueError:
+                logger.error(f"Unknown host API: {driver_type}")
+                return False
+
+            if api not in self.get_available_drivers_enum():
+                logger.error(f"{api.value} is not available on this system")
+                return False
+
+            was_running = self.host.is_running
+            self.host.stop()
+
+            self.host.host_api = api
+            self.routing_matrix.connections.clear()
+            self.host.apply_graph(RoutingGraph())
+
+            self.refresh_devices()
+
+            if was_running:
+                self.start_engine()
+
+            logger.info(f"Switched to {api.value}")
+            return True
+
+    def get_available_drivers_enum(self) -> List[HostApi]:
+        from tonesphere.engine.devices import available_host_apis
+
+        try:
+            return available_host_apis()
+        except AudioBackendUnavailable:
+            return []
+
+    def set_exclusive_mode(self, exclusive: bool) -> bool:
+        """
+        Exclusive mode bypasses the system mixer. Measured 8.3 ms versus 22 ms shared on
+        WASAPI here, at the cost of no other application being able to use the device.
+        """
+        with self._lock:
+            if self.host.exclusive == exclusive:
+                return True
+
+            was_running = self.host.is_running
+            self.host.stop()
+            self.host.exclusive = exclusive
+
+            if was_running:
+                self.start_engine()
+            return True
+
+    def set_sample_rate(self, sample_rate: int) -> bool:
+        with self._lock:
+            was_running = self.host.is_running
+            self.host.stop()
+
+            self.sample_rate = sample_rate
+            self.host.samplerate = sample_rate
+            self.processor.sample_rate = sample_rate
+
+            if was_running:
+                self.start_engine()
+            return True
+
+    def set_buffer_size(self, buffer_size: int) -> bool:
+        """
+        Smaller is lower latency and higher risk of dropouts. 256 frames is a reasonable
+        default; 64 is achievable on exclusive-mode hardware.
+        """
+        with self._lock:
+            was_running = self.host.is_running
+            self.host.stop()
+
+            self.buffer_size = buffer_size
+            self.host.blocksize = buffer_size
+            self.processor.buffer_size = buffer_size
+
+            if was_running:
+                self.start_engine()
+            return True
+
+    # --- Network (unchanged; see README for its current state) ---
+
+    def start_network_streaming(self):
+        self.network_router.start_server()
+
+    def stop_network_streaming(self):
+        self.network_router.stop_server()
+
+    def get_network_clients(self) -> List[str]:
+        return self.network_router.get_connected_clients()
+
+    def connect_to_network(self, host: str, port: int) -> bool:
+        return self.network_router.connect_to(host, port)
+
+    def disconnect_from_network(self, conn_id: str):
+        self.network_router.disconnect_from(conn_id)
+
+    def get_network_connections(self) -> List[str]:
+        return self.network_router.get_connections()
+
+    def get_network_statistics(self) -> Dict:
+        return self.network_router.get_statistics()
+
+    def register_network_receive(self, device_id: int):
+        """Feed audio arriving from the network into a bus."""
+        def receive_callback(audio_data: np.ndarray, packet):
+            self.write_to_bus(device_id, audio_data)
+
+        self.network_router.register_receive_callback(device_id, receive_callback)
+
+    def send_device_audio_to_network(self, device_id: int, target: Optional[str] = None):
+        logger.warning(
+            "Network send is not wired to the audio path; see the Roadmap in README.md"
+        )

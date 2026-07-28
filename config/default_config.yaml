@@ -4,10 +4,22 @@
 # Audio Engine Configuration
 engine:
   sample_rate: 48000
+
+  # Frames per audio callback. Smaller means lower latency and less margin before a
+  # dropout. Measured round trip on WASAPI exclusive: 128 frames -> 5.7 ms.
+  # Raise to 256 or 512 if you hear crackling (check `xruns` in the status bar).
   buffer_size: 128
-  preferred_driver: 'auto'  # Options: auto, asio, wasapi, directsound, alsa, pulseaudio, jack, pipewire, coreaudio
-  enabled: true             # Enable audio effects processing
-  presets: {}               # Effect presets (can be customized)
+
+  # Audio backend. 'auto' picks the lowest-latency one that has devices.
+  #   Windows: wasapi, wdmks, directsound, mme  (asio only if you supply a
+  #            PortAudio built against the ASIO SDK, which cannot be redistributed)
+  #   Linux:   alsa, jack        macOS: coreaudio, jack
+  preferred_driver: 'auto'
+
+  # Exclusive mode hands the device to ToneSphere and bypasses the OS mixer and its
+  # resampling. Measured here: 8.3 ms exclusive vs 22 ms shared on the same device.
+  # The cost is that no other application can use the device while ToneSphere holds it.
+  exclusive_mode: true
 
 # API Server Configuration
 api:
@@ -32,12 +44,16 @@ logging:
   colored_console: true     # Use colored console output
   structured: false         # Use structured JSON logging
   
-# Virtual Devices Configuration
+# Mix Buses (named "virtual_devices" for config compatibility)
+#
+# These are summing points INSIDE the ToneSphere process. They are not operating-system
+# audio devices and cannot be selected from other applications — that needs a signed
+# kernel-mode driver, which is Phase 5 on the roadmap.
 virtual_devices:
-  max_inputs: 10            # Maximum number of virtual input devices
-  max_outputs: 10           # Maximum number of virtual output devices
-  default_inputs: 3         # Number of default virtual inputs to create
-  default_outputs: 3        # Number of default virtual outputs to create
+  max_inputs: 10            # Maximum number of input buses
+  max_outputs: 10           # Maximum number of output buses
+  default_inputs: 0         # Buses created at startup (0: create them as you need them)
+  default_outputs: 0
   
 # Performance Monitoring
 performance:

@@ -86,60 +86,94 @@ def run_diagnostics() -> int:
 
     try:
         driver_info = engine.get_driver_info()
-        active = driver_info.get('active_driver')
-        available = engine.get_available_drivers()
+        report("INFO", f"PortAudio:        {driver_info.get('portaudio_version', 'unknown')}")
+        report("INFO", f"Active backend:   {driver_info.get('active_driver') or 'none'}")
+        report("INFO", f"Available:        {', '.join(engine.get_available_drivers()) or 'none'}")
 
-        report("INFO", f"Active driver:    {active or 'none'}")
-        report("INFO", f"Available:        {', '.join(available) or 'none'}")
+        if driver_info.get('error'):
+            report("FAIL", f"Audio backend:    {driver_info['error']}")
+
+        if not driver_info.get('asio_available'):
+            report("INFO", "ASIO:             not in this PortAudio build (SDK is not "
+                           "redistributable); WASAPI exclusive is the low-latency path")
 
         devices = engine.get_devices()
-        physical = [d for d in devices if d['type'].startswith('physical')]
-        virtual = [d for d in devices if d['type'].startswith('virtual')]
+        inputs = [d for d in devices if d['direction'] == 'input' and 'bus' not in d['host_api'].lower()]
+        outputs = [d for d in devices if d['direction'] == 'output' and 'bus' not in d['host_api'].lower()]
 
-        if physical:
-            report("PASS", f"Physical devices: {len(physical)}")
+        if inputs:
+            report("PASS", f"Hardware inputs:  {len(inputs)}")
         else:
-            report("FAIL", "Physical devices: 0 — the active driver enumerated no "
-                           "hardware, so nothing can be routed to or from your interface")
+            report("WARN", "Hardware inputs:  0")
 
-        report("INFO", f"Virtual buses:    {len(virtual)} (in-process only, not visible to other apps)")
+        if outputs:
+            report("PASS", f"Hardware outputs: {len(outputs)}")
+        else:
+            report("FAIL", "Hardware outputs: 0 — nothing can be played")
 
-        # Prove whether audio actually moves, rather than trusting the return value.
-        if len(virtual) >= 2:
+        # Prove audio reaches real hardware, by measuring rather than trusting a
+        # return value. This is the check the project never had.
+        if outputs:
             import numpy as np
-            source, dest = virtual[0], virtual[1]
-            ok, message = engine.create_routing(source['id'], dest['id'], 1.0)
-            report("INFO", f"Route {source['id']} -> {dest['id']}: {message}")
 
-            src_device = engine.engine.virtual_manager.get_device(source['id'])
-            dst_device = engine.engine.virtual_manager.get_device(dest['id'])
+            target_id = engine.engine.default_output_id()
+            target = next((d for d in outputs if d['id'] == target_id), outputs[0])
+            bus_id = engine.create_virtual_input("Diagnostic tone", channels=2)
 
-            if src_device and dst_device:
-                src_device.write_audio(np.full((src_device.buffer_size, src_device.channels),
-                                               0.5, dtype=np.float32))
-                deadline = time.time() + 2.0
-                peak = 0.0
-                while time.time() < deadline:
-                    peak = float(np.max(np.abs(dst_device.current_frame)))
-                    if peak > 0.0:
-                        break
-                    time.sleep(0.01)
+            ok, message = engine.create_routing(bus_id, target['id'], 0.25)
+            if not ok:
+                report("FAIL", f"Route to {target['name']}: {message}")
+            else:
+                engine.start_engine()
+                stats = engine.get_performance_stats()
 
-                if peak > 0.0:
-                    report("PASS", f"Virtual bus carried audio (peak {peak:.3f})")
+                if not stats['audio_path_active']:
+                    report("FAIL", f"Stream would not start: {'; '.join(stats['problems'])}")
                 else:
-                    report("FAIL", "Virtual bus carried no audio (peak 0.0)")
+                    report("PASS", f"Stream open on {target['name'][:34]}")
 
-        stats = engine.get_performance_stats()
-        report("INFO", f"Nominal latency:  {format_measurement(stats.get('nominal_latency_ms'), ' ms')}")
-        report("INFO", f"Measured latency: {format_measurement(stats.get('measured_latency_ms'), ' ms')}")
-        report("INFO", f"CPU load:         {format_measurement(stats.get('cpu_usage'), '%')}")
+                    # 440 Hz for two seconds at -12 dBFS; audible but not startling.
+                    block = engine.buffer_size
+                    phase = 0
+                    deadline = time.monotonic() + 2.0
+                    while time.monotonic() < deadline:
+                        t = (np.arange(block) + phase) / engine.sample_rate
+                        wave = (0.25 * np.sin(2 * 3.14159265 * 440.0 * t)).astype(np.float32)
+                        engine.write_to_bus(bus_id, np.repeat(wave.reshape(-1, 1), 2, axis=1))
+                        phase += block
+                        time.sleep(block / engine.sample_rate / 3)
 
-        if not stats.get('audio_path_active', False):
-            report("WARN", "No audio path to hardware — see the Roadmap in README.md")
+                    stats = engine.get_performance_stats()
+
+                    if stats['callback_count'] > 50:
+                        report("PASS", f"Audio callback ran {stats['callback_count']} times")
+                    else:
+                        report("FAIL", f"Callback barely ran ({stats['callback_count']})")
+
+                    if stats['callback_errors'] == 0:
+                        report("PASS", "No callback errors")
+                    else:
+                        report("FAIL", f"{stats['callback_errors']} callback error(s): "
+                                       f"{engine.engine.host.last_callback_error}")
+
+                    if stats['xruns'] == 0:
+                        report("PASS", "No dropouts (xruns)")
+                    else:
+                        report("WARN", f"{stats['xruns']} xrun(s) — try a larger buffer")
+
+                    report("INFO", f"Measured latency: "
+                                   f"{format_measurement(stats.get('measured_latency_ms'), ' ms')} round trip")
+                    report("INFO", f"Nominal latency:  "
+                                   f"{format_measurement(stats.get('nominal_latency_ms'), ' ms')} "
+                                   f"(buffer arithmetic only)")
+                    report("INFO", f"DSP load:         {format_measurement(stats.get('cpu_usage'), '%')}")
+                    report("INFO", f"Buffer / rate:    {engine.buffer_size} frames @ "
+                                   f"{engine.sample_rate} Hz, "
+                                   f"exclusive={driver_info.get('exclusive_mode')}")
 
     finally:
         engine.stop_engine()
+        engine.cleanup()
 
     print("-" * 60)
     print(f"{failures} failure(s), {warnings} warning(s)")
@@ -156,7 +190,8 @@ def main():
     # Setup logging first
     setup_logging(config)
     
-    print("ToneSphere - Professional Audio Routing Engine")
+    from tonesphere import __version__
+    print(f"ToneSphere {__version__}")
     print("=" * 50)
     
     if len(sys.argv) > 1:

@@ -6,9 +6,13 @@ from tonesphere.gui.channel_panel import ChannelControlPanel
 from tonesphere.gui.network_panel import NetworkRoutingPanel
 from tonesphere.gui.virtual_device_panel import VirtualDevicePanel
 from tonesphere.gui.modern_theme import ModernTheme
-from tonesphere.utils.formatting import format_performance_summary
+from tonesphere.utils.formatting import format_measurement, format_performance_summary
 import threading
 import time
+
+from tonesphere.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 class ToneSphereStudioGUI:
     """Professional GUI for ToneSphere Studio"""
@@ -171,7 +175,8 @@ class ToneSphereStudioGUI:
         button_frame.pack(fill=tk.X)
         
         # Modern action buttons
-        self._create_action_button(button_frame, "🔄 Refresh Devices", self.refresh_devices)
+        self._create_action_button(button_frame, "🎸 Monitor Input", self.create_monitor_patch)
+        self._create_action_button(button_frame, "🔄 Rescan Devices", self.rescan_devices)
         self._create_action_button(button_frame, "🔗 Routing Matrix", self.open_routing_window)
         self._create_action_button(button_frame, "🎚️ Channel Controls", self.open_channel_controls)
         self._create_action_button(button_frame, "🌐 Network Routing", self.open_network_panel)
@@ -240,7 +245,9 @@ class ToneSphereStudioGUI:
         devices_frame = tk.Frame(devices_panel, bg=self.colors['bg_secondary'])
         devices_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 15))
         
-        columns = ('ID', 'Name', 'Type', 'Channels', 'ASIO', 'Latency')
+        # 'Backend' replaces the old 'ASIO' column: with PortAudio the backend in use is
+        # the useful fact, and the old column claimed ASIO on devices that had none.
+        columns = ('ID', 'Name', 'Dir', 'Ch', 'Backend', 'Latency')
         self.devices_tree = ttk.Treeview(devices_frame, columns=columns, 
                                         show='headings', height=12)
         
@@ -255,14 +262,10 @@ class ToneSphereStudioGUI:
                        foreground=self.colors['accent_primary'],
                        font=('Segoe UI', 11, 'bold'))
         
+        widths = {'ID': 50, 'Name': 340, 'Dir': 70, 'Ch': 50, 'Backend': 170, 'Latency': 90}
         for col in columns:
             self.devices_tree.heading(col, text=col)
-            if col == 'Name':
-                self.devices_tree.column(col, width=300)
-            elif col == 'Type':
-                self.devices_tree.column(col, width=150)
-            else:
-                self.devices_tree.column(col, width=80)
+            self.devices_tree.column(col, width=widths.get(col, 80))
         
         # Scrollbars
         devices_scrollbar_y = ttk.Scrollbar(devices_frame, orient=tk.VERTICAL, 
@@ -697,11 +700,11 @@ class ToneSphereStudioGUI:
             for device in devices:
                 self.devices_tree.insert('', 'end', values=(
                     device['id'],
-                    device['name'][:30] + '...' if len(device['name']) > 30 else device['name'],
-                    device['type'],
+                    device['name'][:40] + '...' if len(device['name']) > 40 else device['name'],
+                    device['direction'],
                     device['channels'],
-                    '✓' if device['is_asio'] else '✗',
-                    f"{device['latency_ms']:.1f}ms"
+                    device['host_api'],
+                    f"{device['latency_ms']:.1f} ms"
                 ))
                 device_options.append(f"{device['id']}: {device['name']}")
             
@@ -1201,88 +1204,173 @@ class ToneSphereStudioGUI:
             self.refresh_active_routes()
             self.refresh_routing_display()
 
-    def refresh_devices(self):
-        """Refresh device list to detect newly launched applications"""
+    def create_monitor_patch(self):
+        """
+        Patch default input to default output — plug in and hear yourself.
+
+        Created muted, and the user is told why: on a laptop the defaults are the built-in
+        mic and the built-in speakers, and that pair unmuted is an acoustic feedback loop.
+        """
         if not self.engine:
-            messagebox.showwarning("Engine Not Running", "Please start the engine first")
+            self.log_message("Start the engine first", "warning")
             return
-        
+
+        success, message = self.engine.create_monitor_patch(muted=True)
+
+        if not success:
+            self.log_message(f"Could not create monitor patch: {message}", "error")
+            return
+
+        self.log_message(f"Monitor patch: {message}", "success")
+        self.refresh_devices()
+        self.refresh_active_routes()
+
+        if messagebox.askyesno(
+            "Unmute monitoring?",
+            f"Patched {message}\n\n"
+            "It is muted for now. If your input is a microphone and your output is "
+            "speakers, unmuting will cause feedback.\n\n"
+            "Unmute now?",
+        ):
+            source_id = self.engine.default_input_id()
+            dest_id = self.engine.default_output_id()
+            self.engine.set_routing_mute(source_id, dest_id, False)
+            self.log_message("Monitoring unmuted", "success")
+
+    def rescan_devices(self):
+        """
+        Re-enumerate hardware, then redraw.
+
+        This used to be a second method also named `refresh_devices`, which silently
+        overrode the one above — so the better implementation was dead code. It also
+        opened a modal dialog on every refresh, which is both needless interruption and a
+        hang when the app is driven without a user to click it. Results go to the log.
+        """
+        if not self.engine:
+            self.log_message("Start the engine first", "warning")
+            return
+
         try:
-            self.log_message("🔄 Refreshing device list...", "info")
-            success = self.engine.refresh_devices()
-            
-            if success:
-                # Update device list display
-                devices = self.engine.get_devices()
-                self.devices_tree.delete(*self.devices_tree.get_children())
-                
-                for device in devices:
-                    self.devices_tree.insert('', 'end', values=(
-                        device['id'],
-                        device['name'],
-                        device['type'],
-                        device['channels'],
-                        '✓' if device['is_asio'] else '✗',
-                        f"{device['latency_ms']:.1f}ms"
-                    ))
-                
-                self.log_message(f"✓ Device list refreshed: {len(devices)} devices found", "success")
-                messagebox.showinfo("Devices Refreshed", 
-                                  f"Device list updated!\n{len(devices)} devices detected.")
+            self.log_message("Rescanning devices...", "info")
+
+            if self.engine.refresh_devices():
+                self.refresh_devices()
             else:
-                self.log_message("✗ Failed to refresh devices", "error")
-                messagebox.showerror("Refresh Failed", "Could not refresh device list")
-                
+                self.log_message("Device rescan failed — see the log for details", "error")
+
         except Exception as e:
-            self.log_message(f"❌ Error refreshing devices: {e}", "error")
-            messagebox.showerror("Error", f"Failed to refresh devices: {e}")
-    
+            self.log_message(f"Error rescanning devices: {e}", "error")
+
+
     def update_status(self):
-        """Update status information"""
-        if self.engine:
-            if self.engine.is_running:
-                self.status_label.configure(text="Engine: Running", 
-                                          fg=self.colors['success'])
-                
-                # Update performance stats
-                stats = self.engine.get_performance_stats()
-                self.performance_label.configure(text=format_performance_summary(stats))
-                
-                # Update network client count
-                clients = self.engine.get_network_clients()
-                self.client_count_label.configure(text=f"Clients: {len(clients)}")
-            else:
-                self.status_label.configure(text="Engine: Stopped",
-                                          fg=self.colors['text_secondary'])
-        else:
+        """
+        Reflect the engine's real state.
+
+        Three states, not two: 'idle' means started but with nothing patched, which used to
+        display as "Engine: Stopped" while the button read STOP ENGINE. Statistics are only
+        shown when streams are actually open, because there is nothing to measure otherwise.
+        """
+        if not self.engine:
             self.status_label.configure(text="Engine: Not Initialized",
-                                      fg=self.colors['error'])
+                                        fg=self.colors['error'])
+            return
+
+        state = self.engine.state
+
+        if state == 'running':
+            self.status_label.configure(text="Engine: Running", fg=self.colors['success'])
+            self.performance_label.configure(
+                text=format_performance_summary(self.engine.get_performance_stats())
+            )
+            clients = self.engine.get_network_clients()
+            self.client_count_label.configure(text=f"Clients: {len(clients)}")
+
+        elif state == 'degraded':
+            # Running, but at least one device would not open, so some routes are silent.
+            stats = self.engine.get_performance_stats()
+            failed = stats.get('failed_streams') or {}
+            self.status_label.configure(
+                text=f"Engine: Degraded — {len(failed)} device(s) failed",
+                fg=self.colors['error'],
+            )
+            self.performance_label.configure(text=format_performance_summary(stats))
+
+        elif state == 'idle':
+            self.status_label.configure(text="Engine: Idle — nothing patched",
+                                        fg=self.colors['warning'])
+            self.performance_label.configure(
+                text="Patch an input to an output to start audio"
+            )
+
+        else:
+            self.status_label.configure(text="Engine: Stopped",
+                                        fg=self.colors['text_secondary'])
+            self.performance_label.configure(text="CPU: --  |  Latency: --")
     
     def start_updates(self):
-        """Start update thread"""
-        def update_loop():
-            while True:
-                try:
-                    self.root.after(0, self.update_status)
-                    time.sleep(1.0)
-                except:
-                    break
-        
-        self.update_thread = threading.Thread(target=update_loop, daemon=True)
-        self.update_thread.start()
+        """
+        Schedule the status refresh on Tk's own event loop.
+
+        This used to run a background thread calling `self.root.after(...)`. Tk is not
+        thread-safe and `after` is not safe to call from another thread — it deadlocked the
+        interpreter when the main thread was busy opening an audio device. `after` calling
+        itself keeps everything on the main thread, which is the only supported way.
+        """
+        def tick():
+            try:
+                self.update_status()
+            except Exception as e:
+                logger.debug(f"Status update failed: {e}")
+            finally:
+                # Reschedule even after an error, or the UI freezes on one bad read.
+                self._update_job = self.root.after(1000, tick)
+
+        self._update_job = self.root.after(1000, tick)
+
+    def stop_updates(self):
+        job = getattr(self, '_update_job', None)
+        if job is not None:
+            try:
+                self.root.after_cancel(job)
+            except Exception:
+                pass
+            self._update_job = None
     
     def show_about(self):
-        """Show about dialog"""
-        messagebox.showinfo("About ToneSphere Studio", 
-                          "ToneSphere Studio v1.0\n\n"
-                          "Professional Audio Routing Engine\n"
-                          "Inspired by VoiceMeeter Potato\n\n"
-                          "Features:\n"
-                          "• Low-latency ASIO support\n"
-                          "• Virtual audio devices\n"
-                          "• Network audio streaming\n"
-                          "• Professional routing matrix\n"
-                          "• Real-time audio effects")
+        """
+        Show version and real capabilities.
+
+        The previous text claimed v1.0 with ASIO support, virtual audio devices, network
+        streaming and real-time effects. None of it was true. This reports what the engine
+        is actually doing right now.
+        """
+        from tonesphere import __version__
+
+        lines = [f"ToneSphere {__version__}", "Audio routing and mixing", ""]
+
+        if self.engine:
+            info = self.engine.get_driver_info()
+            stats = self.engine.get_performance_stats()
+
+            lines += [
+                f"Backend:  {info.get('active_driver') or 'not selected'}",
+                f"Exclusive mode: {info.get('exclusive_mode')}",
+                f"Buffer:   {self.engine.buffer_size} frames @ {self.engine.sample_rate} Hz",
+                f"Latency:  {format_measurement(stats.get('measured_latency_ms'), ' ms')} measured"
+                f" / {format_measurement(stats.get('nominal_latency_ms'), ' ms')} nominal",
+                f"Dropouts: {stats.get('xruns', 0)}",
+                "",
+            ]
+            if not info.get('asio_available'):
+                lines.append("ASIO is not in this PortAudio build.")
+        else:
+            lines.append("Engine not started.")
+
+        lines += ["", "Mix buses are in-process only and cannot be",
+                  "selected from other applications. See the",
+                  "Roadmap in README.md."]
+
+        messagebox.showinfo("About ToneSphere", "\n".join(lines))
     
     def run(self):
         """Run the GUI"""
