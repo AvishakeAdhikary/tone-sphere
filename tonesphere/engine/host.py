@@ -36,6 +36,7 @@ from tonesphere.engine.devices import (
     AudioBackendUnavailable, DeviceInfo, HostApi, enumerate_devices, find_device,
 )
 from tonesphere.engine.dsp import ChannelStrip, DriftResampler, Limiter, Panner
+from tonesphere.engine.effects import InsertChain
 from tonesphere.engine.graph import (
     Connection, GraphHolder, NodeId, RoutingGraph, bus_node, device_node,
 )
@@ -213,6 +214,7 @@ class _DeviceStream:
         '_mix', '_source_scratch', '_channel_scratch', '_gain_ramp', '_prev_state',
         '_limiter', '_resample_in',
         'input_strip', 'output_strip', '_capture_scratch',
+        'input_inserts', 'output_inserts',
         'xruns', 'callback_count', 'callback_errors', 'drift_corrections',
         'error', 'used_exclusive',
     )
@@ -272,6 +274,21 @@ class _DeviceStream:
 
         if config.output_channels:
             self.output_strip = ChannelStrip(config.output_channels, block)
+
+        # Insert chains: high-pass, EQ, dynamics, VST3 plugins, delay. Created empty and
+        # skipped entirely until something is enabled, so an untouched channel costs
+        # nothing beyond a boolean check.
+        self.input_inserts: Optional[InsertChain] = None
+        self.output_inserts: Optional[InsertChain] = None
+
+        if config.input_channels:
+            self.input_inserts = InsertChain(
+                config.samplerate, block, config.input_channels
+            )
+        if config.output_channels:
+            self.output_inserts = InsertChain(
+                config.samplerate, block, config.output_channels
+            )
 
         self.xruns = 0
         self.callback_count = 0
@@ -766,6 +783,28 @@ class AudioHost:
             return (None, None)
         return (stream.input_strip, stream.output_strip)
 
+    def inserts_for(self, device_key: str, is_input: bool) -> Optional[InsertChain]:
+        """The insert chain on one side of a device, or None if it has no stream."""
+        stream = self._streams.get(device_key)
+        if stream is None:
+            return None
+        return stream.input_inserts if is_input else stream.output_inserts
+
+    def total_plugin_latency_ms(self) -> float:
+        """
+        Latency the loaded plugins add, on top of the driver's.
+
+        Must be included in what we report: a look-ahead limiter adds several milliseconds
+        by itself, and omitting it would make the latency figure wrong in exactly the
+        direction that flatters us.
+        """
+        samples = 0
+        for stream in self._streams.values():
+            for chain in (stream.input_inserts, stream.output_inserts):
+                if chain is not None:
+                    samples += chain.latency_samples
+        return samples / self.samplerate * 1000.0 if samples else 0.0
+
     def failed_streams(self) -> Dict[str, str]:
         """Device key -> why its stream is not carrying audio."""
         return {
@@ -892,12 +931,26 @@ class AudioHost:
         """
         block = indata
         strip = stream.input_strip
+        inserts = stream.input_inserts
 
-        if strip is not None and not strip.is_transparent():
+        needs_work = (
+            (strip is not None and not strip.is_transparent())
+            or (inserts is not None and not inserts.is_transparent)
+        )
+
+        if needs_work:
             frames = indata.shape[0]
             scratch = stream._capture_scratch[:frames]
             scratch[:] = indata
-            block = strip.process(scratch, frames)
+
+            if strip is not None:
+                strip.process(scratch, frames)
+            if inserts is not None:
+                # Channel inserts run before the split, so every destination receives the
+                # same processed signal — which is what "insert on the channel" means.
+                inserts.process(scratch, frames)
+
+            block = scratch
 
         for ring in self._routes.sinks_for(source_key):
             ring.write(block)
@@ -990,8 +1043,11 @@ class AudioHost:
                 self._render_route(stream, ring, key, source_node, 0.0,
                                    mix, out_channels, frames, None)
 
-        # Output trim and mute, then the limiter. The limiter goes last so it protects the
-        # converter from whatever the trim did.
+        # Bus inserts, then output trim, then the limiter. The limiter is unconditionally
+        # last so it protects the converter from whatever anything before it did.
+        if stream.output_inserts is not None and not stream.output_inserts.is_transparent:
+            stream.output_inserts.process(mix, frames)
+
         if stream.output_strip is not None and not stream.output_strip.is_transparent():
             stream.output_strip.process(mix, frames)
 
@@ -1320,9 +1376,14 @@ class AudioHost:
         stats.input_latency_ms = input_latency
         stats.output_latency_ms = output_latency
 
-        # Round trip is what a player feels: in, through us, and back out.
+        # Round trip is what a player feels: in, through us, and back out — including
+        # whatever the loaded plugins add, which can be several milliseconds.
         if input_latency is not None or output_latency is not None:
-            stats.measured_latency_ms = (input_latency or 0.0) + (output_latency or 0.0)
+            stats.measured_latency_ms = (
+                (input_latency or 0.0)
+                + (output_latency or 0.0)
+                + self.total_plugin_latency_ms()
+            )
 
         if cpu_loads:
             stats.cpu_load = max(cpu_loads) * 100.0

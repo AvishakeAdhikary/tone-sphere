@@ -26,7 +26,6 @@ import numpy as np
 
 from tonesphere.core.channel_control import ChannelControlManager
 from tonesphere.core.models import AudioDevice, DeviceType
-from tonesphere.core.processor import AudioProcessor
 from tonesphere.core.routing import AudioRoutingMatrix
 from tonesphere.engine import (
     AudioBackendUnavailable, AudioHost, Connection, DeviceInfo, HostApi, RoutingGraph,
@@ -69,7 +68,6 @@ class AudioEngine:
         # they were simply never connected to any audio.
         self.routing_matrix = AudioRoutingMatrix()
         self.channel_control_manager = ChannelControlManager()
-        self.processor = AudioProcessor(sample_rate, buffer_size)
         self.network_router = NetworkAudioRouter(quality=NetworkQuality.HIGH)
 
         # Id bookkeeping.
@@ -766,6 +764,68 @@ class AudioEngine:
         self.channel_control_manager.set_device_master_mute(device_id, muted)
         self.apply_channel_controls(device_id)
 
+    # --- Inserts (EQ, dynamics, plugins) ---
+
+    def get_inserts(self, device_id: int, is_input: bool = True):
+        """
+        The insert chain for a device, or None if it has no open stream.
+
+        None is normal while stopped. Inserts belong to a stream, so they exist only once
+        that stream is open; configuration should be reapplied after a restart.
+        """
+        node = self._node_for(device_id)
+        if node is None or node.kind != 'device':
+            return None
+        return self.host.inserts_for(node.ref, is_input)
+
+    def load_plugin(self, device_id: int, path: str, is_input: bool = True) -> Tuple[bool, str]:
+        """
+        Load a VST3/AU plugin onto a device's insert chain.
+
+        This is the feature the project exists for: rather than paying for a separate
+        router to get a guitar into Guitar Rig, load Guitar Rig here and monitor through it
+        on the same low-latency path.
+        """
+        inserts = self.get_inserts(device_id, is_input)
+        if inserts is None:
+            return False, "Device has no open stream — start the engine and patch it first"
+
+        try:
+            if inserts.plugins is None:
+                inserts.enable_plugins()
+            index = inserts.plugins.load(path)
+        except Exception as e:
+            return False, str(e)
+
+        latency = self.host.total_plugin_latency_ms()
+        note = f" (+{latency:.1f} ms plugin latency)" if latency > 0.05 else ""
+        return True, f"Loaded {inserts.plugins.names[index]}{note}"
+
+    def list_plugins(self, device_id: int, is_input: bool = True) -> List[Dict[str, Any]]:
+        inserts = self.get_inserts(device_id, is_input)
+        if inserts is None or inserts.plugins is None:
+            return []
+        return inserts.plugins.describe()
+
+    def remove_plugin(self, device_id: int, index: int, is_input: bool = True) -> bool:
+        inserts = self.get_inserts(device_id, is_input)
+        if inserts is None or inserts.plugins is None:
+            return False
+        inserts.plugins.remove(index)
+        return True
+
+    @staticmethod
+    def discover_plugins(paths: Optional[List[str]] = None) -> List[str]:
+        from tonesphere.engine.effects import PluginChain
+
+        return PluginChain.discover(paths)
+
+    @staticmethod
+    def plugin_hosting_available() -> bool:
+        from tonesphere.engine.effects import PluginChain
+
+        return PluginChain.is_available()
+
     # --- Route parameters ---
 
     def set_routing_pan(self, source_id: int, destination_id: int, pan: float):
@@ -939,7 +999,6 @@ class AudioEngine:
 
             self.sample_rate = sample_rate
             self.host.samplerate = sample_rate
-            self.processor.sample_rate = sample_rate
 
             if was_running:
                 self.start_engine()
@@ -956,7 +1015,6 @@ class AudioEngine:
 
             self.buffer_size = buffer_size
             self.host.blocksize = buffer_size
-            self.processor.buffer_size = buffer_size
 
             if was_running:
                 self.start_engine()

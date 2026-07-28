@@ -19,6 +19,7 @@ dependencies = [
     "pystray>=0.19.5",
     "pillow>=10.0.0",
     "pyside6>=6.11.1",
+    "pedalboard>=0.9.24",
 ]
 
 [dependency-groups]
