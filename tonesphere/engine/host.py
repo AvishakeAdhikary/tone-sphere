@@ -35,7 +35,10 @@ import numpy as np
 from tonesphere.engine.devices import (
     AudioBackendUnavailable, DeviceInfo, HostApi, enumerate_devices, find_device,
 )
-from tonesphere.engine.graph import GraphHolder, NodeId, RoutingGraph, bus_node, device_node
+from tonesphere.engine.dsp import ChannelStrip, DriftResampler, Limiter, Panner
+from tonesphere.engine.graph import (
+    Connection, GraphHolder, NodeId, RoutingGraph, bus_node, device_node,
+)
 from tonesphere.engine.meters import MeterRegistry
 from tonesphere.engine.ringbuffer import AudioRingBuffer
 from tonesphere.utils.logger import get_logger
@@ -46,9 +49,17 @@ logger = get_logger(__name__)
 # jitter between two device clocks while adding only a few milliseconds.
 RING_BLOCKS = 4
 
-# Drift correction thresholds, in blocks of buffered audio. Above the high mark the
-# source clock is outrunning the sink and latency is growing, so we drop.
+# Drift correction, in blocks of buffered audio.
+#
+# The ring is steered towards TARGET. Above HIGH we give up on resampling and discard,
+# which only happens on a gross desync such as a device stalling and resuming.
+DRIFT_TARGET_BLOCKS = 1.5
 DRIFT_HIGH_BLOCKS = 3.0
+
+# How aggressively fill error is turned into a resampling ratio. Low on purpose: the
+# correction must stay well inside the resampler's clamp so it can never become audible
+# pitch movement, and drift is measured in parts per million, not percent.
+DRIFT_CORRECTION_STRENGTH = 0.0005
 
 # Gain ramp length as a fraction of a block. A gain step applied instantly produces a
 # click; ramping across the block makes it inaudible.
@@ -71,10 +82,22 @@ class _RouteTable:
     mid-resize.
     """
 
-    __slots__ = ('rings', 'by_source')
+    __slots__ = ('rings', 'by_source', 'panners', 'resamplers')
 
-    def __init__(self, rings: Dict[Tuple[str, str], AudioRingBuffer]):
+    def __init__(
+        self,
+        rings: Dict[Tuple[str, str], AudioRingBuffer],
+        panners: Optional[Dict[Tuple[str, str], Panner]] = None,
+        resamplers: Optional[Dict[Tuple[str, str], DriftResampler]] = None,
+    ):
         self.rings = rings
+
+        # Per-route processing state lives here alongside the ring, rather than on the
+        # destination stream. Pan and drift are properties of a route, and keying them by
+        # route means any renderer finds them — including a bus destination, which has no
+        # device stream to hang them off.
+        self.panners = panners if panners is not None else {}
+        self.resamplers = resamplers if resamplers is not None else {}
 
         # Producer side: every ring a given source must fan its block out to.
         by_source: Dict[str, List[AudioRingBuffer]] = {}
@@ -90,6 +113,12 @@ class _RouteTable:
 
     def sinks_for(self, source_key: str) -> Tuple[AudioRingBuffer, ...]:
         return self.by_source.get(source_key, ())
+
+    def panner_for(self, key: Tuple[str, str]) -> Optional[Panner]:
+        return self.panners.get(key)
+
+    def resampler_for(self, key: Tuple[str, str]) -> Optional[DriftResampler]:
+        return self.resamplers.get(key)
 
     def statistics(self) -> Dict[str, dict]:
         return {
@@ -182,6 +211,8 @@ class _DeviceStream:
     __slots__ = (
         'config', 'node', 'stream', 'output_meter_key', 'input_meter_key',
         '_mix', '_source_scratch', '_channel_scratch', '_gain_ramp', '_prev_state',
+        '_limiter', '_resample_in',
+        'input_strip', 'output_strip', '_capture_scratch',
         'xruns', 'callback_count', 'callback_errors', 'drift_corrections',
         'error', 'used_exclusive',
     )
@@ -217,6 +248,30 @@ class _DeviceStream:
         # so a route that has just been muted or unrouted can still be rendered for one
         # final block, ramping down to zero instead of cutting off with a click.
         self._prev_state: Dict[Tuple[str, str], Tuple[NodeId, float]] = {}
+
+        # Catches summing overs before they reach the device's integer converter, where
+        # they would clip hard rather than gracefully.
+        self._limiter: Optional[Limiter] = None
+        if config.output_channels:
+            self._limiter = Limiter(config.samplerate, block)
+
+        # Oversized so a ratio above 1.0, which needs more input than output, still fits.
+        self._resample_in = np.zeros((block * 2, 8), dtype=np.float32)
+
+        # Per-device trim, mute, pan and polarity. Fed from `core.channel_control`, which
+        # held exactly this state and was never connected to any audio.
+        self.input_strip: Optional[ChannelStrip] = None
+        self.output_strip: Optional[ChannelStrip] = None
+        self._capture_scratch: Optional[np.ndarray] = None
+
+        if config.input_channels:
+            self.input_strip = ChannelStrip(config.input_channels, block)
+            # PortAudio's input buffer must not be written to, so processing happens in
+            # our own memory.
+            self._capture_scratch = np.zeros((block, config.input_channels), dtype=np.float32)
+
+        if config.output_channels:
+            self.output_strip = ChannelStrip(config.output_channels, block)
 
         self.xruns = 0
         self.callback_count = 0
@@ -358,9 +413,11 @@ class AudioHost:
         graph does not interrupt audio already flowing.
         """
         graph = self.graph_holder.current()
-        existing = self._routes.rings
+        existing = self._routes
 
         rings: Dict[Tuple[str, str], AudioRingBuffer] = {}
+        panners: Dict[Tuple[str, str], Panner] = {}
+        resamplers: Dict[Tuple[str, str], DriftResampler] = {}
 
         for connection in graph.connections:
             source_key = str(connection.source)
@@ -370,8 +427,10 @@ class AudioHost:
                 continue
 
             key = (source_key, dest_key)
-            previous = existing.get(key)
 
+            # Carry unchanged routes across so an edit elsewhere in the graph does not
+            # interrupt audio already flowing, or reset a smoothed pan mid-move.
+            previous = existing.rings.get(key)
             if previous is not None and previous.channels == channels:
                 rings[key] = previous
             else:
@@ -379,8 +438,32 @@ class AudioHost:
                     capacity_frames=self.blocksize * RING_BLOCKS, channels=channels
                 )
 
-        # Single reference swap: a callback sees either the old table or the new one.
-        self._routes = _RouteTable(rings)
+            panner = existing.panners.get(key) or Panner(self.blocksize)
+            panner.set_pan(connection.pan)
+            panners[key] = panner
+
+            # Drift correction applies only between two *different* hardware devices,
+            # which are the only things with independent clocks that can disagree.
+            #
+            # Not the same device in both directions: a duplex stream has one clock, so
+            # there is nothing to correct. Not a bus at either end either: a bus has no
+            # clock of its own, it is paced by whoever writes it. Resampling in those
+            # cases adds interpolation error and a fractional offset to a signal that was
+            # already perfectly aligned.
+            crosses_clocks = (
+                connection.source.kind == 'device'
+                and connection.dest.kind == 'device'
+                and connection.source.ref != connection.dest.ref
+            )
+            if crosses_clocks:
+                resamplers[key] = (
+                    existing.resamplers.get(key) or DriftResampler(channels, self.blocksize)
+                )
+
+        # Single reference swap: a callback sees either the old table or the new one,
+        # never a dict mid-rebuild. Everything above happens on the control thread, so
+        # the callback never allocates.
+        self._routes = _RouteTable(rings, panners, resamplers)
 
     # --- Configuration ---
 
@@ -670,6 +753,19 @@ class AudioHost:
             **common,
         )
 
+    def strips_for(self, device_key: str) -> Tuple[Optional[ChannelStrip], Optional[ChannelStrip]]:
+        """
+        The (input, output) strips for a device, or (None, None) if it has no stream.
+
+        Callers push control-side state in through these. Both may be None while the host
+        is stopped, which is normal — settings are stored on the control side and applied
+        when streams are next opened.
+        """
+        stream = self._streams.get(device_key)
+        if stream is None:
+            return (None, None)
+        return (stream.input_strip, stream.output_strip)
+
     def failed_streams(self) -> Dict[str, str]:
         """Device key -> why its stream is not carrying audio."""
         return {
@@ -785,17 +881,31 @@ class AudioHost:
 
     def _publish_capture(self, source_key: str, indata: np.ndarray, stream: _DeviceStream):
         """
-        Fan a captured block out to every route leaving this device, and meter it.
+        Apply the input strip, fan the block out to every route leaving this device, meter.
 
         Writing once per consumer is what makes fan-out correct: each destination reads a
         complete copy instead of racing the others for a shared one.
-        """
-        for ring in self._routes.sinks_for(source_key):
-            ring.write(indata)
 
+        Trim, mute and polarity are applied once here rather than per route, because they
+        describe the device rather than any particular destination — and doing it once is
+        also cheaper.
+        """
+        block = indata
+        strip = stream.input_strip
+
+        if strip is not None and not strip.is_transparent():
+            frames = indata.shape[0]
+            scratch = stream._capture_scratch[:frames]
+            scratch[:] = indata
+            block = strip.process(scratch, frames)
+
+        for ring in self._routes.sinks_for(source_key):
+            ring.write(block)
+
+        # Meter post-trim, so the meter shows what is actually being sent onward.
         bank = self.meters.get(stream.input_meter_key)
         if bank is not None:
-            bank.measure(indata)
+            bank.measure(block)
 
     def _make_output_callback(self, stream: _DeviceStream) -> Callable:
         def callback(outdata, frames, time_info, status):
@@ -858,7 +968,7 @@ class AudioHost:
                 gain = 0.0
 
             self._render_route(stream, ring, key, connection.source, gain,
-                               mix, out_channels, frames)
+                               mix, out_channels, frames, connection)
 
         # Routes the graph no longer has, but which were audible last block. Render one
         # more block ramping to silence, then forget them.
@@ -878,7 +988,15 @@ class AudioHost:
                     continue
 
                 self._render_route(stream, ring, key, source_node, 0.0,
-                                   mix, out_channels, frames)
+                                   mix, out_channels, frames, None)
+
+        # Output trim and mute, then the limiter. The limiter goes last so it protects the
+        # converter from whatever the trim did.
+        if stream.output_strip is not None and not stream.output_strip.is_transparent():
+            stream.output_strip.process(mix, frames)
+
+        if stream._limiter is not None:
+            stream._limiter.process(mix, frames)
 
         outdata[:] = mix
 
@@ -896,17 +1014,16 @@ class AudioHost:
         mix: np.ndarray,
         out_channels: int,
         frames: int,
+        connection: Optional[Connection],
     ):
         """
-        Add one route's contribution to the mix, ramping if its gain changed.
+        Add one route's contribution to the mix.
 
         Always consumes from the ring, even at zero gain, so a silent route cannot
-        accumulate a backlog that later shows up as drift.
+        accumulate a backlog that later shows up as spurious drift.
         """
-        source = stream.source_buffer(ring.channels)[:frames]
-        ring.read_into(source)
-
-        self._drift_correct(ring, stream)
+        self._drift_correct(ring, stream, key)
+        source = self._read_source(stream, ring, key, frames)
 
         state = stream._prev_state.get(key)
         previous = state[1] if state is not None else gain
@@ -915,7 +1032,12 @@ class AudioHost:
             stream._prev_state[key] = (source_node, 0.0)
             return
 
-        mapped = self._map_channels(stream, source, out_channels, frames)
+        if connection is not None and connection.invert:
+            # Polarity flip. Applied before summing so it can cancel a correlated source,
+            # which is the whole point of having it.
+            source = source * -1.0
+
+        mapped = self._map_channels(stream, source, out_channels, frames, connection, key)
 
         if previous == gain:
             if gain == 1.0:
@@ -923,40 +1045,84 @@ class AudioHost:
             else:
                 mix += mapped * gain
         else:
-            # Linear ramp across the block: inaudible, and cheap enough that we do it on
-            # every change rather than trying to detect which ones matter.
+            # Linear ramp across the block: inaudible, and cheap enough to do on every
+            # change rather than trying to work out which ones matter.
             ramp = stream._gain_ramp[:frames]
             mix += mapped * (previous + (gain - previous) * ramp)
 
         stream._prev_state[key] = (source_node, gain)
 
-    def _drift_correct(self, ring: AudioRingBuffer, stream: _DeviceStream):
+    def _drift_correct(
+        self, ring: AudioRingBuffer, stream: _DeviceStream,
+        key: Optional[Tuple[str, str]] = None,
+    ):
         """
-        Keep a cross-device ring from growing without bound.
+        Keep a cross-device ring from drifting away from its target fill level.
 
-        Two devices at a nominal 48 kHz do not agree exactly. If the source runs faster,
-        its ring fills and latency climbs until the buffer overflows. Dropping the excess
-        costs one small glitch and bounds the latency. Phase 2 replaces this with
-        adaptive resampling, which corrects drift inaudibly.
+        Two devices at a nominal 48 kHz do not agree exactly, so a cross-device route's
+        buffer creeps in one direction: latency grows until it overflows, or shrinks until
+        it starves. Dropping or repeating a block fixes the level but costs an audible
+        glitch every time, and at typical drift rates that is every few seconds.
+
+        Instead the ring's fill level steers a resampling ratio. The correction is a
+        fraction of a percent and clamped by `DriftResampler.MAX_RATIO_DEVIATION`, which is
+        far below the threshold of audible pitch change. Discarding only remains as a
+        backstop for a gross desync, such as a device that stalled and came back.
         """
-        high_water = int(stream.config.blocksize * DRIFT_HIGH_BLOCKS)
-        if ring.available > high_water:
-            ring.discard(ring.available - stream.config.blocksize)
+        blocksize = stream.config.blocksize
+        target = blocksize * DRIFT_TARGET_BLOCKS
+        available = ring.available
+
+        resampler = self._routes.resampler_for(key) if key is not None else None
+        if resampler is not None:
+            # Fill above target means the source is ahead: read slightly faster.
+            error = (available - target) / max(target, 1.0)
+            resampler.set_ratio(1.0 + error * DRIFT_CORRECTION_STRENGTH)
+
+        hard_limit = int(blocksize * DRIFT_HIGH_BLOCKS)
+        if available > hard_limit:
+            # Beyond what resampling can pull back in reasonable time. Drop, and count it
+            # so a persistently bad configuration is visible rather than merely audible.
+            ring.discard(available - blocksize)
             stream.drift_corrections += 1
 
     def _map_channels(
-        self, stream: _DeviceStream, source: np.ndarray, out_channels: int, frames: int
+        self,
+        stream: _DeviceStream,
+        source: np.ndarray,
+        out_channels: int,
+        frames: int,
+        connection: Optional[Connection] = None,
+        key: Optional[Tuple[str, str]] = None,
     ) -> np.ndarray:
         """
-        Fit a source's channel count to the destination's.
+        Fit a source's channel count to the destination's, applying pan where it applies.
 
-        Mono to stereo duplicates; stereo to mono averages rather than dropping a
-        channel, so a hard-panned guitar does not vanish. Equal counts pass through with
-        no copy at all.
+        Mono into stereo is a pan, not a duplication: with a constant-power law a centred
+        mono source keeps the same perceived loudness as a hard-panned one. Stereo to mono
+        averages rather than taking the left channel, so a hard-right guitar does not
+        vanish. Equal counts with no pan pass through with no copy at all.
         """
         in_channels = source.shape[1]
+        panner = self._panner_for(key, connection)
+
+        if in_channels == 1 and out_channels == 2:
+            # Always panned, even at centre. Placing a mono source in a stereo field is
+            # what the pan law is *for*: centred means -3 dB per side, not unity per side.
+            # Duplicating at unity would make a centred source 3 dB louder than a panned
+            # one, so a pan sweep would audibly dip at the edges.
+            if panner is not None:
+                return panner.process_mono_to_stereo(source, frames)
+            scratch = stream._channel_scratch[:frames, :2]
+            scratch[:] = source[:, 0:1]
+            return scratch
 
         if in_channels == out_channels:
+            # Equal widths: centre really is a no-op, so skip the copy entirely.
+            if panner is not None and out_channels == 2 and not panner.is_centred():
+                scratch = stream._channel_scratch[:frames, :2]
+                scratch[:] = source[:frames]
+                return panner.process_stereo(scratch, frames)
             return source
 
         scratch = stream._channel_scratch[:frames, :out_channels]
@@ -972,6 +1138,69 @@ class AudioHost:
             scratch[:, in_channels:] = 0.0
 
         return scratch
+
+    def _read_source(
+        self, stream: _DeviceStream, ring: AudioRingBuffer,
+        key: Tuple[str, str], frames: int,
+    ) -> np.ndarray:
+        """
+        Pull one block from a route's ring, resampling it if the route crosses clocks.
+
+        Without a resampler this is a straight read. With one, we read the slightly
+        different number of input frames the current ratio calls for and interpolate,
+        which is how drift is absorbed continuously instead of in audible jumps.
+        """
+        channels = ring.channels
+        out = stream.source_buffer(channels)[:frames]
+
+        resampler = self._routes.resampler_for(key)
+        if resampler is None:
+            ring.read_into(out)
+            return out
+
+        needed = min(resampler.input_frames_needed(frames), stream._resample_in.shape[0])
+        if channels > stream._resample_in.shape[1]:
+            stream._resample_in = np.zeros(
+                (stream.config.blocksize * 2, channels), dtype=np.float32
+            )
+
+        source = stream._resample_in[:needed, :channels]
+        ring.read_into(source)
+
+        consumed = resampler.process(source, out, frames)
+
+        # Hand back whatever the interpolator did not use, so no sample is lost or
+        # duplicated across block boundaries.
+        surplus = needed - consumed
+        if surplus > 0:
+            ring.unread(surplus)
+
+        return out
+
+    def _panner_for(
+        self,
+        key: Optional[Tuple[str, str]],
+        connection: Optional[Connection],
+    ) -> Optional[Panner]:
+        """
+        The panner for a route, with its position brought up to date.
+
+        Panners are created on the control thread in `_rebuild_routes`; a lookup miss here
+        means the route is brand new, and this block passes through unpanned rather than
+        the callback allocating one. Whether a centred panner can be skipped depends on
+        the channel mapping, so that decision belongs to the caller.
+        """
+        if key is None or connection is None:
+            return None
+
+        panner = self._routes.panner_for(key)
+        if panner is None:
+            return None
+
+        if panner.pan != connection.pan:
+            panner.set_pan(connection.pan)
+
+        return panner
 
     # --- Bus input, for non-realtime producers ---
 

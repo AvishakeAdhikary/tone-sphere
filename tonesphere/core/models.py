@@ -38,9 +38,13 @@ class RoutingConnection:
     source_id: int
     destination_id: int
     state: RoutingState
-    volume: float = 1.0  # 0.0 to 2.0 (0dB = 1.0)
+    volume: float = 1.0   # linear amplitude; 1.0 is unity (0 dB)
     muted: bool = False
     solo: bool = False
+    # Pan and polarity belong to the route rather than the source, because one source can
+    # legitimately sit centre in a headphone mix and hard left in a recording feed.
+    pan: float = 0.0      # -1.0 hard left .. 1.0 hard right
+    inverted: bool = False
 
 @dataclass
 class AudioEffect:

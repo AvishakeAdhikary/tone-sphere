@@ -239,29 +239,42 @@ class UnifiedAudioEngine:
 
     # --- Channel controls ---
 
+    # These forward to AudioEngine rather than reaching into the control manager, so that
+    # every change is pushed into the running audio path. Calling the manager directly
+    # updates state that no sample ever sees.
+
     def get_device_channels(self, device_id: int):
         return self.engine.channel_control_manager.get_device_info(device_id)
 
     def set_channel_volume(self, device_id: int, channel: int, volume: float):
-        self.engine.channel_control_manager.set_device_channel_volume(device_id, channel, volume)
+        self.engine.set_channel_volume(device_id, channel, volume)
 
     def set_channel_mute(self, device_id: int, channel: int, muted: bool):
-        self.engine.channel_control_manager.set_device_channel_mute(device_id, channel, muted)
+        self.engine.set_channel_mute(device_id, channel, muted)
 
     def set_channel_solo(self, device_id: int, channel: int, solo: bool):
-        self.engine.channel_control_manager.set_device_channel_solo(device_id, channel, solo)
+        self.engine.set_channel_solo(device_id, channel, solo)
 
     def set_channel_pan(self, device_id: int, channel: int, pan: float):
-        self.engine.channel_control_manager.set_device_channel_pan(device_id, channel, pan)
+        self.engine.set_channel_pan(device_id, channel, pan)
+
+    def set_channel_inverted(self, device_id: int, channel: int, inverted: bool):
+        self.engine.set_channel_inverted(device_id, channel, inverted)
 
     def swap_channels(self, device_id: int):
-        self.engine.channel_control_manager.swap_device_channels(device_id)
+        self.engine.swap_channels(device_id)
 
     def set_device_master_volume(self, device_id: int, volume: float):
-        self.engine.channel_control_manager.set_device_master_volume(device_id, volume)
+        self.engine.set_device_master_volume(device_id, volume)
 
     def set_device_master_mute(self, device_id: int, muted: bool):
-        self.engine.channel_control_manager.set_device_master_mute(device_id, muted)
+        self.engine.set_device_master_mute(device_id, muted)
+
+    def set_routing_pan(self, source_id: int, destination_id: int, pan: float):
+        self.engine.set_routing_pan(source_id, destination_id, pan)
+
+    def set_routing_invert(self, source_id: int, destination_id: int, invert: bool):
+        self.engine.set_routing_invert(source_id, destination_id, invert)
 
     # --- Properties ---
 

@@ -508,7 +508,12 @@ class TestBusMixing:
         np.testing.assert_allclose(out_a, tone, atol=1e-6)
         np.testing.assert_allclose(out_b, tone, atol=1e-6)
 
-    def test_mono_source_fills_both_output_channels(self):
+    def test_mono_source_reaches_both_output_channels(self):
+        """
+        Placing mono into stereo is a pan, so a centred source arrives at -3 dB per side,
+        not unity per side. Phase 1 duplicated at unity, which made a centred source 3 dB
+        louder than a hard-panned one; Phase 2 applies the constant-power law.
+        """
         host = AudioHost(samplerate=RATE, blocksize=BLOCK)
         host.create_bus('mono', channels=1)
 
@@ -519,8 +524,14 @@ class TestBusMixing:
             out_channels=2,
         )
 
-        np.testing.assert_allclose(out[:, 0], 0.5, atol=1e-6)
-        np.testing.assert_allclose(out[:, 1], 0.5, atol=1e-6)
+        expected = 0.5 / math.sqrt(2.0)
+        np.testing.assert_allclose(out[:, 0], expected, atol=1e-5)
+        np.testing.assert_allclose(out[:, 1], expected, atol=1e-5)
+
+        # Total power matches the mono source, which is the property that makes a pan
+        # sweep sound even across its travel.
+        power = out[0, 0] ** 2 + out[0, 1] ** 2
+        assert float(power) == pytest.approx(0.25, abs=1e-5)
 
     def test_stereo_to_mono_averages_rather_than_dropping(self):
         """

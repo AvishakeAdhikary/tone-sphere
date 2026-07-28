@@ -66,13 +66,18 @@ class Connection:
     """
     One route, with its mix parameters resolved.
 
-    `gain` is linear and already folded together with mute, so the callback multiplies
-    by a single float and never branches on state.
+    `gain` is linear and already folded together with mute, so the callback multiplies by a
+    single float and never branches on state.
+
+    `pan` and `invert` live on the route rather than on the source, because the same source
+    can legitimately sit centre in the headphone mix and hard left in a recording feed.
     """
     source: NodeId
     dest: NodeId
     gain: float = 1.0
     muted: bool = False
+    pan: float = 0.0
+    invert: bool = False
     source_channels: Optional[Tuple[int, ...]] = None
     dest_channels: Optional[Tuple[int, ...]] = None
 
@@ -197,6 +202,18 @@ class RoutingGraph:
             return self
         return self.with_connection(replace(existing, muted=muted))
 
+    def with_pan(self, source: NodeId, dest: NodeId, pan: float) -> "RoutingGraph":
+        existing = self.find(source, dest)
+        if existing is None:
+            return self
+        return self.with_connection(replace(existing, pan=min(max(pan, -1.0), 1.0)))
+
+    def with_invert(self, source: NodeId, dest: NodeId, invert: bool) -> "RoutingGraph":
+        existing = self.find(source, dest)
+        if existing is None:
+            return self
+        return self.with_connection(replace(existing, invert=invert))
+
     def with_solo(self, node: NodeId, soloed: bool) -> "RoutingGraph":
         current = set(self.soloed)
         if soloed:
@@ -253,6 +270,8 @@ class RoutingGraph:
                     'gain': c.gain,
                     'gain_db': round(linear_to_db(c.gain), 2),
                     'muted': c.muted,
+                    'pan': c.pan,
+                    'invert': c.invert,
                 }
                 for c in self.connections
             ],
@@ -270,6 +289,8 @@ class RoutingGraph:
                 dest=parse(item['dest']),
                 gain=float(item.get('gain', 1.0)),
                 muted=bool(item.get('muted', False)),
+                pan=float(item.get('pan', 0.0)),
+                invert=bool(item.get('invert', False)),
             )
             for item in data.get('connections', ())
         )

@@ -85,13 +85,47 @@ class DeviceChannelControl:
         self.master_muted = muted
         logger.debug(f"Device {self.device_id} master muted: {muted}")
     
+    def apply_to_strip(self, strip):
+        """
+        Push this configuration into a realtime `engine.dsp.ChannelStrip`.
+
+        This class is the control-side model: it is what the GUI and REST API edit, and it
+        is convenient but not realtime-safe. The strip is the callback-side counterpart,
+        with preallocated buffers and smoothed gains. Keeping them separate is what lets
+        settings be edited freely on the UI thread without ever blocking or allocating on
+        the audio thread.
+
+        Until this method existed, none of these settings affected audio at all.
+        """
+        any_solo = any(channel.solo for channel in self.channels.values())
+
+        for index in range(self.num_channels):
+            config = self.channels.get(index)
+            if config is None:
+                continue
+
+            # Solo is exclusive: anything not soloed goes silent while any solo is active.
+            silenced = config.muted or (any_solo and not config.solo)
+
+            strip.set_channel_mute(index, silenced)
+            if not silenced:
+                strip.set_channel_gain(index, config.volume)
+            strip.set_channel_pan(index, config.pan)
+            strip.set_channel_inverted(index, config.inverted)
+
+        strip.set_swapped(self.channels_swapped)
+        strip.set_master_gain(0.0 if self.master_muted else self.master_volume)
+
     def process_audio(self, audio_data: np.ndarray) -> np.ndarray:
         """
-        Process audio through channel controls
-        
+        Offline processing, for tests and file rendering.
+
+        NOT for the audio callback: it allocates on every call and steps gain rather than
+        ramping it, which would click. `apply_to_strip` feeds the realtime path.
+
         Args:
             audio_data: Input audio (frames, channels)
-            
+
         Returns:
             Processed audio
         """
@@ -136,14 +170,14 @@ class DeviceChannelControl:
             # Volume
             processed[:, ch_idx] *= ch_config.volume
             
-            # Pan (for stereo output)
+            # Pan, using the same constant-power law as the realtime path so offline and
+            # live rendering agree. The previous version only attenuated the opposite
+            # channel, so a centred source was 3 dB louder than a panned one.
             if self.num_channels == 2 and ch_config.pan != 0.0:
-                if ch_idx == 0:  # Left channel
-                    if ch_config.pan > 0:  # Pan right
-                        processed[:, ch_idx] *= (1.0 - ch_config.pan)
-                elif ch_idx == 1:  # Right channel
-                    if ch_config.pan < 0:  # Pan left
-                        processed[:, ch_idx] *= (1.0 + ch_config.pan)
+                from tonesphere.engine.dsp import pan_gains
+
+                left, right = pan_gains(ch_config.pan)
+                processed[:, ch_idx] *= left if ch_idx == 0 else right
         
         # Master volume
         processed *= self.master_volume

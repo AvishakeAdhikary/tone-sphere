@@ -550,6 +550,8 @@ class AudioEngine:
                 dest=dest,
                 gain=route.volume,
                 muted=route.muted,
+                pan=route.pan,
+                invert=route.inverted,
             ))
 
         soloed = frozenset(
@@ -691,8 +693,100 @@ class AudioEngine:
                 'volume_db': round(linear_to_db(route.volume), 1),
                 'muted': route.muted,
                 'solo': route.solo,
+                'pan': route.pan,
+                'inverted': route.inverted,
             }
         return connections
+
+    # --- Channel controls ---
+
+    def apply_channel_controls(self, device_id: Optional[int] = None):
+        """
+        Push channel-control state into the running audio path.
+
+        Call after any set_channel_* change. Before this existed, `ChannelControlManager`
+        stored volume, mute, solo, pan and polarity for every device and none of it
+        reached a single sample — the UI's faders moved and nothing happened.
+
+        A device with no open stream is skipped rather than treated as an error: the
+        setting is kept on the control side and applied when its stream next opens.
+        """
+        with self._lock:
+            targets = [device_id] if device_id is not None else list(self._id_to_node)
+
+            for target in targets:
+                control = self.channel_control_manager.device_controls.get(target)
+                if control is None:
+                    continue
+
+                node = self._node_for(target)
+                if node is None:
+                    continue
+
+                if node.kind == 'bus':
+                    # Buses have no device strip; their level is the route gain.
+                    continue
+
+                input_strip, output_strip = self.host.strips_for(node.ref)
+                for strip in (input_strip, output_strip):
+                    if strip is not None:
+                        control.apply_to_strip(strip)
+
+    def set_channel_volume(self, device_id: int, channel: int, volume: float):
+        self.channel_control_manager.set_device_channel_volume(device_id, channel, volume)
+        self.apply_channel_controls(device_id)
+
+    def set_channel_mute(self, device_id: int, channel: int, muted: bool):
+        self.channel_control_manager.set_device_channel_mute(device_id, channel, muted)
+        self.apply_channel_controls(device_id)
+
+    def set_channel_solo(self, device_id: int, channel: int, solo: bool):
+        self.channel_control_manager.set_device_channel_solo(device_id, channel, solo)
+        self.apply_channel_controls(device_id)
+
+    def set_channel_pan(self, device_id: int, channel: int, pan: float):
+        self.channel_control_manager.set_device_channel_pan(device_id, channel, pan)
+        self.apply_channel_controls(device_id)
+
+    def set_channel_inverted(self, device_id: int, channel: int, inverted: bool):
+        control = self.channel_control_manager.device_controls.get(device_id)
+        if control is not None:
+            control.set_channel_inverted(channel, inverted)
+            self.apply_channel_controls(device_id)
+
+    def swap_channels(self, device_id: int):
+        self.channel_control_manager.swap_device_channels(device_id)
+        self.apply_channel_controls(device_id)
+
+    def set_device_master_volume(self, device_id: int, volume: float):
+        self.channel_control_manager.set_device_master_volume(device_id, volume)
+        self.apply_channel_controls(device_id)
+
+    def set_device_master_mute(self, device_id: int, muted: bool):
+        self.channel_control_manager.set_device_master_mute(device_id, muted)
+        self.apply_channel_controls(device_id)
+
+    # --- Route parameters ---
+
+    def set_routing_pan(self, source_id: int, destination_id: int, pan: float):
+        """
+        Pan one route. Per route, not per source: the same guitar can sit centre in the
+        headphone mix and hard left in a recording feed.
+        """
+        with self._lock:
+            route = self.routing_matrix.connections.get((source_id, destination_id))
+            if route is None:
+                return
+            route.pan = min(max(pan, -1.0), 1.0)
+            self._publish_graph()
+
+    def set_routing_invert(self, source_id: int, destination_id: int, invert: bool):
+        with self._lock:
+            route = self.routing_matrix.connections.get((source_id, destination_id))
+            if route is None:
+                return
+            route.inverted = invert
+            self._publish_graph()
 
     # --- Metering ---
 

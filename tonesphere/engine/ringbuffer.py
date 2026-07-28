@@ -165,6 +165,26 @@ class AudioRingBuffer:
 
         return got
 
+    def unread(self, frames: int) -> int:
+        """
+        Rewind the read cursor, giving frames back. Consumer side only.
+
+        The drift resampler must read a whole number of frames but may consume a
+        fractional amount of them, so it hands the remainder back rather than dropping it.
+        Without this, one sample would be lost at every block boundary — a periodic click
+        at exactly the block rate, which is the most audible artefact there is.
+
+        Safe because the data is still in the buffer; the producer cannot have overwritten
+        it while it counted as read, since it only ever writes into free space.
+        """
+        rewind = min(frames, self._capacity - 1 - self.available)
+        if rewind <= 0:
+            return 0
+
+        self._read_index = (self._read_index - rewind) % self._capacity
+        self.frames_read -= rewind
+        return rewind
+
     def discard(self, frames: int) -> int:
         """
         Drop the oldest frames. Consumer side only.
