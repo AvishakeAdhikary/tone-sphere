@@ -9,7 +9,6 @@ import threading
 import time
 from typing import Dict, Any, List, Optional
 from tonesphere.core.routing import AudioRoutingMatrix
-from tonesphere.devices.native_virtual import NativeVirtualDeviceManager
 from tonesphere.devices.virtual_device_manager import VirtualDeviceManager
 from tonesphere.network.audio_router import NetworkAudioRouter, NetworkQuality
 from tonesphere.utils.logger import get_logger
@@ -40,7 +39,6 @@ class AudioEngine:
         self.driver_manager = AudioDriverManager(preferred_driver)
         self.stream_manager = AudioStreamManager(self.driver_manager)
         self.processor = AudioProcessor(sample_rate, buffer_size)
-        self.virtual_device_manager = NativeVirtualDeviceManager(sample_rate, buffer_size)
         self.virtual_manager = VirtualDeviceManager(sample_rate, buffer_size, max_virtual_inputs, max_virtual_outputs)
         self.routing_matrix = AudioRoutingMatrix()
         self.network_router = NetworkAudioRouter(quality=NetworkQuality.HIGH)
@@ -54,11 +52,20 @@ class AudioEngine:
         self.is_running = False
         self.master_volume = 1.0
         
-        # Performance monitoring
+        # Performance monitoring.
+        #
+        # `cpu_usage` is None, not 0.0. The drivers report no CPU load, so a 0.0
+        # here would render in the UI as "CPU: 0%" — a measurement we never took
+        # presented as a good result. None means "not measured"; the UI shows "--".
+        #
+        # `nominal_latency_ms` is buffer/rate, which is arithmetic, not the true
+        # round-trip latency. It is named to say so.
         self.performance_stats = {
-            'cpu_usage': 0.0,
+            'cpu_usage': None,
             'buffer_underruns': 0,
-            'latency_ms': 0.0,
+            'nominal_latency_ms': 0.0,
+            'measured_latency_ms': None,
+            'audio_path_active': False,
             'active_driver': None,
             'total_devices': 0,
             'virtual_devices': 0,
@@ -273,9 +280,9 @@ class AudioEngine:
         
         # Stop stream manager
         self.stream_manager.stop_processing()
-        
+
         # Stop virtual devices
-        self.virtual_device_manager.stop_all()
+        self.virtual_manager.stop_all()
         
         # Wait for threads
         if self.monitor_thread:
@@ -286,37 +293,48 @@ class AudioEngine:
         logger.info("Audio engine stopped")
     
     def _performance_monitor(self):
-        """Monitor engine performance"""
+        """
+        Publish the stats we can actually measure.
+
+        Anything we cannot measure stays None so the UI renders "--" instead of a
+        confident zero. CPU load in particular is left None until a real driver
+        callback exists to report it.
+        """
         while self.is_running:
             try:
-                # Update performance stats
                 stream_stats = self.stream_manager.get_statistics()
-                
+
                 self.performance_stats['active_streams'] = stream_stats['running_streams']
-                self.performance_stats['latency_ms'] = self.buffer_size / self.sample_rate * 1000
-                
-                # Calculate CPU usage from streams
-                total_cpu = 0.0
-                for stream_info in stream_stats['streams'].values():
-                    total_cpu += stream_info.get('cpu_load', 0.0)
-                
-                self.performance_stats['cpu_usage'] = total_cpu / max(1, stream_stats['total_streams'])
-                
+                self.performance_stats['nominal_latency_ms'] = (
+                    self.buffer_size / self.sample_rate * 1000
+                )
+
+                # Underruns from the virtual buses are real counts, so report them.
+                self.performance_stats['buffer_underruns'] = sum(
+                    device.buffer_underruns
+                    for device in self.virtual_manager.all_devices().values()
+                )
+
                 time.sleep(1.0)
-                
+
             except Exception as e:
                 logger.error(f"Performance monitor error: {e}")
     
     def _audio_processing_loop(self):
-        """Main audio processing loop"""
+        """
+        Pump virtual-to-virtual buses.
+
+        Stopgap only: this is a polling loop, not an audio callback, and it does
+        not reach real hardware. It is paced at the nominal buffer period rather
+        than the old fixed 1 ms, which was ~1000 wakeups/second of pure overhead.
+        Phase 1 replaces this with a driver-owned callback.
+        """
+        period = self.buffer_size / self.sample_rate
+
         while self.is_running:
             try:
-                # Process virtual device routing
-                self.virtual_device_manager.process_routing()
-                
-                # Small sleep to prevent busy waiting
-                time.sleep(0.001)
-                
+                self.virtual_manager.process_routing()
+                time.sleep(period)
             except Exception as e:
                 logger.error(f"Audio processing error: {e}")
     
@@ -442,35 +460,38 @@ class AudioEngine:
     
     # Routing Methods
     def create_routing(self, source_id: int, destination_id: int, volume: float = 1.0) -> tuple[bool, str]:
-        """Create a routing connection"""
-        # Create routing in matrix
+        """
+        Create a routing connection.
+
+        Audio only flows for virtual-to-virtual routes today; a route touching a
+        physical device is recorded in the matrix but carries no audio yet, and the
+        returned message says so rather than reporting a bare success.
+        """
         success, message = self.routing_matrix.create_routing(source_id, destination_id, volume)
-        
-        if success:
-            # Also route in virtual device manager if both are virtual
-            self.virtual_device_manager.route_audio(source_id, destination_id, volume)
-        
-        return success, message
-    
+
+        if not success:
+            return success, message
+
+        if self.virtual_manager.route_audio(source_id, destination_id, volume):
+            return True, message
+
+        return True, f"{message} (recorded only — no audio path to physical devices yet)"
+
     def remove_routing(self, source_id: int, destination_id: int) -> bool:
         """Remove a routing connection"""
-        # Remove from routing matrix
         success = self.routing_matrix.remove_routing(source_id, destination_id)
-        
+
         if success:
-            # Also disconnect in virtual device manager
-            source_device = self.virtual_device_manager.get_device(source_id)
-            if source_device:
-                source_device.disconnect_from(destination_id)
-        
+            self.virtual_manager.unroute_audio(source_id, destination_id)
+
         return success
-    
+
     def set_routing_volume(self, source_id: int, destination_id: int, volume: float):
         """Set volume for a routing connection"""
         self.routing_matrix.set_routing_volume(source_id, destination_id, volume)
-        
-        # Update virtual device routing
-        source_device = self.virtual_device_manager.get_device(source_id)
+
+        # Keep the virtual bus gain in step with the matrix.
+        source_device = self.virtual_manager.get_device(source_id)
         if source_device and destination_id in source_device.connected_devices:
             source_device.connected_devices[destination_id] = volume
     
@@ -548,7 +569,7 @@ class AudioEngine:
             return
         
         # Get audio from virtual device
-        virtual_device = self.virtual_device_manager.get_device(device_id)
+        virtual_device = self.virtual_manager.get_device(device_id)
         if virtual_device:
             audio_data = virtual_device.read_audio()
             self.network_router.send_audio(device_id, audio_data, self.sample_rate, target)
@@ -556,7 +577,7 @@ class AudioEngine:
     def register_network_receive(self, device_id: int):
         """Register device to receive network audio"""
         def receive_callback(audio_data: np.ndarray, packet):
-            virtual_device = self.virtual_device_manager.get_device(device_id)
+            virtual_device = self.virtual_manager.get_device(device_id)
             if virtual_device:
                 virtual_device.write_audio(audio_data)
         

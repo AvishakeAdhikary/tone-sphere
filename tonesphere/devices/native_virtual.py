@@ -1,6 +1,12 @@
 """
-Native Virtual Audio Device Manager
-Creates actual virtual audio devices that appear in system sound settings
+In-process virtual audio endpoints.
+
+IMPORTANT: these are NOT operating-system audio devices. They exist only inside
+the ToneSphere process and cannot be selected from other applications' sound
+settings. A system-visible virtual device requires a signed kernel-mode driver
+(WDM/AVStream on Windows) — see the Roadmap in README.md.
+
+They are useful today as internal mix buses that routing can target.
 """
 
 import numpy as np
@@ -8,7 +14,6 @@ import threading
 import queue
 from typing import Dict, Optional, Callable, Any
 from tonesphere.utils.logger import logger
-from tonesphere.drivers.base import AudioStreamConfig, AudioDriverType
 
 
 class NativeVirtualDevice:
@@ -26,10 +31,12 @@ class NativeVirtualDevice:
         self.is_input = is_input
         self.is_active = False
         
-        # Audio buffers
-        self.input_buffer = queue.Queue(maxsize=10)
-        self.output_buffer = queue.Queue(maxsize=10)
-        
+        # Single ingress queue. There used to be separate input_buffer and
+        # output_buffer queues: write_audio() always fed input_buffer while the
+        # output-device loop only ever read output_buffer, so audio written to an
+        # output device was silently discarded.
+        self.frame_queue: queue.Queue = queue.Queue(maxsize=10)
+
         # Current audio frame
         self.current_frame = np.zeros((buffer_size, channels), dtype=np.float32)
         
@@ -48,6 +55,11 @@ class NativeVirtualDevice:
         self.buffer_underruns = 0
         self.buffer_overruns = 0
         
+    @property
+    def is_running(self) -> bool:
+        """Whether the device's processing thread is active."""
+        return self.running
+
     def set_callback(self, callback: Callable):
         """Set audio processing callback"""
         self.audio_callback = callback
@@ -87,202 +99,78 @@ class NativeVirtualDevice:
         
         if self.stream_thread:
             self.stream_thread.join(timeout=1.0)
-        
-        # Clear buffers
-        while not self.input_buffer.empty():
-            try:
-                self.input_buffer.get_nowait()
-            except queue.Empty:
-                break
-        
-        while not self.output_buffer.empty():
-            try:
-                self.output_buffer.get_nowait()
-            except queue.Empty:
-                break
-        
+
+        self.drain_buffers()
+
         logger.info(f"Stopped virtual device: {self.name}")
-    
+
+    def drain_buffers(self):
+        """Discard any queued frames."""
+        while True:
+            try:
+                self.frame_queue.get_nowait()
+            except queue.Empty:
+                return
+
     def _process_loop(self):
-        """Main processing loop for virtual device"""
+        """
+        Consume queued frames into `current_frame`.
+
+        Inputs and outputs behave identically here — the direction only describes
+        which side of the graph the endpoint sits on, not how frames are carried.
+        """
         while self.running:
             try:
-                if self.is_input:
-                    self._process_input()
-                else:
-                    self._process_output()
-                
+                self._process_frame()
                 self.frames_processed += 1
-                
             except Exception as e:
                 logger.error(f"Error in virtual device {self.name} processing: {e}")
-    
-    def _process_input(self):
-        """Process input device (capture)"""
-        # Get audio from input buffer
+
+    def _process_frame(self):
         try:
-            audio_data = self.input_buffer.get(timeout=0.1)
+            audio_data = self.frame_queue.get(timeout=0.1)
         except queue.Empty:
-            # No input data, use silence
+            # Starved: hold silence rather than repeating the last frame, which
+            # would sound like a stutter once this feeds real hardware.
             audio_data = np.zeros((self.buffer_size, self.channels), dtype=np.float32)
             self.buffer_underruns += 1
-        
-        # Apply callback if set
+
         if self.audio_callback:
             audio_data = self.audio_callback(audio_data)
-        
-        # Store current frame
-        self.current_frame = audio_data.copy()
-    
-    def _process_output(self):
-        """Process output device (playback)"""
-        # Mix audio from all connected sources
-        mixed_audio = np.zeros((self.buffer_size, self.channels), dtype=np.float32)
-        
-        # This would normally receive audio from routing matrix
-        # For now, we process what's in the output buffer
-        try:
-            audio_data = self.output_buffer.get(timeout=0.1)
-            mixed_audio += audio_data
-        except queue.Empty:
-            self.buffer_underruns += 1
-        
-        # Apply callback if set
-        if self.audio_callback:
-            mixed_audio = self.audio_callback(mixed_audio)
-        
-        # Store current frame
-        self.current_frame = mixed_audio.copy()
-    
+
+        self.current_frame = audio_data
+
     def write_audio(self, audio_data: np.ndarray):
-        """Write audio data to device (for inputs)"""
+        """Push a frame into this device. Drops the oldest frame when backed up."""
+        frame = np.ascontiguousarray(audio_data, dtype=np.float32)
         try:
-            self.input_buffer.put_nowait(audio_data)
+            self.frame_queue.put_nowait(frame)
         except queue.Full:
             self.buffer_overruns += 1
-            # Drop oldest frame and add new one
             try:
-                self.input_buffer.get_nowait()
-                self.input_buffer.put_nowait(audio_data)
-            except:
+                self.frame_queue.get_nowait()
+                self.frame_queue.put_nowait(frame)
+            except (queue.Empty, queue.Full):
                 pass
-    
+
     def read_audio(self) -> np.ndarray:
-        """Read audio data from device (for outputs)"""
+        """Read the most recently processed frame."""
         return self.current_frame.copy()
-    
+
+
     def get_statistics(self) -> Dict[str, Any]:
         """Get device statistics"""
         return {
             'frames_processed': self.frames_processed,
             'buffer_underruns': self.buffer_underruns,
             'buffer_overruns': self.buffer_overruns,
-            'input_buffer_size': self.input_buffer.qsize(),
-            'output_buffer_size': self.output_buffer.qsize(),
+            'queued_frames': self.frame_queue.qsize(),
             'is_active': self.is_active
         }
 
 
-class NativeVirtualDeviceManager:
-    """
-    Manages native virtual audio devices
-    Creates devices that integrate with the audio driver system
-    """
-    
-    def __init__(self, sample_rate: int = 48000, buffer_size: int = 128):
-        self.sample_rate = sample_rate
-        self.buffer_size = buffer_size
-        self.virtual_devices: Dict[int, NativeVirtualDevice] = {}
-        self.next_device_id = 10000  # Start virtual devices at 10000
-        
-    def create_virtual_input(self, name: str, channels: int = 2) -> int:
-        """Create a native virtual input device"""
-        device_id = self.next_device_id
-        self.next_device_id += 1
-        
-        device = NativeVirtualDevice(
-            device_id=device_id,
-            name=name,
-            channels=channels,
-            sample_rate=self.sample_rate,
-            buffer_size=self.buffer_size,
-            is_input=True
-        )
-        
-        self.virtual_devices[device_id] = device
-        device.start()
-        
-        logger.info(f"Created native virtual input: {name} (ID: {device_id})")
-        return device_id
-    
-    def create_virtual_output(self, name: str, channels: int = 2) -> int:
-        """Create a native virtual output device"""
-        device_id = self.next_device_id
-        self.next_device_id += 1
-        
-        device = NativeVirtualDevice(
-            device_id=device_id,
-            name=name,
-            channels=channels,
-            sample_rate=self.sample_rate,
-            buffer_size=self.buffer_size,
-            is_input=False
-        )
-        
-        self.virtual_devices[device_id] = device
-        device.start()
-        
-        logger.info(f"Created native virtual output: {name} (ID: {device_id})")
-        return device_id
-    
-    def remove_virtual_device(self, device_id: int) -> bool:
-        """Remove a virtual device"""
-        if device_id not in self.virtual_devices:
-            return False
-        
-        device = self.virtual_devices[device_id]
-        device.stop()
-        del self.virtual_devices[device_id]
-        
-        logger.info(f"Removed virtual device: {device.name}")
-        return True
-    
-    def get_device(self, device_id: int) -> Optional[NativeVirtualDevice]:
-        """Get a virtual device by ID"""
-        return self.virtual_devices.get(device_id)
-    
-    def get_all_devices(self) -> Dict[int, NativeVirtualDevice]:
-        """Get all virtual devices"""
-        return self.virtual_devices.copy()
-    
-    def route_audio(self, source_id: int, dest_id: int, volume: float = 1.0):
-        """Route audio from source to destination"""
-        source = self.virtual_devices.get(source_id)
-        dest = self.virtual_devices.get(dest_id)
-        
-        if source and dest:
-            source.connect_to(dest_id, volume)
-    
-    def process_routing(self):
-        """Process audio routing between virtual devices"""
-        # This is called by the audio engine to route audio between devices
-        for source_id, source_device in self.virtual_devices.items():
-            if not source_device.is_input or not source_device.is_active:
-                continue
-            
-            # Get audio from source
-            audio_data = source_device.read_audio()
-            
-            # Route to connected destinations
-            for dest_id, volume in source_device.connected_devices.items():
-                dest_device = self.virtual_devices.get(dest_id)
-                if dest_device and dest_device.is_active:
-                    # Apply volume and send to destination
-                    routed_audio = audio_data * volume
-                    dest_device.write_audio(routed_audio)
-    
-    def stop_all(self):
-        """Stop all virtual devices"""
-        for device in self.virtual_devices.values():
-            device.stop()
-        logger.info("Stopped all virtual devices")
+# NOTE: `NativeVirtualDeviceManager` used to live here as a second, parallel
+# device registry. The engine created its devices in `VirtualDeviceManager` but
+# routed them through this one, so every route was recorded against an empty
+# registry: `create_routing()` reported success and no audio ever moved. There is
+# now exactly one registry — `devices.virtual_device_manager.VirtualDeviceManager`.

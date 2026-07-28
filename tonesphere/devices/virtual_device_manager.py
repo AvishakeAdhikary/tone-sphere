@@ -5,6 +5,7 @@ CRUD operations for virtual audio devices with limits
 
 from typing import Dict, List, Optional
 from dataclasses import dataclass
+import numpy as np
 from tonesphere.devices.native_virtual import NativeVirtualDevice
 from tonesphere.utils.logger import get_logger
 
@@ -232,31 +233,37 @@ class VirtualDeviceManager:
     def update_device_channels(self, device_id: int, channels: int) -> bool:
         """
         Update device channel count (requires restart)
-        
+
         Args:
             device_id: Device ID
             channels: New channel count
-            
+
         Returns:
             True if successful
         """
         device = self.get_device(device_id)
         if not device:
             return False
-        
+
+        if channels < 1:
+            logger.warning(f"Refusing to set device {device_id} to {channels} channels")
+            return False
+
         # Stop device
         was_running = device.is_running
         if was_running:
             device.stop()
-        
-        # Update channels
+
+        # Reallocate the frame buffer for the new channel count. Queued frames
+        # still have the old shape, so drop them rather than mixing widths.
         device.channels = channels
-        device.buffer = device.buffer[:, :channels] if device.buffer.shape[1] > channels else device.buffer
-        
+        device.current_frame = np.zeros((device.buffer_size, channels), dtype=np.float32)
+        device.drain_buffers()
+
         # Restart if it was running
         if was_running:
             device.start()
-        
+
         logger.info(f"Updated device {device_id} to {channels} channels")
         return True
     
@@ -290,6 +297,58 @@ class VirtualDeviceManager:
         logger.info(f"Updated device {device_id} to {sample_rate}Hz")
         return True
     
+    def all_devices(self) -> Dict[int, NativeVirtualDevice]:
+        """Every virtual device, inputs and outputs, keyed by ID."""
+        return {**self.input_devices, **self.output_devices}
+
+    def route_audio(self, source_id: int, dest_id: int, volume: float = 1.0) -> bool:
+        """
+        Record a route between two virtual devices.
+
+        Returns False when either endpoint is not a virtual device, so callers
+        can tell the difference between "routed" and "nothing happened".
+        """
+        source = self.get_device(source_id)
+        dest = self.get_device(dest_id)
+
+        if source is None or dest is None:
+            return False
+
+        source.connect_to(dest_id, volume)
+        return True
+
+    def unroute_audio(self, source_id: int, dest_id: int) -> bool:
+        """Remove a route between two virtual devices."""
+        source = self.get_device(source_id)
+        if source is None or dest_id not in source.connected_devices:
+            return False
+
+        source.disconnect_from(dest_id)
+        return True
+
+    def process_routing(self):
+        """
+        Move one frame from each virtual source to its connected destinations.
+
+        This is a polling stopgap for virtual-to-virtual buses only; it carries no
+        audio to or from real hardware. The real driver-owned callback replaces it.
+        """
+        devices = self.all_devices()
+
+        for source in devices.values():
+            if not source.is_active or not source.connected_devices:
+                continue
+
+            audio_data = source.read_audio()
+
+            for dest_id, volume in source.connected_devices.items():
+                dest = devices.get(dest_id)
+                if dest is None or not dest.is_active:
+                    continue
+                if dest.channels != audio_data.shape[1]:
+                    continue
+                dest.write_audio(audio_data * volume)
+
     def stop_all(self):
         """Stop all virtual devices"""
         for device in list(self.input_devices.values()):

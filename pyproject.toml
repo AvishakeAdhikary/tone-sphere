@@ -1,7 +1,9 @@
 [project]
 name = "tone-sphere"
 version = "0.1.0"
-description = "A complete audio routing system inspired by VoiceMeeter Potato, VB-Audio Cable, and Odeus ASIO Link Pro."
+# Describes what this is, not what it aspires to. The previous description claimed a
+# "complete audio routing system"; it passes no audio yet. See the Roadmap in README.md.
+description = "Audio routing and mixing for Windows, Linux and macOS. Pre-alpha: no audio path yet."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
@@ -16,4 +18,16 @@ dependencies = [
     "websockets>=15.0.1",
     "pystray>=0.19.5",
     "pillow>=10.0.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = [
+    "hardware: needs a real audio device; skipped on CI runners, which have none",
 ]

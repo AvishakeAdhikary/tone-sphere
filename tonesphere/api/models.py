@@ -1,3 +1,5 @@
+from typing import Optional
+
 from pydantic import BaseModel
 
 class DeviceInfo(BaseModel):
@@ -26,6 +28,13 @@ class SetVolumeRequest(BaseModel):
     volume: float
 
 class PerformanceStats(BaseModel):
-    cpu_usage: float
+    """
+    Engine statistics. Fields that are not measured are None rather than 0.0, so
+    clients can render "unknown" instead of showing an untaken measurement as a
+    healthy-looking zero.
+    """
     buffer_underruns: int
-    latency_ms: float
+    nominal_latency_ms: float          # buffer_size / sample_rate — arithmetic, not measured
+    cpu_usage: Optional[float] = None
+    measured_latency_ms: Optional[float] = None
+    audio_path_active: bool = False

@@ -87,15 +87,10 @@ class AudioDriverManager:
         except Exception as e:
             logger.debug(f"PipeWire driver not available: {e}")
         
-        try:
-            from .linux_jack import JACKDriver
-            jack = JACKDriver()
-            if jack.is_available():
-                self.available_drivers[AudioDriverType.JACK] = jack
-                logger.info("JACK driver available")
-        except Exception as e:
-            logger.debug(f"JACK driver not available: {e}")
-        
+        # JACK: the driver module was deleted in the Phase 0 cleanup — it contained a
+        # SyntaxError and had therefore never once loaded. It returns in Phase 1 as a
+        # real backend. See the Roadmap in README.md.
+
         try:
             from .linux_pulseaudio import PulseAudioDriver
             pulse = PulseAudioDriver()
@@ -134,16 +129,8 @@ class AudioDriverManager:
         except Exception as e:
             logger.debug(f"CoreAudio driver not available: {e}")
         
-        # JACK is also available on macOS
-        try:
-            from .linux_jack import JACKDriver
-            jack = JACKDriver()
-            if jack.is_available():
-                self.available_drivers[AudioDriverType.JACK] = jack
-                logger.info("JACK driver available on macOS")
-        except Exception as e:
-            logger.debug(f"JACK driver not available on macOS: {e}")
-        
+        # JACK on macOS: see the note in _register_linux_drivers.
+
         try:
             from .wireless_audio import WirelessAudioDriver
             wireless = WirelessAudioDriver()

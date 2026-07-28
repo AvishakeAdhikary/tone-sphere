@@ -5,9 +5,25 @@ Main entry point for the application
 """
 
 import sys
+import time
 import logging
 from tonesphere.utils.config import ConfigManager
 from tonesphere.utils.logger import logger_manager, enable_file_logging
+
+
+def setup_console_encoding():
+    """
+    Force UTF-8 on stdout/stderr.
+
+    Windows consoles default to cp1252, which cannot encode the symbols used in
+    our output and raises UnicodeEncodeError mid-print. errors='replace' keeps a
+    legacy console readable instead of crashing the process.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding='utf-8', errors='replace')
+        except (AttributeError, ValueError):
+            pass
 
 
 def setup_logging(config: dict):
@@ -32,8 +48,108 @@ def setup_logging(config: dict):
     )
 
 
+def run_diagnostics() -> int:
+    """
+    Report what the engine can and cannot do on this machine.
+
+    This replaces the old `test` command, which printed a checkmark next to every
+    line it reached — including "Found 0 audio devices" — and then claimed "All
+    tests passed" regardless of outcome. Findings are reported as PASS/WARN/FAIL and
+    the exit code reflects them, so this is usable from a script.
+    """
+    from tonesphere.core.engine_factory import UnifiedAudioEngine
+    from tonesphere.utils.formatting import format_measurement
+
+    failures = 0
+    warnings = 0
+
+    def report(status: str, message: str):
+        nonlocal failures, warnings
+        if status == "FAIL":
+            failures += 1
+        elif status == "WARN":
+            warnings += 1
+        print(f"[{status:4}] {message}")
+
+    print("ToneSphere diagnostics")
+    print("-" * 60)
+
+    try:
+        engine = UnifiedAudioEngine()
+        engine.initialize()
+        engine.start_engine()
+    except Exception as e:
+        report("FAIL", f"Engine failed to start: {e}")
+        import traceback
+        traceback.print_exc()
+        return 1
+
+    try:
+        driver_info = engine.get_driver_info()
+        active = driver_info.get('active_driver')
+        available = engine.get_available_drivers()
+
+        report("INFO", f"Active driver:    {active or 'none'}")
+        report("INFO", f"Available:        {', '.join(available) or 'none'}")
+
+        devices = engine.get_devices()
+        physical = [d for d in devices if d['type'].startswith('physical')]
+        virtual = [d for d in devices if d['type'].startswith('virtual')]
+
+        if physical:
+            report("PASS", f"Physical devices: {len(physical)}")
+        else:
+            report("FAIL", "Physical devices: 0 — the active driver enumerated no "
+                           "hardware, so nothing can be routed to or from your interface")
+
+        report("INFO", f"Virtual buses:    {len(virtual)} (in-process only, not visible to other apps)")
+
+        # Prove whether audio actually moves, rather than trusting the return value.
+        if len(virtual) >= 2:
+            import numpy as np
+            source, dest = virtual[0], virtual[1]
+            ok, message = engine.create_routing(source['id'], dest['id'], 1.0)
+            report("INFO", f"Route {source['id']} -> {dest['id']}: {message}")
+
+            src_device = engine.engine.virtual_manager.get_device(source['id'])
+            dst_device = engine.engine.virtual_manager.get_device(dest['id'])
+
+            if src_device and dst_device:
+                src_device.write_audio(np.full((src_device.buffer_size, src_device.channels),
+                                               0.5, dtype=np.float32))
+                deadline = time.time() + 2.0
+                peak = 0.0
+                while time.time() < deadline:
+                    peak = float(np.max(np.abs(dst_device.current_frame)))
+                    if peak > 0.0:
+                        break
+                    time.sleep(0.01)
+
+                if peak > 0.0:
+                    report("PASS", f"Virtual bus carried audio (peak {peak:.3f})")
+                else:
+                    report("FAIL", "Virtual bus carried no audio (peak 0.0)")
+
+        stats = engine.get_performance_stats()
+        report("INFO", f"Nominal latency:  {format_measurement(stats.get('nominal_latency_ms'), ' ms')}")
+        report("INFO", f"Measured latency: {format_measurement(stats.get('measured_latency_ms'), ' ms')}")
+        report("INFO", f"CPU load:         {format_measurement(stats.get('cpu_usage'), '%')}")
+
+        if not stats.get('audio_path_active', False):
+            report("WARN", "No audio path to hardware — see the Roadmap in README.md")
+
+    finally:
+        engine.stop_engine()
+
+    print("-" * 60)
+    print(f"{failures} failure(s), {warnings} warning(s)")
+    return 1 if failures else 0
+
+
 def main():
     """Main entry point"""
+    setup_console_encoding()
+
     config_manager = ConfigManager()
     config = config_manager.load_config()
     
@@ -109,55 +225,15 @@ def main():
             cli.run_interactive_mode()
             
         elif command == "test":
-            print("Running basic engine tests...")
-            try:
-                engine = UnifiedAudioEngine()
-                engine.initialize()
-                engine.start_engine()
-                
-                # Display driver info
-                driver_info = engine.get_driver_info()
-                print(f"✓ Using driver: {driver_info.get('active_driver', 'unknown')}")
-                print(f"✓ Available drivers: {', '.join(engine.get_available_drivers())}")
-                
-                devices = engine.get_devices()
-                print(f"✓ Found {len(devices)} audio devices")
-                
-                # Test virtual device creation
-                virtual_id = engine.create_virtual_input("Test Input")
-                print(f"✓ Created virtual input with ID: {virtual_id}")
-                
-                # Test routing
-                devices = engine.get_devices()
-                inputs = [d for d in devices if 'input' in d['type']]
-                outputs = [d for d in devices if 'output' in d['type']]
-                
-                if len(inputs) > 0 and len(outputs) > 0:
-                    success, message = engine.create_routing(inputs[0]['id'], outputs[0]['id'])
-                    if success:
-                        print("✓ Created test routing")
-                    else:
-                        print("✗ Failed to create routing")
-                
-                # Display performance stats
-                stats = engine.get_performance_stats()
-                print(f"✓ Latency: {stats.get('latency_ms', 0):.2f}ms")
-                print(f"✓ CPU Usage: {stats.get('cpu_usage', 0):.1f}%")
-                
-                engine.stop_engine()
-                print("✓ All tests passed")
-                
-            except Exception as e:
-                print(f"✗ Test failed: {e}")
-                import traceback
-                traceback.print_exc()
-            
+            return run_diagnostics()
+
         else:
             print(f"Unknown command: {command}")
             print("Available commands: server, gui, cli, test")
+            return 2
     else:
-        print("ToneSphere - Professional Audio Routing System")
-        print("Version 1.0.0")
+        from tonesphere import __version__
+        print(f"ToneSphere - Audio Routing Engine (v{__version__}, pre-alpha)")
         print()
         print("Usage:")
         print("  python main.py server  - Start API server")
@@ -165,16 +241,13 @@ def main():
         print("  python main.py cli     - Interactive CLI mode")
         print("  python main.py test    - Run basic tests")
         print()
-        print("Features:")
-        print("  ✓ Native audio driver support (ASIO, WASAPI, ALSA, PulseAudio, JACK, etc.)")
-        print("  ✓ Virtual audio device creation")
-        print("  ✓ Advanced routing matrix")
-        print("  ✓ Real-time audio effects")
-        print("  ✓ RESTful API with WebSocket events")
-        print("  ✓ VoiceMeeter Potato-like functionality")
-        print("  ✓ Cross-platform support (Windows, Linux, macOS)")
-        print("  ✓ Low-latency professional audio processing")
+        print("STATUS: ToneSphere does not process audio yet.")
+        print("The routing matrix, mixer state and UI are in place, but the audio")
+        print("path is under construction. Nothing you route will be audible.")
+        print("See the Roadmap in README.md for what works and what is next.")
+
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main() or 0)

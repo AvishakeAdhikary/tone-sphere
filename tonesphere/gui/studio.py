@@ -6,6 +6,7 @@ from tonesphere.gui.channel_panel import ChannelControlPanel
 from tonesphere.gui.network_panel import NetworkRoutingPanel
 from tonesphere.gui.virtual_device_panel import VirtualDevicePanel
 from tonesphere.gui.modern_theme import ModernTheme
+from tonesphere.utils.formatting import format_performance_summary
 import threading
 import time
 
@@ -145,7 +146,7 @@ class ToneSphereStudioGUI:
         
         self.performance_label = ModernTheme.create_label(
             status_info_frame,
-            text="CPU: 0% | Latency: 0ms",
+            text="CPU: --  |  Latency: --",
             style='body',
             fg=self.colors['text_muted']
         )
@@ -1245,7 +1246,7 @@ class ToneSphereStudioGUI:
                 
                 # Update performance stats
                 stats = self.engine.get_performance_stats()
-                self.performance_label.configure(text=f"CPU: {stats['cpu_usage']:.1f}% | Latency: {stats['latency_ms']:.1f}ms")
+                self.performance_label.configure(text=format_performance_summary(stats))
                 
                 # Update network client count
                 clients = self.engine.get_network_clients()

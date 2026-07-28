@@ -72,11 +72,8 @@ class AudioStreamManager:
         self.streams: Dict[int, AudioStream] = {}
         self.next_stream_id = 1
         self.stream_lock = threading.Lock()
-        
-        # Processing thread
-        self.processing_thread: Optional[threading.Thread] = None
         self.running = False
-        
+
     def create_stream(self, device_id: int, config: AudioStreamConfig) -> int:
         """
         Create a new audio stream
@@ -196,51 +193,29 @@ class AudioStreamManager:
             return list(self.streams.values())
     
     def start_processing(self):
-        """Start the stream processing thread"""
+        """
+        Mark the manager as processing.
+
+        There is deliberately no thread here. This used to spawn a loop that woke
+        1000 times a second and whose entire body was `stream.last_callback_time =
+        time.time()` — it moved no audio and only burned CPU. Audio will be pumped
+        by the driver's own callback thread, not by us polling.
+        """
         if self.running:
             return
-        
+
         self.running = True
-        self.processing_thread = threading.Thread(target=self._processing_loop, daemon=True)
-        self.processing_thread.start()
-        logger.info("Started stream processing")
-    
+        logger.info("Stream manager active (no audio path yet — see README Roadmap)")
+
     def stop_processing(self):
-        """Stop the stream processing thread"""
+        """Mark the manager as stopped."""
         if not self.running:
             return
-        
+
         self.running = False
-        if self.processing_thread:
-            self.processing_thread.join(timeout=2.0)
-        logger.info("Stopped stream processing")
-    
-    def _processing_loop(self):
-        """Main processing loop for all streams"""
-        while self.running:
-            try:
-                with self.stream_lock:
-                    for stream in self.streams.values():
-                        if stream.state == StreamState.RUNNING:
-                            self._process_stream(stream)
-                
-                # Small sleep to prevent busy waiting
-                time.sleep(0.001)
-                
-            except Exception as e:
-                logger.error(f"Error in processing loop: {e}")
-    
-    def _process_stream(self, stream: AudioStream):
-        """Process a single stream"""
-        try:
-            # This is where we would read from input and write to output
-            # For now, just update statistics
-            stream.last_callback_time = time.time()
-            
-        except Exception as e:
-            logger.error(f"Error processing stream {stream.stream_id}: {e}")
-            stream.xruns += 1
-    
+        logger.info("Stream manager stopped")
+
+
     def get_statistics(self) -> Dict[str, Any]:
         """Get statistics for all streams"""
         with self.stream_lock:

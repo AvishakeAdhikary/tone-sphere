@@ -1,4 +1,5 @@
 from tonesphere.utils.config import ConfigManager
+from tonesphere.utils.formatting import format_measurement
 from tonesphere.core.engine_factory import UnifiedAudioEngine
 
 class AudioEngineCLI:
@@ -114,9 +115,12 @@ class AudioEngineCLI:
             
         stats = self.engine.get_performance_stats()
         print(f"\nPerformance Statistics:")
-        print(f"CPU Usage: {stats['cpu_usage']:.1f}%")
+        print(f"CPU Usage: {format_measurement(stats.get('cpu_usage'), '%')}")
         print(f"Buffer Underruns: {stats['buffer_underruns']}")
-        print(f"Latency: {stats['latency_ms']:.1f}ms")
+        print(f"Latency (measured): {format_measurement(stats.get('measured_latency_ms'), 'ms')}")
+        print(f"Latency (nominal):  {format_measurement(stats.get('nominal_latency_ms'), 'ms')}")
+        if not stats.get('audio_path_active', False):
+            print("Audio path: INACTIVE - no audio is being processed")
     
     def show_network_info(self):
         """Show network information"""
