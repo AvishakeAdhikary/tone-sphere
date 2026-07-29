@@ -27,14 +27,22 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-groups
 
-      - name: Install Qt runtime libraries
-        # PySide6 needs X11/EGL libraries that a headless Ubuntu runner does not ship.
-        # Without them every UI test errors on import rather than on anything real.
+      - name: Install native runtime libraries
+        # Two things the Linux runner doesn't ship that the Python wheels assume exist:
+        #   - PySide6 needs X11/EGL libraries; without them every UI test errors on
+        #     import rather than on anything real.
+        #   - The `sounddevice` wheel does NOT bundle libportaudio.so on Linux (unlike
+        #     the Windows/macOS wheels, which do) — it's a thin ctypes wrapper that calls
+        #     ctypes.util.find_library('portaudio') at import time. Without the system
+        #     package, AudioHost can't even enumerate devices, and every engine test that
+        #     merely constructs one fails with AudioBackendUnavailable — not a code bug,
+        #     a missing OS package.
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libegl1 libxkbcommon-x11-0 libxcb-cursor0 \
-            libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libgl1
+            libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libgl1 \
+            libportaudio2
 
       - name: Run tests
         # CI runners have no audio hardware, so hardware-marked tests are excluded.

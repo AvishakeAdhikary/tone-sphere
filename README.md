@@ -29,6 +29,16 @@ uv sync
 uv run main.py gui
 ```
 
+**Linux only:** the `sounddevice` package is a thin ctypes wrapper — unlike the
+Windows/macOS wheels, the Linux wheel does not bundle PortAudio's shared library. Install
+it from your distro first, or every audio feature reports `PortAudio library not found`:
+
+```
+sudo apt install libportaudio2      # Debian/Ubuntu
+sudo dnf install portaudio          # Fedora
+sudo pacman -S portaudio            # Arch
+```
+
 Check what your machine can do first:
 
 ```
