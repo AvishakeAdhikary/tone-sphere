@@ -4,11 +4,12 @@ ToneSphere - Professional Audio Routing Engine
 Main entry point for the application
 """
 
+import logging
 import sys
 import time
-import logging
+
 from tonesphere.utils.config import ConfigManager
-from tonesphere.utils.logger import logger_manager, enable_file_logging
+from tonesphere.utils.logger import logger_manager
 
 
 def setup_console_encoding():
@@ -29,11 +30,11 @@ def setup_console_encoding():
 def setup_logging(config: dict):
     """Setup logging based on configuration"""
     log_config = config.get('logging', {})
-    
+
     # Get log level
     level_str = log_config.get('level', 'INFO')
     level = getattr(logging, level_str.upper(), logging.INFO)
-    
+
     # Setup logger with configuration
     logger_manager.setup_logger(
         name="tonesphere",
@@ -186,18 +187,17 @@ def main():
 
     config_manager = ConfigManager()
     config = config_manager.load_config()
-    
+
     # Setup logging first
     setup_logging(config)
-    
+
     from tonesphere import __version__
     print(f"ToneSphere {__version__}")
     print("=" * 50)
-    
+
     if len(sys.argv) > 1:
-        from tonesphere.core.engine_factory import UnifiedAudioEngine
         command = sys.argv[1].lower()
-        
+
         if command == "server":
             from tonesphere.api.server import run_api_server
             print("Starting ToneSphere API server...")
@@ -214,7 +214,7 @@ def main():
             print("Starting ToneSphere CLI...")
             cli = AudioEngineCLI()
             cli.run_interactive_mode()
-            
+
         elif command == "test":
             return run_diagnostics()
 

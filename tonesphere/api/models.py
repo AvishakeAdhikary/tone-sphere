@@ -1,6 +1,6 @@
-from typing import Optional
 
 from pydantic import BaseModel
+
 
 class DeviceInfo(BaseModel):
     id: int
@@ -35,6 +35,6 @@ class PerformanceStats(BaseModel):
     """
     buffer_underruns: int
     nominal_latency_ms: float          # buffer_size / sample_rate — arithmetic, not measured
-    cpu_usage: Optional[float] = None
-    measured_latency_ms: Optional[float] = None
+    cpu_usage: float | None = None
+    measured_latency_ms: float | None = None
     audio_path_active: bool = False

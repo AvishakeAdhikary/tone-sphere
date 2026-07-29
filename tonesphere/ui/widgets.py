@@ -9,20 +9,33 @@ Every widget here shows a real measurement or controls a real parameter. None of
 decorative.
 """
 
-import math
-from typing import Optional
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import (
-    QBrush, QColor, QFontMetrics, QLinearGradient, QMouseEvent, QPainter, QPainterPath,
-    QPen, QWheelEvent,
+    QBrush,
+    QColor,
+    QFontMetrics,
+    QLinearGradient,
+    QMouseEvent,
+    QPainter,
+    QPen,
+    QWheelEvent,
 )
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
 from tonesphere.ui.theme import (
-    METER_HIGH_DB, METER_MAX_DB, METER_MIN_DB, METER_PEAK_DB, METRICS,
-    Colors, Spacing, Type, db_to_fader_position, db_to_fraction, fader_position_to_db,
-    format_db, meter_color,
+    METER_HIGH_DB,
+    METER_MIN_DB,
+    METER_PEAK_DB,
+    METRICS,
+    Colors,
+    Spacing,
+    Type,
+    db_to_fader_position,
+    db_to_fraction,
+    fader_position_to_db,
+    format_db,
+    meter_color,
 )
 
 
@@ -44,7 +57,7 @@ class LevelMeter(QWidget):
     SCALE_TICKS = (0, -6, -12, -18, -24, -36, -48)
 
     def __init__(self, channels: int = 2, horizontal: bool = False,
-                 show_scale: bool = True, parent: Optional[QWidget] = None):
+                 show_scale: bool = True, parent: QWidget | None = None):
         super().__init__(parent)
 
         self.channels = channels
@@ -237,7 +250,7 @@ class Fader(QWidget):
 
     value_changed = Signal(float)   # dB
 
-    def __init__(self, initial_db: float = 0.0, parent: Optional[QWidget] = None):
+    def __init__(self, initial_db: float = 0.0, parent: QWidget | None = None):
         super().__init__(parent)
 
         self._db = initial_db
@@ -379,7 +392,7 @@ class PanKnob(QWidget):
 
     value_changed = Signal(float)   # -1..1
 
-    def __init__(self, initial: float = 0.0, parent: Optional[QWidget] = None):
+    def __init__(self, initial: float = 0.0, parent: QWidget | None = None):
         super().__init__(parent)
 
         self._pan = initial
@@ -481,17 +494,17 @@ class StatusPill(QWidget):
     not just a QLabel.
     """
 
-    def __init__(self, label: str, value: str = "--", parent: Optional[QWidget] = None):
+    def __init__(self, label: str, value: str = "--", parent: QWidget | None = None):
         super().__init__(parent)
 
         self._label = label
         self._value = value
-        self._tone: Optional[QColor] = None
+        self._tone: QColor | None = None
 
         self.setFixedHeight(METRICS.STATUSBAR_HEIGHT - 6)
         self._resize_to_fit()
 
-    def set_value(self, value: Optional[str], tone: Optional[QColor] = None):
+    def set_value(self, value: str | None, tone: QColor | None = None):
         self._value = value if value is not None else "--"
         self._tone = tone
         self._resize_to_fit()

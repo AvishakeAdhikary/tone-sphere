@@ -9,20 +9,27 @@ All engine access happens here. The widgets emit intent and know nothing about a
 keeps them testable and keeps the audio layer free of Qt.
 """
 
-import math
-from typing import Dict, List, Optional
 
-from PySide6.QtCore import QPointF, Qt, QTimer, Signal
+from PySide6.QtCore import QPointF, Qt, QTimer
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
-    QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow, QMessageBox,
-    QPushButton, QScrollArea, QSplitter, QVBoxLayout, QWidget,
+    QComboBox,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QMainWindow,
+    QMessageBox,
+    QPushButton,
+    QScrollArea,
+    QSplitter,
+    QVBoxLayout,
+    QWidget,
 )
 
 from tonesphere.core.engine_factory import UnifiedAudioEngine
+from tonesphere.engine.graph import db_to_linear
 from tonesphere.ui.routing_view import RoutingScene, RoutingView
 from tonesphere.ui.strip import ChannelStripWidget, HardwareBar, MasterStrip
-from tonesphere.engine.graph import db_to_linear, linear_to_db
 from tonesphere.ui.theme import METRICS, Colors, Spacing, Type
 from tonesphere.utils.config import ConfigManager
 from tonesphere.utils.logger import get_logger
@@ -38,15 +45,15 @@ STATS_INTERVAL_MS = 500
 class MainWindow(QMainWindow):
     """ToneSphere's main window."""
 
-    def __init__(self, config_manager: Optional[ConfigManager] = None):
+    def __init__(self, config_manager: ConfigManager | None = None):
         super().__init__()
 
         self.config_manager = config_manager or ConfigManager()
         self.engine = UnifiedAudioEngine(self.config_manager)
         self.engine.initialize()
 
-        self._strips: Dict[int, ChannelStripWidget] = {}
-        self._node_positions: Dict[int, QPointF] = {}
+        self._strips: dict[int, ChannelStripWidget] = {}
+        self._node_positions: dict[int, QPointF] = {}
 
         self.setWindowTitle("ToneSphere")
         self.resize(1360, 880)
@@ -304,7 +311,7 @@ class MainWindow(QMainWindow):
         inputs = [d for d in devices if d['direction'] == 'input']
         outputs = [d for d in devices if d['direction'] == 'output']
 
-        for index, device in enumerate(inputs + outputs):
+        for device in inputs + outputs:
             self._add_strip(device)
 
         self._place_nodes(inputs, outputs)
@@ -332,7 +339,7 @@ class MainWindow(QMainWindow):
             strip.deleteLater()
         self._strips.clear()
 
-    def _add_strip(self, device: Dict):
+    def _add_strip(self, device: dict):
         strip = ChannelStripWidget(
             device_id=device['id'],
             name=device['name'],
@@ -348,7 +355,7 @@ class MainWindow(QMainWindow):
         self.strip_layout.insertWidget(self.strip_layout.count() - 1, strip)
         self._strips[device['id']] = strip
 
-    def _place_nodes(self, inputs: List[Dict], outputs: List[Dict]):
+    def _place_nodes(self, inputs: list[dict], outputs: list[dict]):
         """
         Sources on the left, destinations on the right.
 

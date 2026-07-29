@@ -1,6 +1,7 @@
-from typing import Any, Dict, List
-from enum import Enum
 from dataclasses import dataclass
+from enum import Enum
+from typing import Any
+
 
 class DeviceType(Enum):
     PHYSICAL_INPUT = "physical_input"
@@ -50,7 +51,7 @@ class RoutingConnection:
 class AudioEffect:
     effect_type: EffectType
     enabled: bool
-    parameters: Dict[str, Any]
+    parameters: dict[str, Any]
 
 @dataclass
 class AudioChannel:
@@ -60,8 +61,8 @@ class AudioChannel:
     volume: float = 1.0
     muted: bool = False
     solo: bool = False
-    effects: List[AudioEffect] = None
-    
+    effects: list[AudioEffect] = None
+
     def __post_init__(self):
         if self.effects is None:
             self.effects = []

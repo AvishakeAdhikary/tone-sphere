@@ -150,7 +150,8 @@ that tells you what you want to hear.
 ## Contributing
 
 Contributions welcome, especially on Phase 5. Run the tests with `uv run pytest`
-(hardware-dependent tests: `uv run pytest -m hardware`).
+(hardware-dependent tests: `uv run pytest -m hardware`), and lint with `uv run ruff check .`
+— both run in CI, on every push and PR, across Windows, Linux and macOS.
 
 If you add a backend or an effect, add a test that asserts a known signal comes out the
 other side at the expected amplitude. Several real bugs in this rebuild — a filter that

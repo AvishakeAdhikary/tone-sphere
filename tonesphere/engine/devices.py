@@ -19,15 +19,14 @@ Host API notes (Windows), in the order we prefer them:
 
 import platform
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Dict, List, Optional, Tuple
+from enum import StrEnum
 
 from tonesphere.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 
-class HostApi(str, Enum):
+class HostApi(StrEnum):
     """Audio backends, named as PortAudio reports them."""
     ASIO = "ASIO"
     WASAPI = "Windows WASAPI"
@@ -49,7 +48,7 @@ class HostApi(str, Enum):
 
 
 # Preference order per platform. Latency first, compatibility last.
-_PREFERENCE: Dict[str, Tuple[HostApi, ...]] = {
+_PREFERENCE: dict[str, tuple[HostApi, ...]] = {
     "Windows": (HostApi.ASIO, HostApi.WASAPI, HostApi.WDMKS, HostApi.DIRECTSOUND, HostApi.MME),
     "Linux": (HostApi.JACK, HostApi.ALSA, HostApi.OSS),
     "Darwin": (HostApi.COREAUDIO, HostApi.JACK),
@@ -85,7 +84,7 @@ class DeviceInfo:
     default_high_output_latency_ms: float
     is_default_input: bool = False
     is_default_output: bool = False
-    supported_samplerates: Tuple[int, ...] = field(default_factory=tuple)
+    supported_samplerates: tuple[int, ...] = field(default_factory=tuple)
 
     @property
     def key(self) -> str:
@@ -152,7 +151,7 @@ def _clean_name(name: str) -> str:
         return name.strip()
 
 
-def probe_samplerates(sd, index: int, is_input: bool, channels: int) -> Tuple[int, ...]:
+def probe_samplerates(sd, index: int, is_input: bool, channels: int) -> tuple[int, ...]:
     """
     Ask the device which rates it will actually accept.
 
@@ -172,7 +171,7 @@ def probe_samplerates(sd, index: int, is_input: bool, channels: int) -> Tuple[in
     return tuple(supported)
 
 
-def enumerate_devices(probe_rates: bool = False) -> List[DeviceInfo]:
+def enumerate_devices(probe_rates: bool = False) -> list[DeviceInfo]:
     """
     Every audio endpoint the OS reports.
 
@@ -190,7 +189,7 @@ def enumerate_devices(probe_rates: bool = False) -> List[DeviceInfo]:
 
     default_input, default_output = _default_indices(sd)
 
-    devices: List[DeviceInfo] = []
+    devices: list[DeviceInfo] = []
     for index, raw in enumerate(raw_devices):
         api_index = raw['hostapi']
         api_name = host_apis[api_index]['name'] if api_index < len(host_apis) else "Unknown"
@@ -198,7 +197,7 @@ def enumerate_devices(probe_rates: bool = False) -> List[DeviceInfo]:
         max_in = int(raw['max_input_channels'])
         max_out = int(raw['max_output_channels'])
 
-        rates: Tuple[int, ...] = ()
+        rates: tuple[int, ...] = ()
         if probe_rates:
             rates = probe_samplerates(sd, index, max_in > 0, min(max_in or max_out, 2))
 
@@ -222,7 +221,7 @@ def enumerate_devices(probe_rates: bool = False) -> List[DeviceInfo]:
     return devices
 
 
-def _default_indices(sd) -> Tuple[Optional[int], Optional[int]]:
+def _default_indices(sd) -> tuple[int | None, int | None]:
     try:
         default = sd.default.device
         return (
@@ -233,7 +232,7 @@ def _default_indices(sd) -> Tuple[Optional[int], Optional[int]]:
         return (None, None)
 
 
-def available_host_apis() -> List[HostApi]:
+def available_host_apis() -> list[HostApi]:
     """Backends PortAudio was compiled with and that have at least one device."""
     sd = _import_sounddevice()
 
@@ -246,7 +245,7 @@ def available_host_apis() -> List[HostApi]:
     return found
 
 
-def preferred_host_api(available: Optional[List[HostApi]] = None) -> Optional[HostApi]:
+def preferred_host_api(available: list[HostApi] | None = None) -> HostApi | None:
     """
     The lowest-latency backend actually present.
 
@@ -265,13 +264,13 @@ def preferred_host_api(available: Optional[List[HostApi]] = None) -> Optional[Ho
     return available[0] if available else None
 
 
-def devices_for_host_api(api: HostApi, devices: Optional[List[DeviceInfo]] = None) -> List[DeviceInfo]:
+def devices_for_host_api(api: HostApi, devices: list[DeviceInfo] | None = None) -> list[DeviceInfo]:
     if devices is None:
         devices = enumerate_devices()
     return [d for d in devices if d.host_api == api]
 
 
-def find_device(key_or_index, devices: Optional[List[DeviceInfo]] = None) -> Optional[DeviceInfo]:
+def find_device(key_or_index, devices: list[DeviceInfo] | None = None) -> DeviceInfo | None:
     """Resolve a device by PortAudio index or by persisted key."""
     if devices is None:
         devices = enumerate_devices()

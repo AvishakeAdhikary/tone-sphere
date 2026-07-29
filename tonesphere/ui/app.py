@@ -3,9 +3,7 @@ Application entry point for the Qt interface.
 """
 
 import sys
-from typing import Optional
 
-from PySide6.QtCore import Qt
 from PySide6.QtGui import QIcon, QPalette
 from PySide6.QtWidgets import QApplication
 
@@ -46,7 +44,7 @@ def _apply_palette(app: QApplication):
     app.setPalette(palette)
 
 
-def create_app(argv: Optional[list] = None) -> QApplication:
+def create_app(argv: list | None = None) -> QApplication:
     """Build the QApplication with theme and DPI handling in place."""
     app = QApplication.instance()
     if app is None:
@@ -74,7 +72,7 @@ def create_app(argv: Optional[list] = None) -> QApplication:
     return app
 
 
-def run(config_manager: Optional[ConfigManager] = None) -> int:
+def run(config_manager: ConfigManager | None = None) -> int:
     """Launch the interface. Returns the process exit code."""
     from tonesphere.ui.main_window import MainWindow
 

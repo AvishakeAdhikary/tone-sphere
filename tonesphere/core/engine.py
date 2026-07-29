@@ -19,17 +19,26 @@ device key, buses are allocated from a separate range.
 """
 
 import threading
-import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 
 from tonesphere.core.channel_control import ChannelControlManager
-from tonesphere.core.models import AudioDevice, DeviceType
+from tonesphere.core.models import DeviceType
 from tonesphere.core.routing import AudioRoutingMatrix
 from tonesphere.engine import (
-    AudioBackendUnavailable, AudioHost, Connection, DeviceInfo, HostApi, RoutingGraph,
-    bus_node, db_to_linear, device_node, enumerate_devices, linear_to_db, preferred_host_api,
+    AudioBackendUnavailable,
+    AudioHost,
+    Connection,
+    DeviceInfo,
+    HostApi,
+    RoutingGraph,
+    bus_node,
+    db_to_linear,
+    device_node,
+    enumerate_devices,
+    linear_to_db,
+    preferred_host_api,
 )
 from tonesphere.network.audio_router import NetworkAudioRouter, NetworkQuality
 from tonesphere.utils.logger import get_logger
@@ -47,7 +56,7 @@ class AudioEngine:
         self,
         sample_rate: int = 48000,
         buffer_size: int = 256,
-        preferred_driver: Optional[HostApi] = None,
+        preferred_driver: HostApi | None = None,
         max_virtual_inputs: int = 10,
         max_virtual_outputs: int = 10,
         exclusive: bool = True,
@@ -71,18 +80,18 @@ class AudioEngine:
         self.network_router = NetworkAudioRouter(quality=NetworkQuality.HIGH)
 
         # Id bookkeeping.
-        self._devices: List[DeviceInfo] = []
-        self._id_to_node: Dict[int, Any] = {}
-        self._node_to_id: Dict[str, int] = {}
-        self._device_by_id: Dict[int, DeviceInfo] = {}
-        self._bus_meta: Dict[int, Dict[str, Any]] = {}
+        self._devices: list[DeviceInfo] = []
+        self._id_to_node: dict[int, Any] = {}
+        self._node_to_id: dict[str, int] = {}
+        self._device_by_id: dict[int, DeviceInfo] = {}
+        self._bus_meta: dict[int, dict[str, Any]] = {}
         self._next_bus_id = BUS_ID_BASE
 
         self._lock = threading.RLock()
         self._initialized = False
         self._started = False
-        self._backend_error: Optional[str] = None
-        self._problems: List[str] = []
+        self._backend_error: str | None = None
+        self._problems: list[str] = []
 
         self.master_volume = 1.0
 
@@ -164,7 +173,7 @@ class AudioEngine:
             return 'idle'
         return 'stopped'
 
-    def create_monitor_patch(self, muted: bool = True) -> Tuple[bool, str]:
+    def create_monitor_patch(self, muted: bool = True) -> tuple[bool, str]:
         """
         Patch the default input straight to the default output.
 
@@ -247,7 +256,7 @@ class AudioEngine:
     def _node_for(self, device_id: int):
         return self._id_to_node.get(device_id)
 
-    def _id_for(self, node) -> Optional[int]:
+    def _id_for(self, node) -> int | None:
         return self._node_to_id.get(str(node))
 
     # --- Devices ---
@@ -287,7 +296,7 @@ class AudioEngine:
             logger.info(f"Refreshed: {len(self._devices)} devices")
             return True
 
-    def get_devices(self, include_all_backends: bool = False) -> List[Dict]:
+    def get_devices(self, include_all_backends: bool = False) -> list[dict]:
         """
         Routable endpoints on the active backend.
 
@@ -303,7 +312,7 @@ class AudioEngine:
         actually achieved, and the two differ substantially.
         """
         with self._lock:
-            devices: List[Dict] = []
+            devices: list[dict] = []
             active_api = self.host.host_api
 
             for device_id, device in sorted(self._device_by_id.items()):
@@ -358,10 +367,10 @@ class AudioEngine:
 
             return devices
 
-    def get_device_info(self, device_id: int) -> Optional[DeviceInfo]:
+    def get_device_info(self, device_id: int) -> DeviceInfo | None:
         return self._device_by_id.get(device_id)
 
-    def default_output_id(self) -> Optional[int]:
+    def default_output_id(self) -> int | None:
         """
         The device a user would expect audio to come out of.
 
@@ -371,10 +380,10 @@ class AudioEngine:
         """
         return self._default_id(want_output=True)
 
-    def default_input_id(self) -> Optional[int]:
+    def default_input_id(self) -> int | None:
         return self._default_id(want_output=False)
 
-    def _default_id(self, want_output: bool) -> Optional[int]:
+    def _default_id(self, want_output: bool) -> int | None:
         active_api = self.host.host_api
 
         candidates = [
@@ -401,7 +410,7 @@ class AudioEngine:
 
     # --- Buses (previously called "virtual devices") ---
 
-    def create_virtual_input(self, name: str, channels: int = 2) -> Optional[int]:
+    def create_virtual_input(self, name: str, channels: int = 2) -> int | None:
         """
         Create an input bus.
 
@@ -410,10 +419,10 @@ class AudioEngine:
         """
         return self._create_bus(name, channels, direction='input')
 
-    def create_virtual_output(self, name: str, channels: int = 2) -> Optional[int]:
+    def create_virtual_output(self, name: str, channels: int = 2) -> int | None:
         return self._create_bus(name, channels, direction='output')
 
-    def _create_bus(self, name: str, channels: int, direction: str) -> Optional[int]:
+    def _create_bus(self, name: str, channels: int, direction: str) -> int | None:
         with self._lock:
             existing = sum(1 for m in self._bus_meta.values() if m['direction'] == direction)
             limit = self.max_virtual_inputs if direction == 'input' else self.max_virtual_outputs
@@ -463,7 +472,7 @@ class AudioEngine:
 
     delete_virtual_device = remove_virtual_device
 
-    def list_virtual_devices(self) -> List[Dict]:
+    def list_virtual_devices(self) -> list[dict]:
         return [
             {
                 'id': bus_id,
@@ -476,7 +485,7 @@ class AudioEngine:
             for bus_id, meta in sorted(self._bus_meta.items())
         ]
 
-    def get_virtual_device_counts(self) -> Dict:
+    def get_virtual_device_counts(self) -> dict:
         inputs = sum(1 for m in self._bus_meta.values() if m['direction'] == 'input')
         outputs = sum(1 for m in self._bus_meta.values() if m['direction'] == 'output')
         return {
@@ -567,7 +576,7 @@ class AudioEngine:
         )
 
     def create_routing(self, source_id: int, destination_id: int,
-                       volume: float = 1.0) -> Tuple[bool, str]:
+                       volume: float = 1.0) -> tuple[bool, str]:
         """
         Route source to destination.
 
@@ -642,7 +651,7 @@ class AudioEngine:
             self.routing_matrix.connections.clear()
             self._publish_graph()
 
-    def _publish_graph(self) -> List[str]:
+    def _publish_graph(self) -> list[str]:
         """
         Hand the current routing to the host.
 
@@ -680,7 +689,7 @@ class AudioEngine:
         self._problems = problems
         return problems
 
-    def get_routing_matrix(self) -> Dict:
+    def get_routing_matrix(self) -> dict:
         connections = {}
         for (source, dest), route in self.routing_matrix.connections.items():
             connections[f"{source}_{dest}"] = {
@@ -698,7 +707,7 @@ class AudioEngine:
 
     # --- Channel controls ---
 
-    def apply_channel_controls(self, device_id: Optional[int] = None):
+    def apply_channel_controls(self, device_id: int | None = None):
         """
         Push channel-control state into the running audio path.
 
@@ -778,7 +787,7 @@ class AudioEngine:
             return None
         return self.host.inserts_for(node.ref, is_input)
 
-    def load_plugin(self, device_id: int, path: str, is_input: bool = True) -> Tuple[bool, str]:
+    def load_plugin(self, device_id: int, path: str, is_input: bool = True) -> tuple[bool, str]:
         """
         Load a VST3/AU plugin onto a device's insert chain.
 
@@ -801,7 +810,7 @@ class AudioEngine:
         note = f" (+{latency:.1f} ms plugin latency)" if latency > 0.05 else ""
         return True, f"Loaded {inserts.plugins.names[index]}{note}"
 
-    def list_plugins(self, device_id: int, is_input: bool = True) -> List[Dict[str, Any]]:
+    def list_plugins(self, device_id: int, is_input: bool = True) -> list[dict[str, Any]]:
         inserts = self.get_inserts(device_id, is_input)
         if inserts is None or inserts.plugins is None:
             return []
@@ -815,7 +824,7 @@ class AudioEngine:
         return True
 
     @staticmethod
-    def discover_plugins(paths: Optional[List[str]] = None) -> List[str]:
+    def discover_plugins(paths: list[str] | None = None) -> list[str]:
         from tonesphere.engine.effects import PluginChain
 
         return PluginChain.discover(paths)
@@ -850,7 +859,7 @@ class AudioEngine:
 
     # --- Metering ---
 
-    def get_meters(self) -> Dict[int, Dict[str, float]]:
+    def get_meters(self) -> dict[int, dict[str, float]]:
         """
         Current levels per device id, in dBFS.
 
@@ -860,7 +869,7 @@ class AudioEngine:
         if not self.host.is_running:
             return {}
 
-        meters: Dict[int, Dict[str, float]] = {}
+        meters: dict[int, dict[str, float]] = {}
 
         for key, reading in self.host.meters.read_summaries().items():
             device_id = self._meter_key_to_id(key)
@@ -876,7 +885,7 @@ class AudioEngine:
 
         return meters
 
-    def _meter_key_to_id(self, key: str) -> Optional[int]:
+    def _meter_key_to_id(self, key: str) -> int | None:
         if key.startswith('bus::'):
             return self._node_to_id.get(f"bus:{key[5:]}")
 
@@ -888,7 +897,7 @@ class AudioEngine:
 
     # --- Statistics ---
 
-    def get_performance_stats(self) -> Dict:
+    def get_performance_stats(self) -> dict:
         """
         Measured engine statistics.
 
@@ -908,12 +917,12 @@ class AudioEngine:
 
         return stats
 
-    def get_ring_statistics(self) -> Dict[str, dict]:
+    def get_ring_statistics(self) -> dict[str, dict]:
         return self.host.ring_statistics()
 
     # --- Backend info ---
 
-    def get_driver_info(self) -> Dict[str, Any]:
+    def get_driver_info(self) -> dict[str, Any]:
         from tonesphere.engine.devices import describe_backend
 
         info = describe_backend()
@@ -924,7 +933,7 @@ class AudioEngine:
             info['error'] = self._backend_error
         return info
 
-    def get_available_drivers(self) -> List[str]:
+    def get_available_drivers(self) -> list[str]:
         from tonesphere.engine.devices import available_host_apis
 
         try:
@@ -967,7 +976,7 @@ class AudioEngine:
             logger.info(f"Switched to {api.value}")
             return True
 
-    def get_available_drivers_enum(self) -> List[HostApi]:
+    def get_available_drivers_enum(self) -> list[HostApi]:
         from tonesphere.engine.devices import available_host_apis
 
         try:
@@ -1028,7 +1037,7 @@ class AudioEngine:
     def stop_network_streaming(self):
         self.network_router.stop_server()
 
-    def get_network_clients(self) -> List[str]:
+    def get_network_clients(self) -> list[str]:
         return self.network_router.get_connected_clients()
 
     def connect_to_network(self, host: str, port: int) -> bool:
@@ -1037,10 +1046,10 @@ class AudioEngine:
     def disconnect_from_network(self, conn_id: str):
         self.network_router.disconnect_from(conn_id)
 
-    def get_network_connections(self) -> List[str]:
+    def get_network_connections(self) -> list[str]:
         return self.network_router.get_connections()
 
-    def get_network_statistics(self) -> Dict:
+    def get_network_statistics(self) -> dict:
         return self.network_router.get_statistics()
 
     def register_network_receive(self, device_id: int):
@@ -1050,7 +1059,7 @@ class AudioEngine:
 
         self.network_router.register_receive_callback(device_id, receive_callback)
 
-    def send_device_audio_to_network(self, device_id: int, target: Optional[str] = None):
+    def send_device_audio_to_network(self, device_id: int, target: str | None = None):
         logger.warning(
             "Network send is not wired to the audio path; see the Roadmap in README.md"
         )

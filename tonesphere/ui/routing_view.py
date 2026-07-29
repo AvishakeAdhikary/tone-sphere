@@ -11,16 +11,22 @@ from the original: drag from an output port to an input port to connect, right-c
 cable to remove it, drag nodes to arrange, wheel to zoom.
 """
 
-import math
-from typing import Dict, List, Optional, Tuple
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import (
-    QBrush, QColor, QFont, QPainter, QPainterPath, QPen, QWheelEvent,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QWheelEvent,
 )
 from PySide6.QtWidgets import (
-    QGraphicsItem, QGraphicsObject, QGraphicsScene, QGraphicsView, QMenu,
-    QStyleOptionGraphicsItem, QWidget,
+    QGraphicsItem,
+    QGraphicsObject,
+    QGraphicsScene,
+    QGraphicsView,
+    QMenu,
+    QStyleOptionGraphicsItem,
+    QWidget,
 )
 
 from tonesphere.ui.theme import Colors, Spacing, Type, format_db
@@ -55,7 +61,7 @@ class PortItem(QGraphicsObject):
         return QRectF(-r, -r, r * 2, r * 2)
 
     def paint(self, painter: QPainter, option: QStyleOptionGraphicsItem,
-              widget: Optional[QWidget] = None):
+              widget: QWidget | None = None):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         radius = PORT_RADIUS + (2 if self._hovered else 0)
@@ -97,18 +103,18 @@ class NodeItem(QGraphicsObject):
         self.name = name
         self.subtitle = subtitle
         self.is_bus = is_bus
-        self.failed: Optional[str] = None
+        self.failed: str | None = None
 
         self._level = 0.0
-        self._cables: List["CableItem"] = []
+        self._cables: list[CableItem] = []
 
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable)
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable)
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges)
         self.setCursor(Qt.CursorShape.OpenHandCursor)
 
-        self.input_port: Optional[PortItem] = None
-        self.output_port: Optional[PortItem] = None
+        self.input_port: PortItem | None = None
+        self.output_port: PortItem | None = None
 
         if can_input:
             self.input_port = PortItem(self, is_output=False)
@@ -124,7 +130,7 @@ class NodeItem(QGraphicsObject):
                       NODE_WIDTH + PORT_RADIUS * 4, NODE_HEIGHT)
 
     def paint(self, painter: QPainter, option: QStyleOptionGraphicsItem,
-              widget: Optional[QWidget] = None):
+              widget: QWidget | None = None):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         body = QRectF(0, 0, NODE_WIDTH, NODE_HEIGHT)
@@ -185,7 +191,7 @@ class NodeItem(QGraphicsObject):
             self._level = level
             self.update()
 
-    def set_failed(self, reason: Optional[str]):
+    def set_failed(self, reason: str | None):
         self.failed = reason
         self.setToolTip(f"{self.name}\n{reason}" if reason else f"{self.name}\n{self.subtitle}")
         self.update()
@@ -242,7 +248,7 @@ class CableItem(QGraphicsObject):
         self.refresh()
 
     @property
-    def key(self) -> Tuple[int, int]:
+    def key(self) -> tuple[int, int]:
         return (self.source.node_id, self.dest.node_id)
 
     def refresh(self):
@@ -274,7 +280,7 @@ class CableItem(QGraphicsObject):
         return stroker.createStroke(self._path)
 
     def paint(self, painter: QPainter, option: QStyleOptionGraphicsItem,
-              widget: Optional[QWidget] = None):
+              widget: QWidget | None = None):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         if self.dead:
@@ -335,11 +341,11 @@ class RoutingScene(QGraphicsScene):
 
         self.setBackgroundBrush(Colors.BG_SUNKEN)
 
-        self.nodes: Dict[int, NodeItem] = {}
-        self.cables: Dict[Tuple[int, int], CableItem] = {}
+        self.nodes: dict[int, NodeItem] = {}
+        self.cables: dict[tuple[int, int], CableItem] = {}
 
-        self._pending_source: Optional[PortItem] = None
-        self._pending_path: Optional[QGraphicsItem] = None
+        self._pending_source: PortItem | None = None
+        self._pending_path: QGraphicsItem | None = None
 
     # --- Content ---
 
@@ -353,7 +359,7 @@ class RoutingScene(QGraphicsScene):
         return node
 
     def add_cable(self, source_id: int, dest_id: int,
-                  gain_db: float = 0.0, muted: bool = False) -> Optional[CableItem]:
+                  gain_db: float = 0.0, muted: bool = False) -> CableItem | None:
         source = self.nodes.get(source_id)
         dest = self.nodes.get(dest_id)
         if source is None or dest is None:
@@ -492,7 +498,7 @@ class RoutingView(QGraphicsView):
     MIN_SCALE = 0.25
     MAX_SCALE = 2.5
 
-    def __init__(self, scene: RoutingScene, parent: Optional[QWidget] = None):
+    def __init__(self, scene: RoutingScene, parent: QWidget | None = None):
         super().__init__(scene, parent)
 
         self.setRenderHint(QPainter.RenderHint.Antialiasing)

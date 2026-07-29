@@ -7,15 +7,20 @@ done to it in a fixed vertical order. The order is not arbitrary — it matches 
 every console, so it can be read without learning anything.
 """
 
-from typing import Callable, Dict, List, Optional
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QFontMetrics
+from PySide6.QtGui import QFontMetrics
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
 )
 
-from tonesphere.ui.theme import METRICS, Colors, Spacing, Type, format_db
+from tonesphere.ui.theme import METRICS, Colors, Spacing, Type
 from tonesphere.ui.widgets import Fader, LevelMeter, PanKnob, StatusPill
 
 
@@ -38,7 +43,7 @@ class ChannelStripWidget(QFrame):
     selected = Signal(int)
 
     def __init__(self, device_id: int, name: str, subtitle: str, channels: int = 2,
-                 parent: Optional[QWidget] = None):
+                 parent: QWidget | None = None):
         super().__init__(parent)
 
         self.device_id = device_id
@@ -181,7 +186,7 @@ class ChannelStripWidget(QFrame):
         self.solo_button.setChecked(soloed)
         self.solo_button.blockSignals(False)
 
-    def set_failed(self, reason: Optional[str]):
+    def set_failed(self, reason: str | None):
         """
         Mark a strip whose device would not open.
 
@@ -216,7 +221,7 @@ class MasterStrip(QFrame):
     gain_changed = Signal(float)
     clip_cleared = Signal()
 
-    def __init__(self, parent: Optional[QWidget] = None):
+    def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
 
         self.setObjectName("Panel")
@@ -261,7 +266,7 @@ class MasterStrip(QFrame):
     def set_inactive(self):
         self.meter.set_inactive()
 
-    def set_limiter_reduction(self, db: Optional[float]):
+    def set_limiter_reduction(self, db: float | None):
         if db is None or db >= -0.05:
             self.limiter_label.setText("limiter idle")
             self.limiter_label.setStyleSheet(f"color: {Colors.TEXT_DIM.name()};")
@@ -282,7 +287,7 @@ class HardwareBar(QFrame):
     single most useful thing a latency-sensitive user can know.
     """
 
-    def __init__(self, parent: Optional[QWidget] = None):
+    def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
 
         self.setObjectName("Panel")
@@ -322,7 +327,7 @@ class HardwareBar(QFrame):
         line.setStyleSheet(f"color: {Colors.BORDER.name()};")
         return line
 
-    def update_state(self, state: str, stats: Dict):
+    def update_state(self, state: str, stats: dict):
         """Reflect engine state and measurements. Called on a UI timer."""
         labels = {
             'running': ("Running", Colors.OK),
@@ -358,7 +363,7 @@ class HardwareBar(QFrame):
         else:
             self.message.setText("")
 
-    def _update_latency(self, stats: Dict):
+    def _update_latency(self, stats: dict):
         measured = stats.get('measured_latency_ms')
         nominal = stats.get('nominal_latency_ms')
 
@@ -377,7 +382,7 @@ class HardwareBar(QFrame):
             text += f" ({nominal:.1f} nom)"
         self.latency.set_value(text, tone)
 
-    def _update_load(self, stats: Dict):
+    def _update_load(self, stats: dict):
         load = stats.get('cpu_usage')
         if load is None:
             self.load.set_value(None)
@@ -387,7 +392,7 @@ class HardwareBar(QFrame):
         tone = Colors.OK if load < 50 else (Colors.WARN if load < 80 else Colors.ERROR)
         self.load.set_value(f"{load:.0f}%", tone)
 
-    def _update_xruns(self, stats: Dict):
+    def _update_xruns(self, stats: dict):
         xruns = stats.get('xruns')
         if xruns is None:
             self.xruns.set_value(None)

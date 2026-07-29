@@ -14,7 +14,11 @@ import numpy as np
 import pytest
 
 from tonesphere.network.audio_router import (
-    MAX_PACKET_BYTES, AudioCodec, AudioPacket, NetworkAudioRouter, NetworkQuality,
+    MAX_PACKET_BYTES,
+    AudioCodec,
+    AudioPacket,
+    NetworkAudioRouter,
+    NetworkQuality,
 )
 
 

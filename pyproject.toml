@@ -3,7 +3,7 @@ name = "tone-sphere"
 version = "0.1.0"
 # Describes what this is, not what it aspires to. The previous description claimed a
 # "complete audio routing system"; it passes no audio yet. See the Roadmap in README.md.
-description = "Audio routing and mixing for Windows, Linux and macOS. Pre-alpha: no audio path yet."
+description = "Low-latency audio routing and mixing for Windows, Linux and macOS."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
@@ -26,6 +26,7 @@ dependencies = [
 dev = [
     "httpx>=0.28.1",
     "pytest>=9.1.1",
+    "ruff>=0.16.0",
 ]
 
 [tool.pytest.ini_options]
@@ -34,3 +35,33 @@ addopts = "-ra --strict-markers"
 markers = [
     "hardware: needs a real audio device; skipped on CI runners, which have none",
 ]
+
+[tool.ruff]
+target-version = "py313"
+# 120, not the default 88. This codebase's comments are prose explaining *why*, not
+# clipped one-liners, and its longest line — an unavoidably atomic logging format
+# string — sits at 112; 100 would have forced ~20 lines (log formats, f-strings,
+# a couple of signatures) into awkward wraps that read worse than the overflow did,
+# for zero readability gain. 120 reflects the width this code already settled at
+# rather than loosening a check that would otherwise catch something real.
+line-length = 120
+exclude = ["dist", "build", "presets"]
+
+[tool.ruff.lint]
+# Correctness and real bugs, not house style:
+#   F   pyflakes      — unused imports/names, undefined names, real mistakes
+#   E/W pycodestyle   — the parts of PEP 8 that catch actual errors
+#   B   bugbear       — mutable default args, loop-variable-in-closure, and similar
+#                       footguns that are easy to write and hard to spot in review
+#   UP  pyupgrade     — flags syntax older than the declared target-version
+#   I   isort         — import order and grouping
+select = ["E", "F", "W", "B", "UP", "I"]
+ignore = [
+    "E402",   # a handful of modules import mid-file on purpose (optional deps, lazy
+              # imports to avoid pulling in PortAudio/Qt/pedalboard just for a type check)
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests intentionally build throwaway fixture objects inline and re-import optional
+# dependencies (pedalboard) after checking availability at runtime, not at module load.
+"tests/*" = ["E402"]

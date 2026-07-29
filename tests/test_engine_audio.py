@@ -16,7 +16,13 @@ import numpy as np
 import pytest
 
 from tonesphere.engine.graph import (
-    Connection, GraphHolder, RoutingGraph, bus_node, db_to_linear, device_node, linear_to_db,
+    Connection,
+    GraphHolder,
+    RoutingGraph,
+    bus_node,
+    db_to_linear,
+    device_node,
+    linear_to_db,
 )
 from tonesphere.engine.host import AudioHost
 from tonesphere.engine.ringbuffer import AudioRingBuffer

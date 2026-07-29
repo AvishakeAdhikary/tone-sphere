@@ -12,7 +12,6 @@ carry that state across blocks, which is why these are objects rather than funct
 """
 
 import math
-from typing import Optional, Tuple
 
 import numpy as np
 
@@ -25,7 +24,7 @@ PAN_LAW_MINUS_6DB = 'minus6'
 PAN_LAW_LINEAR = 'linear'
 
 
-def pan_gains(pan: float, law: str = PAN_LAW_MINUS_3DB) -> Tuple[float, float]:
+def pan_gains(pan: float, law: str = PAN_LAW_MINUS_3DB) -> tuple[float, float]:
     """
     Left and right gain for a pan position in [-1, 1].
 

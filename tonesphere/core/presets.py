@@ -14,7 +14,7 @@ your setup back and a list of what is absent.
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import yaml
 
@@ -29,10 +29,10 @@ PRESET_VERSION = 1
 class RecallResult:
     """What happened when a preset was applied."""
     applied: bool
-    missing_devices: List[str] = field(default_factory=list)
+    missing_devices: list[str] = field(default_factory=list)
     restored_routes: int = 0
     skipped_routes: int = 0
-    warnings: List[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
     @property
     def is_complete(self) -> bool:
@@ -53,13 +53,13 @@ class RecallResult:
 class PresetManager:
     """Reads and writes presets for an `AudioEngine`."""
 
-    def __init__(self, engine, directory: Optional[Path] = None):
+    def __init__(self, engine, directory: Path | None = None):
         self.engine = engine
         self.directory = Path(directory) if directory else Path("presets")
 
     # --- Capture ---
 
-    def capture(self, name: str) -> Dict[str, Any]:
+    def capture(self, name: str) -> dict[str, Any]:
         """
         Snapshot the current setup.
 
@@ -133,7 +133,7 @@ class PresetManager:
             'channels': channels,
         }
 
-    def _reference(self, device_id: int) -> Optional[str]:
+    def _reference(self, device_id: int) -> str | None:
         """
         A durable reference for a device or bus.
 
@@ -152,7 +152,7 @@ class PresetManager:
 
     # --- Recall ---
 
-    def apply(self, preset: Dict[str, Any], apply_engine_settings: bool = False) -> RecallResult:
+    def apply(self, preset: dict[str, Any], apply_engine_settings: bool = False) -> RecallResult:
         """
         Apply a preset to the engine.
 
@@ -188,7 +188,7 @@ class PresetManager:
         logger.info(f"Preset '{preset.get('name', 'unnamed')}': {result.summary()}")
         return result
 
-    def _apply_engine_settings(self, settings: Dict[str, Any], result: RecallResult):
+    def _apply_engine_settings(self, settings: dict[str, Any], result: RecallResult):
         engine = self.engine
 
         host_api = settings.get('host_api')
@@ -208,7 +208,7 @@ class PresetManager:
         if exclusive is not None:
             engine.set_exclusive_mode(bool(exclusive))
 
-    def _recreate_buses(self, buses: List[Dict[str, Any]]) -> Dict[str, int]:
+    def _recreate_buses(self, buses: list[dict[str, Any]]) -> dict[str, int]:
         """
         Recreate the preset's buses, reusing any that already exist under the same name.
 
@@ -216,7 +216,7 @@ class PresetManager:
         duplicate buses.
         """
         engine = self.engine
-        mapping: Dict[str, int] = {}
+        mapping: dict[str, int] = {}
 
         existing = {meta['name']: bus_id for bus_id, meta in engine._bus_meta.items()}
 
@@ -240,14 +240,14 @@ class PresetManager:
 
         return mapping
 
-    def _map_devices(self) -> Dict[str, int]:
+    def _map_devices(self) -> dict[str, int]:
         return {
             f"device:{device.key}": device_id
             for device_id, device in self.engine._device_by_id.items()
         }
 
-    def _apply_routes(self, routes: List[Dict[str, Any]],
-                      mapping: Dict[str, int], result: RecallResult):
+    def _apply_routes(self, routes: list[dict[str, Any]],
+                      mapping: dict[str, int], result: RecallResult):
         engine = self.engine
 
         for route in routes:
@@ -284,8 +284,8 @@ class PresetManager:
 
             result.restored_routes += 1
 
-    def _apply_channels(self, channels: Dict[str, Any],
-                        mapping: Dict[str, int], result: RecallResult):
+    def _apply_channels(self, channels: dict[str, Any],
+                        mapping: dict[str, int], result: RecallResult):
         engine = self.engine
 
         for reference, settings in channels.items():
@@ -316,7 +316,7 @@ class PresetManager:
 
     # --- Files ---
 
-    def save(self, name: str, path: Optional[Path] = None) -> Path:
+    def save(self, name: str, path: Path | None = None) -> Path:
         """Write a preset. Returns where it went."""
         preset = self.capture(name)
 
@@ -335,7 +335,7 @@ class PresetManager:
             return RecallResult(applied=False, warnings=[f"No such preset: {source}"])
 
         try:
-            with open(source, 'r', encoding='utf-8') as handle:
+            with open(source, encoding='utf-8') as handle:
                 preset = yaml.safe_load(handle)
         except Exception as e:
             return RecallResult(applied=False, warnings=[f"Could not read preset: {e}"])
@@ -345,7 +345,7 @@ class PresetManager:
 
         return self.apply(preset, apply_engine_settings)
 
-    def list_presets(self) -> List[Dict[str, Any]]:
+    def list_presets(self) -> list[dict[str, Any]]:
         """Presets in the preset directory, newest first."""
         if not self.directory.is_dir():
             return []
@@ -353,7 +353,7 @@ class PresetManager:
         found = []
         for path in self.directory.glob("*.yaml"):
             try:
-                with open(path, 'r', encoding='utf-8') as handle:
+                with open(path, encoding='utf-8') as handle:
                     data = yaml.safe_load(handle) or {}
                 found.append({
                     'path': str(path),

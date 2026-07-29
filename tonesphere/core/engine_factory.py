@@ -6,7 +6,7 @@ It forwards to `AudioEngine` and adds nothing, so new code should use `AudioEngi
 directly.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import numpy as np
 
@@ -38,7 +38,7 @@ _DRIVER_ALIASES = {
 }
 
 
-def resolve_host_api(name: str) -> Optional[HostApi]:
+def resolve_host_api(name: str) -> HostApi | None:
     """Map a config string to a host API. Unknown names fall back to auto-selection."""
     key = (name or 'auto').strip().lower()
 
@@ -53,7 +53,7 @@ def resolve_host_api(name: str) -> Optional[HostApi]:
     return None
 
 
-def create_audio_engine(config_manager: Optional[ConfigManager] = None) -> AudioEngine:
+def create_audio_engine(config_manager: ConfigManager | None = None) -> AudioEngine:
     """Build an engine from configuration."""
     if config_manager is None:
         config_manager = ConfigManager()
@@ -85,7 +85,7 @@ def create_audio_engine(config_manager: Optional[ConfigManager] = None) -> Audio
 class UnifiedAudioEngine:
     """Thin forwarder to `AudioEngine`, kept for the existing GUI/CLI/API callers."""
 
-    def __init__(self, config_manager: Optional[ConfigManager] = None):
+    def __init__(self, config_manager: ConfigManager | None = None):
         self.engine = create_audio_engine(config_manager)
 
     # --- Lifecycle ---
@@ -104,28 +104,28 @@ class UnifiedAudioEngine:
 
     # --- Devices ---
 
-    def get_devices(self, include_all_backends: bool = False) -> List[Dict]:
+    def get_devices(self, include_all_backends: bool = False) -> list[dict]:
         return self.engine.get_devices(include_all_backends)
 
-    def default_output_id(self) -> Optional[int]:
+    def default_output_id(self) -> int | None:
         return self.engine.default_output_id()
 
-    def default_input_id(self) -> Optional[int]:
+    def default_input_id(self) -> int | None:
         return self.engine.default_input_id()
 
     def refresh_devices(self) -> bool:
         return self.engine.refresh_devices()
 
-    def create_virtual_input(self, name: str, channels: int = 2) -> Optional[int]:
+    def create_virtual_input(self, name: str, channels: int = 2) -> int | None:
         return self.engine.create_virtual_input(name, channels)
 
-    def create_virtual_output(self, name: str, channels: int = 2) -> Optional[int]:
+    def create_virtual_output(self, name: str, channels: int = 2) -> int | None:
         return self.engine.create_virtual_output(name, channels)
 
-    def list_virtual_devices(self) -> List[Dict]:
+    def list_virtual_devices(self) -> list[dict]:
         return self.engine.list_virtual_devices()
 
-    def get_virtual_device_counts(self) -> Dict:
+    def get_virtual_device_counts(self) -> dict:
         return self.engine.get_virtual_device_counts()
 
     def delete_virtual_device(self, device_id: int) -> bool:
@@ -171,29 +171,29 @@ class UnifiedAudioEngine:
     def state(self) -> str:
         return self.engine.state
 
-    def get_routing_matrix(self) -> Dict:
+    def get_routing_matrix(self) -> dict:
         return self.engine.get_routing_matrix()
 
     # --- Measurements ---
 
-    def get_performance_stats(self) -> Dict:
+    def get_performance_stats(self) -> dict:
         return self.engine.get_performance_stats()
 
-    def get_meters(self) -> Dict[int, Dict[str, float]]:
+    def get_meters(self) -> dict[int, dict[str, float]]:
         return self.engine.get_meters()
 
     def clear_clip_indicators(self):
         return self.engine.clear_clip_indicators()
 
-    def get_ring_statistics(self) -> Dict[str, dict]:
+    def get_ring_statistics(self) -> dict[str, dict]:
         return self.engine.get_ring_statistics()
 
     # --- Backend ---
 
-    def get_driver_info(self) -> Dict[str, Any]:
+    def get_driver_info(self) -> dict[str, Any]:
         return self.engine.get_driver_info()
 
-    def get_available_drivers(self) -> List[str]:
+    def get_available_drivers(self) -> list[str]:
         return self.engine.get_available_drivers()
 
     def switch_driver(self, driver_type: str) -> bool:

@@ -18,7 +18,6 @@ callback would be arithmetic we can do once, at edit time.
 
 import math
 from dataclasses import dataclass, field, replace
-from typing import Dict, FrozenSet, Iterable, List, Optional, Tuple
 
 MIN_GAIN_DB = -60.0
 MAX_GAIN_DB = 12.0
@@ -78,8 +77,8 @@ class Connection:
     muted: bool = False
     pan: float = 0.0
     invert: bool = False
-    source_channels: Optional[Tuple[int, ...]] = None
-    dest_channels: Optional[Tuple[int, ...]] = None
+    source_channels: tuple[int, ...] | None = None
+    dest_channels: tuple[int, ...] | None = None
 
     @property
     def effective_gain(self) -> float:
@@ -90,7 +89,7 @@ class Connection:
         """Whether this route can contribute anything, so the mixer can skip it."""
         return not self.muted and self.gain > 0.0
 
-    def key(self) -> Tuple[str, str]:
+    def key(self) -> tuple[str, str]:
         return (str(self.source), str(self.dest))
 
 
@@ -102,17 +101,17 @@ class RoutingGraph:
     Every mutator returns a new graph. Nothing here is ever edited in place, which is
     the whole basis of the lock-free handoff to the callback.
     """
-    connections: Tuple[Connection, ...] = ()
-    soloed: FrozenSet[NodeId] = frozenset()
+    connections: tuple[Connection, ...] = ()
+    soloed: frozenset[NodeId] = frozenset()
     master_gain: float = 1.0
 
     # Derived, built once in __post_init__ so the callback never has to search.
-    _by_dest: Dict[NodeId, Tuple[Connection, ...]] = field(
+    _by_dest: dict[NodeId, tuple[Connection, ...]] = field(
         default_factory=dict, compare=False, repr=False
     )
 
     def __post_init__(self):
-        by_dest: Dict[NodeId, List[Connection]] = {}
+        by_dest: dict[NodeId, list[Connection]] = {}
 
         solo_active = bool(self.soloed)
 
@@ -130,23 +129,23 @@ class RoutingGraph:
             {dest: tuple(items) for dest, items in by_dest.items()},
         )
 
-    def sources_for(self, dest: NodeId) -> Tuple[Connection, ...]:
+    def sources_for(self, dest: NodeId) -> tuple[Connection, ...]:
         """Audible routes feeding one destination. The callback's hot lookup."""
         return self._by_dest.get(dest, ())
 
     @property
-    def destinations(self) -> Tuple[NodeId, ...]:
+    def destinations(self) -> tuple[NodeId, ...]:
         return tuple(self._by_dest.keys())
 
     @property
-    def active_sources(self) -> Tuple[NodeId, ...]:
+    def active_sources(self) -> tuple[NodeId, ...]:
         seen = {}
         for connections in self._by_dest.values():
             for connection in connections:
                 seen[connection.source] = None
         return tuple(seen)
 
-    def nodes(self) -> Tuple[NodeId, ...]:
+    def nodes(self) -> tuple[NodeId, ...]:
         """Every node mentioned by any route, audible or not."""
         seen = {}
         for connection in self.connections:
@@ -154,7 +153,7 @@ class RoutingGraph:
             seen[connection.dest] = None
         return tuple(seen)
 
-    def find(self, source: NodeId, dest: NodeId) -> Optional[Connection]:
+    def find(self, source: NodeId, dest: NodeId) -> Connection | None:
         for connection in self.connections:
             if connection.source == source and connection.dest == dest:
                 return connection
@@ -314,7 +313,7 @@ class GraphHolder:
 
     __slots__ = ('_graph', '_generation')
 
-    def __init__(self, graph: Optional[RoutingGraph] = None):
+    def __init__(self, graph: RoutingGraph | None = None):
         self._graph = graph if graph is not None else RoutingGraph()
         self._generation = 0
 

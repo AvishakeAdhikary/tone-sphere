@@ -12,8 +12,15 @@ import numpy as np
 import pytest
 
 from tonesphere.engine.dsp import (
-    PAN_LAW_LINEAR, PAN_LAW_MINUS_3DB, PAN_LAW_MINUS_6DB,
-    ChannelStrip, DriftResampler, Limiter, Panner, SmoothedGain, pan_gains,
+    PAN_LAW_LINEAR,
+    PAN_LAW_MINUS_3DB,
+    PAN_LAW_MINUS_6DB,
+    ChannelStrip,
+    DriftResampler,
+    Limiter,
+    Panner,
+    SmoothedGain,
+    pan_gains,
 )
 
 BLOCK = 256

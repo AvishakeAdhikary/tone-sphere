@@ -13,7 +13,6 @@ writes the other's index. A lock here would be worse than useless — blocking i
 audio callback is what causes dropouts in the first place.
 """
 
-from typing import Optional
 
 import numpy as np
 

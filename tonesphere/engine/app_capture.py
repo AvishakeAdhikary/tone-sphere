@@ -24,7 +24,6 @@ implementation flagged rather than pretending it is done.
 import platform
 import subprocess
 from dataclasses import dataclass
-from typing import List, Optional
 
 from tonesphere.utils.logger import get_logger
 
@@ -49,7 +48,7 @@ class AudioSession:
         return f"{self.display_name} ({state})"
 
 
-def _windows_sessions() -> List[AudioSession]:
+def _windows_sessions() -> list[AudioSession]:
     """
     Query the Windows Audio Session API through PowerShell.
 
@@ -184,7 +183,7 @@ for ($i = 0; $i -lt $pairs.Length; $i += 2) {
         logger.debug(f"Audio session query returned {result.returncode}")
         return []
 
-    sessions: List[AudioSession] = []
+    sessions: list[AudioSession] = []
     for line in result.stdout.splitlines():
         parts = line.strip().split('|')
         if len(parts) != 3:
@@ -212,7 +211,7 @@ for ($i = 0; $i -lt $pairs.Length; $i += 2) {
     return sessions
 
 
-def _linux_sessions() -> List[AudioSession]:
+def _linux_sessions() -> list[AudioSession]:
     """PulseAudio and PipeWire both answer `pactl list sink-inputs`."""
     try:
         result = subprocess.run(
@@ -225,9 +224,9 @@ def _linux_sessions() -> List[AudioSession]:
     if result.returncode != 0:
         return []
 
-    sessions: List[AudioSession] = []
-    pid: Optional[int] = None
-    name: Optional[str] = None
+    sessions: list[AudioSession] = []
+    pid: int | None = None
+    name: str | None = None
     corked = False
 
     for line in result.stdout.splitlines():
@@ -283,7 +282,7 @@ def _friendly_name(process_name: str) -> str:
     return cleaned[:1].upper() + cleaned[1:] if cleaned else process_name
 
 
-def list_audio_sessions() -> List[AudioSession]:
+def list_audio_sessions() -> list[AudioSession]:
     """
     Applications the OS reports as holding an audio session.
 
@@ -320,7 +319,7 @@ def process_loopback_supported() -> bool:
     return build >= _PROCESS_LOOPBACK_MIN_BUILD
 
 
-def system_loopback_devices() -> List[str]:
+def system_loopback_devices() -> list[str]:
     """
     Loopback devices PortAudio can already capture from — whole-system output capture.
 

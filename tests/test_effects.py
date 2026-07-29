@@ -16,7 +16,14 @@ import numpy as np
 import pytest
 
 from tonesphere.engine.effects import (
-    Biquad, Compressor, Delay, EQBand, InsertChain, ParametricEQ, PluginChain,
+    Biquad,
+    Compressor,
+    Delay,
+    EQBand,
+    InsertChain,
+    ParametricEQ,
+    PluginChain,
+    PluginChainUnavailable,
 )
 
 RATE = 48000
@@ -401,17 +408,50 @@ class TestInsertChain:
         assert float(np.max(np.abs(chain.delay._buffer))) == 0.0
 
 
+def require_pedalboard():
+    """
+    Skip the test if pedalboard cannot be used here, otherwise return the module.
+
+    Deliberately not `pytest.importorskip("pedalboard")`. That does a raw import in this
+    process, and this project's own CI proved a raw import is not always safe: pedalboard's
+    Linux wheel raised SIGILL — Illegal instruction, a fatal signal — on a runner CPU
+    missing some instruction its compiled code used unconditionally. A signal like that
+    kills the whole pytest process, not just the one test, so nothing downstream even runs.
+
+    `PluginChain.is_available()` answers the same question from inside a disposable
+    subprocess, so a crash there cannot take this process down with it. Only once that has
+    confirmed importing is safe do we import it directly, to actually use it.
+    """
+    if not PluginChain.is_available():
+        pytest.skip("pedalboard is not usable in this environment")
+    import pedalboard
+    return pedalboard
+
+
 class TestPluginHosting:
     def test_availability_is_reported_honestly(self):
         """
-        Either pedalboard is importable or it is not. Reporting availability without
-        checking is how you get a UI offering a feature that throws when used.
+        Either pedalboard is importable here or it is not. Reporting availability without
+        checking is how you get a UI offering a feature that throws when used — and here,
+        worse than throws: this project's CI hit a case where pedalboard imports crash the
+        whole process (see `require_pedalboard` above), which is exactly why
+        `is_available()` no longer imports it directly to find out.
         """
         available = PluginChain.is_available()
         assert isinstance(available, bool)
 
         if available:
+            # Safe specifically because `is_available()` already proved it in a
+            # subprocess: if that survived, importing it here for real is expected to
+            # succeed too, since it's the same wheel and the same CPU.
             import pedalboard  # noqa: F401
+
+    def test_availability_is_cached_rather_than_reprobed_every_call(self):
+        """The check spawns a subprocess; paying that cost on every call would be wasteful."""
+        first = PluginChain.is_available()
+        second = PluginChain.is_available()
+
+        assert first == second
 
     def test_empty_chain_is_transparent(self):
         chain = PluginChain(RATE, BLOCK)
@@ -424,9 +464,15 @@ class TestPluginHosting:
         np.testing.assert_array_equal(block, original)
 
     def test_loading_a_missing_plugin_raises_rather_than_failing_quietly(self):
+        """
+        Two legitimate outcomes depending on the machine: if pedalboard itself is not
+        usable here, `load()` raises PluginChainUnavailable before ever touching it; if it
+        is usable, pedalboard raises ImportError for a path that does not exist. Either is
+        a real, specific failure — never a silent no-op.
+        """
         chain = PluginChain(RATE, BLOCK)
 
-        with pytest.raises(Exception):
+        with pytest.raises((ImportError, PluginChainUnavailable)):
             chain.load("/nonexistent/plugin.vst3")
 
     def test_discovery_returns_paths_without_loading_anything(self):
@@ -444,7 +490,7 @@ class TestPluginHosting:
             assert any("VST" in p.upper() for p in paths)
 
     def test_bypassed_plugin_is_skipped(self):
-        pedalboard = pytest.importorskip("pedalboard")
+        pedalboard = require_pedalboard()
 
         chain = PluginChain(RATE, BLOCK)
         chain.add_builtin(pedalboard.Gain(gain_db=12.0), "Gain")
@@ -461,7 +507,7 @@ class TestPluginHosting:
 
     def test_builtin_plugin_processes_audio(self):
         """Proves the pedalboard bridge works end to end, including the transpose."""
-        pedalboard = pytest.importorskip("pedalboard")
+        pedalboard = require_pedalboard()
 
         chain = PluginChain(RATE, BLOCK)
         chain.add_builtin(pedalboard.Gain(gain_db=-6.0), "Gain")
@@ -476,7 +522,7 @@ class TestPluginHosting:
         pedalboard uses (channels, frames) and we use (frames, channels). A transpose bug
         would silently swap the two and scramble the audio.
         """
-        pedalboard = pytest.importorskip("pedalboard")
+        pedalboard = require_pedalboard()
 
         chain = PluginChain(RATE, BLOCK)
         chain.add_builtin(pedalboard.Gain(gain_db=0.0), "Unity")

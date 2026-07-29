@@ -7,6 +7,26 @@ on:
   workflow_dispatch:
 
 jobs:
+  lint:
+    # Separate from the test matrix: ruff is pure Python and its verdict does not depend
+    # on the OS, so running it three times would just be paying the same check three
+    # times over instead of once.
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --all-groups
+
+      - name: Run ruff
+        run: uv run ruff check .
+
   test:
     # Run on all three so a platform-specific import can never silently rot again.
     strategy:

@@ -16,7 +16,6 @@ behaviour, not decoration.
 import math
 import time
 from dataclasses import dataclass
-from typing import Dict, List, Optional
 
 import numpy as np
 
@@ -154,11 +153,11 @@ class MeterBank:
     def __init__(self, name: str, channels: int):
         self.name = name
         self.channels = channels
-        self._meters: List[ChannelMeter] = [ChannelMeter() for _ in range(channels)]
+        self._meters: list[ChannelMeter] = [ChannelMeter() for _ in range(channels)]
         # Preallocated so measure() allocates nothing per block.
         self._scratch = np.zeros(channels, dtype=np.float64)
 
-    def measure(self, block: np.ndarray, now: Optional[float] = None):
+    def measure(self, block: np.ndarray, now: float | None = None):
         """
         Measure a (frames, channels) block.
 
@@ -188,7 +187,7 @@ class MeterBank:
 
             self._meters[channel].update(peak, rms, now)
 
-    def read(self) -> List[MeterReading]:
+    def read(self) -> list[MeterReading]:
         return [meter.read() for meter in self._meters]
 
     def read_summary(self) -> MeterReading:
@@ -231,7 +230,7 @@ class MeterRegistry:
     """
 
     def __init__(self):
-        self._banks: Dict[str, MeterBank] = {}
+        self._banks: dict[str, MeterBank] = {}
 
     def ensure(self, key: str, channels: int) -> MeterBank:
         """Create or resize a bank. Control thread only."""
@@ -243,20 +242,20 @@ class MeterRegistry:
             bank.resize(channels)
         return bank
 
-    def get(self, key: str) -> Optional[MeterBank]:
+    def get(self, key: str) -> MeterBank | None:
         """Look up a bank. Safe from the callback; never allocates."""
         return self._banks.get(key)
 
     def remove(self, key: str):
         self._banks.pop(key, None)
 
-    def keys(self) -> List[str]:
+    def keys(self) -> list[str]:
         return list(self._banks.keys())
 
-    def read_all(self) -> Dict[str, List[MeterReading]]:
+    def read_all(self) -> dict[str, list[MeterReading]]:
         return {key: bank.read() for key, bank in self._banks.items()}
 
-    def read_summaries(self) -> Dict[str, MeterReading]:
+    def read_summaries(self) -> dict[str, MeterReading]:
         return {key: bank.read_summary() for key, bank in self._banks.items()}
 
     def clear_clips(self):

@@ -26,19 +26,27 @@ in PortAudio and the user just hears silence with no explanation.
 """
 
 import threading
-import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 
 from tonesphere.engine.devices import (
-    AudioBackendUnavailable, DeviceInfo, HostApi, enumerate_devices, find_device,
+    AudioBackendUnavailable,
+    DeviceInfo,
+    HostApi,
+    enumerate_devices,
+    find_device,
 )
 from tonesphere.engine.dsp import ChannelStrip, DriftResampler, Limiter, Panner
 from tonesphere.engine.effects import InsertChain
 from tonesphere.engine.graph import (
-    Connection, GraphHolder, NodeId, RoutingGraph, bus_node, device_node,
+    Connection,
+    GraphHolder,
+    NodeId,
+    RoutingGraph,
+    bus_node,
+    device_node,
 )
 from tonesphere.engine.meters import MeterRegistry
 from tonesphere.engine.ringbuffer import AudioRingBuffer
@@ -87,9 +95,9 @@ class _RouteTable:
 
     def __init__(
         self,
-        rings: Dict[Tuple[str, str], AudioRingBuffer],
-        panners: Optional[Dict[Tuple[str, str], Panner]] = None,
-        resamplers: Optional[Dict[Tuple[str, str], DriftResampler]] = None,
+        rings: dict[tuple[str, str], AudioRingBuffer],
+        panners: dict[tuple[str, str], Panner] | None = None,
+        resamplers: dict[tuple[str, str], DriftResampler] | None = None,
     ):
         self.rings = rings
 
@@ -101,27 +109,27 @@ class _RouteTable:
         self.resamplers = resamplers if resamplers is not None else {}
 
         # Producer side: every ring a given source must fan its block out to.
-        by_source: Dict[str, List[AudioRingBuffer]] = {}
+        by_source: dict[str, list[AudioRingBuffer]] = {}
         for (source_key, _dest_key), ring in rings.items():
             by_source.setdefault(source_key, []).append(ring)
 
-        self.by_source: Dict[str, Tuple[AudioRingBuffer, ...]] = {
+        self.by_source: dict[str, tuple[AudioRingBuffer, ...]] = {
             key: tuple(items) for key, items in by_source.items()
         }
 
-    def ring_for(self, source_key: str, dest_key: str) -> Optional[AudioRingBuffer]:
+    def ring_for(self, source_key: str, dest_key: str) -> AudioRingBuffer | None:
         return self.rings.get((source_key, dest_key))
 
-    def sinks_for(self, source_key: str) -> Tuple[AudioRingBuffer, ...]:
+    def sinks_for(self, source_key: str) -> tuple[AudioRingBuffer, ...]:
         return self.by_source.get(source_key, ())
 
-    def panner_for(self, key: Tuple[str, str]) -> Optional[Panner]:
+    def panner_for(self, key: tuple[str, str]) -> Panner | None:
         return self.panners.get(key)
 
-    def resampler_for(self, key: Tuple[str, str]) -> Optional[DriftResampler]:
+    def resampler_for(self, key: tuple[str, str]) -> DriftResampler | None:
         return self.resamplers.get(key)
 
-    def statistics(self) -> Dict[str, dict]:
+    def statistics(self) -> dict[str, dict]:
         return {
             f"{source} -> {dest}": ring.statistics()
             for (source, dest), ring in self.rings.items()
@@ -153,24 +161,24 @@ class HostStatistics:
     describes our contribution and reads far lower than the truth.
     """
     running: bool = False
-    samplerate: Optional[int] = None
-    blocksize: Optional[int] = None
-    host_api: Optional[str] = None
+    samplerate: int | None = None
+    blocksize: int | None = None
+    host_api: str | None = None
     exclusive: bool = False
 
-    input_latency_ms: Optional[float] = None
-    output_latency_ms: Optional[float] = None
-    measured_latency_ms: Optional[float] = None
-    nominal_latency_ms: Optional[float] = None
+    input_latency_ms: float | None = None
+    output_latency_ms: float | None = None
+    measured_latency_ms: float | None = None
+    nominal_latency_ms: float | None = None
 
-    cpu_load: Optional[float] = None
+    cpu_load: float | None = None
     xruns: int = 0
     callback_count: int = 0
     callback_errors: int = 0
     drift_corrections: int = 0
     stream_count: int = 0
     live_stream_count: int = 0
-    failed_streams: Dict[str, str] = field(default_factory=dict)
+    failed_streams: dict[str, str] = field(default_factory=dict)
 
     @property
     def fully_healthy(self) -> bool:
@@ -225,7 +233,7 @@ class _DeviceStream:
         self.stream = None
 
         # Why this stream is not carrying audio, if it is not. None means healthy.
-        self.error: Optional[str] = None
+        self.error: str | None = None
 
         # Which mode actually opened, which is not always the one requested.
         self.used_exclusive = False
@@ -249,11 +257,11 @@ class _DeviceStream:
         # Last block's gain per route, plus the source it came from. The source is kept
         # so a route that has just been muted or unrouted can still be rendered for one
         # final block, ramping down to zero instead of cutting off with a click.
-        self._prev_state: Dict[Tuple[str, str], Tuple[NodeId, float]] = {}
+        self._prev_state: dict[tuple[str, str], tuple[NodeId, float]] = {}
 
         # Catches summing overs before they reach the device's integer converter, where
         # they would clip hard rather than gracefully.
-        self._limiter: Optional[Limiter] = None
+        self._limiter: Limiter | None = None
         if config.output_channels:
             self._limiter = Limiter(config.samplerate, block)
 
@@ -262,9 +270,9 @@ class _DeviceStream:
 
         # Per-device trim, mute, pan and polarity. Fed from `core.channel_control`, which
         # held exactly this state and was never connected to any audio.
-        self.input_strip: Optional[ChannelStrip] = None
-        self.output_strip: Optional[ChannelStrip] = None
-        self._capture_scratch: Optional[np.ndarray] = None
+        self.input_strip: ChannelStrip | None = None
+        self.output_strip: ChannelStrip | None = None
+        self._capture_scratch: np.ndarray | None = None
 
         if config.input_channels:
             self.input_strip = ChannelStrip(config.input_channels, block)
@@ -278,8 +286,8 @@ class _DeviceStream:
         # Insert chains: high-pass, EQ, dynamics, VST3 plugins, delay. Created empty and
         # skipped entirely until something is enabled, so an untouched channel costs
         # nothing beyond a boolean check.
-        self.input_inserts: Optional[InsertChain] = None
-        self.output_inserts: Optional[InsertChain] = None
+        self.input_inserts: InsertChain | None = None
+        self.output_inserts: InsertChain | None = None
 
         if config.input_channels:
             self.input_inserts = InsertChain(
@@ -324,7 +332,7 @@ class AudioHost:
         self,
         samplerate: int = 48000,
         blocksize: int = 256,
-        host_api: Optional[HostApi] = None,
+        host_api: HostApi | None = None,
         exclusive: bool = False,
     ):
         self.samplerate = samplerate
@@ -335,13 +343,13 @@ class AudioHost:
         self.graph_holder = GraphHolder()
         self.meters = MeterRegistry()
 
-        self._streams: Dict[str, _DeviceStream] = {}
-        self._devices: List[DeviceInfo] = []
+        self._streams: dict[str, _DeviceStream] = {}
+        self._devices: list[DeviceInfo] = []
 
         # Buses are declared channel counts; their audio lives in the route table like
         # everything else, so a bus feeding two destinations fans out correctly.
-        self._bus_channels: Dict[str, int] = {}
-        self._bus_pending: Dict[str, AudioRingBuffer] = {}
+        self._bus_channels: dict[str, int] = {}
+        self._bus_pending: dict[str, AudioRingBuffer] = {}
 
         # Swapped by reference on a routing change. Read once per callback.
         self._routes = _RouteTable({})
@@ -352,7 +360,7 @@ class AudioHost:
 
         # Set when a callback hits something it cannot handle, so the control thread can
         # report it. The callback only ever writes; it never logs.
-        self._last_callback_error: Optional[str] = None
+        self._last_callback_error: str | None = None
 
     # --- Backend ---
 
@@ -365,13 +373,13 @@ class AudioHost:
             self._sd = sd
         return self._sd
 
-    def refresh_devices(self) -> List[DeviceInfo]:
+    def refresh_devices(self) -> list[DeviceInfo]:
         with self._lock:
             self._devices = enumerate_devices()
             return list(self._devices)
 
     @property
-    def devices(self) -> List[DeviceInfo]:
+    def devices(self) -> list[DeviceInfo]:
         if not self._devices:
             self.refresh_devices()
         return list(self._devices)
@@ -403,12 +411,12 @@ class AudioHost:
             self.meters.remove(f"bus::{name}")
             self._rebuild_routes()
 
-    def bus_channels(self, name: str) -> Optional[int]:
+    def bus_channels(self, name: str) -> int | None:
         return self._bus_channels.get(name)
 
     # --- Route table ---
 
-    def _channels_of(self, node: NodeId) -> Optional[int]:
+    def _channels_of(self, node: NodeId) -> int | None:
         """How wide a node's audio is, for sizing its rings."""
         if node.kind == 'bus':
             return self._bus_channels.get(node.ref)
@@ -432,9 +440,9 @@ class AudioHost:
         graph = self.graph_holder.current()
         existing = self._routes
 
-        rings: Dict[Tuple[str, str], AudioRingBuffer] = {}
-        panners: Dict[Tuple[str, str], Panner] = {}
-        resamplers: Dict[Tuple[str, str], DriftResampler] = {}
+        rings: dict[tuple[str, str], AudioRingBuffer] = {}
+        panners: dict[tuple[str, str], Panner] = {}
+        resamplers: dict[tuple[str, str], DriftResampler] = {}
 
         for connection in graph.connections:
             source_key = str(connection.source)
@@ -484,7 +492,7 @@ class AudioHost:
 
     # --- Configuration ---
 
-    def configure(self, graph: Optional[RoutingGraph] = None) -> List[str]:
+    def configure(self, graph: RoutingGraph | None = None) -> list[str]:
         """
         Decide which streams the graph needs and prepare them.
 
@@ -502,8 +510,8 @@ class AudioHost:
             if not self._devices:
                 self.refresh_devices()
 
-            problems: List[str] = []
-            needed: Dict[str, StreamConfig] = {}
+            problems: list[str] = []
+            needed: dict[str, StreamConfig] = {}
 
             for node in graph.nodes():
                 if node.kind != 'device':
@@ -541,7 +549,7 @@ class AudioHost:
 
             # Verify each configuration with PortAudio before committing to it, so a bad
             # rate or channel count surfaces here rather than as silence later.
-            validated: Dict[str, StreamConfig] = {}
+            validated: dict[str, StreamConfig] = {}
             for key, config in needed.items():
                 error = self._validate(config)
                 if error:
@@ -571,7 +579,7 @@ class AudioHost:
 
             return problems
 
-    def _validate(self, config: StreamConfig) -> Optional[str]:
+    def _validate(self, config: StreamConfig) -> str | None:
         """Ask PortAudio whether this configuration is actually openable."""
         sd = self._sounddevice()
         device = config.device
@@ -618,7 +626,7 @@ class AudioHost:
 
     # --- Running ---
 
-    def start(self) -> List[str]:
+    def start(self) -> list[str]:
         """
         Open and start every configured stream.
 
@@ -636,7 +644,7 @@ class AudioHost:
                 return ["No streams configured — route something to a device first"]
 
             sd = self._sounddevice()
-            problems: List[str] = []
+            problems: list[str] = []
             live = 0
 
             for stream in self._streams.values():
@@ -680,7 +688,7 @@ class AudioHost:
             from dataclasses import replace as _replace
             attempts.append(_replace(config, exclusive=False))
 
-        last_error: Optional[Exception] = None
+        last_error: Exception | None = None
 
         for attempt in attempts:
             try:
@@ -699,7 +707,7 @@ class AudioHost:
 
         raise RuntimeError(self._explain_open_failure(config, last_error))
 
-    def _explain_open_failure(self, config: StreamConfig, error: Optional[Exception]) -> str:
+    def _explain_open_failure(self, config: StreamConfig, error: Exception | None) -> str:
         """
         Turn a PortAudio error into something a user can act on.
 
@@ -770,7 +778,7 @@ class AudioHost:
             **common,
         )
 
-    def strips_for(self, device_key: str) -> Tuple[Optional[ChannelStrip], Optional[ChannelStrip]]:
+    def strips_for(self, device_key: str) -> tuple[ChannelStrip | None, ChannelStrip | None]:
         """
         The (input, output) strips for a device, or (None, None) if it has no stream.
 
@@ -783,7 +791,7 @@ class AudioHost:
             return (None, None)
         return (stream.input_strip, stream.output_strip)
 
-    def inserts_for(self, device_key: str, is_input: bool) -> Optional[InsertChain]:
+    def inserts_for(self, device_key: str, is_input: bool) -> InsertChain | None:
         """The insert chain on one side of a device, or None if it has no stream."""
         stream = self._streams.get(device_key)
         if stream is None:
@@ -805,7 +813,7 @@ class AudioHost:
                     samples += chain.latency_samples
         return samples / self.samplerate * 1000.0 if samples else 0.0
 
-    def failed_streams(self) -> Dict[str, str]:
+    def failed_streams(self) -> dict[str, str]:
         """Device key -> why its stream is not carrying audio."""
         return {
             key: stream.error
@@ -813,7 +821,7 @@ class AudioHost:
             if stream.error is not None
         }
 
-    def dead_nodes(self) -> List[NodeId]:
+    def dead_nodes(self) -> list[NodeId]:
         """
         Nodes whose stream failed, so callers can mark the routes that touch them.
 
@@ -851,7 +859,7 @@ class AudioHost:
 
     # --- Graph updates ---
 
-    def apply_graph(self, graph: RoutingGraph) -> List[str]:
+    def apply_graph(self, graph: RoutingGraph) -> list[str]:
         """
         Publish a routing change.
 
@@ -1064,13 +1072,13 @@ class AudioHost:
         self,
         stream: _DeviceStream,
         ring: AudioRingBuffer,
-        key: Tuple[str, str],
+        key: tuple[str, str],
         source_node: NodeId,
         gain: float,
         mix: np.ndarray,
         out_channels: int,
         frames: int,
-        connection: Optional[Connection],
+        connection: Connection | None,
     ):
         """
         Add one route's contribution to the mix.
@@ -1110,7 +1118,7 @@ class AudioHost:
 
     def _drift_correct(
         self, ring: AudioRingBuffer, stream: _DeviceStream,
-        key: Optional[Tuple[str, str]] = None,
+        key: tuple[str, str] | None = None,
     ):
         """
         Keep a cross-device ring from drifting away from its target fill level.
@@ -1148,8 +1156,8 @@ class AudioHost:
         source: np.ndarray,
         out_channels: int,
         frames: int,
-        connection: Optional[Connection] = None,
-        key: Optional[Tuple[str, str]] = None,
+        connection: Connection | None = None,
+        key: tuple[str, str] | None = None,
     ) -> np.ndarray:
         """
         Fit a source's channel count to the destination's, applying pan where it applies.
@@ -1197,7 +1205,7 @@ class AudioHost:
 
     def _read_source(
         self, stream: _DeviceStream, ring: AudioRingBuffer,
-        key: Tuple[str, str], frames: int,
+        key: tuple[str, str], frames: int,
     ) -> np.ndarray:
         """
         Pull one block from a route's ring, resampling it if the route crosses clocks.
@@ -1235,9 +1243,9 @@ class AudioHost:
 
     def _panner_for(
         self,
-        key: Optional[Tuple[str, str]],
-        connection: Optional[Connection],
-    ) -> Optional[Panner]:
+        key: tuple[str, str] | None,
+        connection: Connection | None,
+    ) -> Panner | None:
         """
         The panner for a route, with its position brought up to date.
 
@@ -1285,7 +1293,7 @@ class AudioHost:
 
         return written
 
-    def read_bus(self, name: str, frames: int, dest: Optional[str] = None) -> Optional[np.ndarray]:
+    def read_bus(self, name: str, frames: int, dest: str | None = None) -> np.ndarray | None:
         """
         Consume a bus's audio for one destination. Allocates, so not for callbacks.
 
@@ -1390,12 +1398,12 @@ class AudioHost:
 
         return stats
 
-    def ring_statistics(self) -> Dict[str, dict]:
+    def ring_statistics(self) -> dict[str, dict]:
         """Per-route buffer health. Overflow means a consumer is starving its producer."""
         return self._routes.statistics()
 
     @property
-    def last_callback_error(self) -> Optional[str]:
+    def last_callback_error(self) -> str | None:
         """Most recent exception swallowed by a callback, for diagnostics."""
         return self._last_callback_error
 

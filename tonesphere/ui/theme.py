@@ -12,9 +12,8 @@ meter always means level and never means "this is a button".
 """
 
 from dataclasses import dataclass
-from typing import Tuple
 
-from PySide6.QtGui import QColor, QFont, QFontDatabase
+from PySide6.QtGui import QColor, QFont
 
 
 class Colors:

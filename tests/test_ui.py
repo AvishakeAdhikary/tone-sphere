@@ -18,8 +18,15 @@ pytest.importorskip("PySide6", reason="Qt not installed")
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from tonesphere.ui.theme import (  # noqa: E402
-    FADER_MAX_DB, FADER_MIN_DB, METER_MAX_DB, METER_MIN_DB,
-    Colors, db_to_fader_position, db_to_fraction, fader_position_to_db, format_db,
+    FADER_MAX_DB,
+    FADER_MIN_DB,
+    METER_MAX_DB,
+    METER_MIN_DB,
+    Colors,
+    db_to_fader_position,
+    db_to_fraction,
+    fader_position_to_db,
+    format_db,
     meter_color,
 )
 

@@ -1,16 +1,18 @@
-from tonesphere.utils.logger import logger
 from pathlib import Path
-from typing import Dict
+
 import yaml
+
+from tonesphere.utils.logger import logger
+
 
 class ConfigManager:
     """Manages configuration and presets"""
-    
+
     def __init__(self, config_path: str = "audio_engine_config.yaml"):
         self.config_path = Path(config_path)
         self.config = self._load_default_config()
-        
-    def _load_default_config(self) -> Dict:
+
+    def _load_default_config(self) -> dict:
         """Load default configuration"""
         return {
             'engine': {
@@ -33,12 +35,12 @@ class ConfigManager:
                 'cors_enabled': True
             }
         }
-    
-    def load_config(self) -> Dict:
+
+    def load_config(self) -> dict:
         """Load configuration from file"""
         try:
             if self.config_path.exists():
-                with open(self.config_path, 'r') as f:
+                with open(self.config_path) as f:
                     loaded_config = yaml.safe_load(f)
                     # Merge with defaults
                     self.config.update(loaded_config)
@@ -46,8 +48,8 @@ class ConfigManager:
         except Exception as e:
             logger.error(f"Failed to load config: {e}")
             return self.config
-    
-    def save_config(self, config: Dict = None):
+
+    def save_config(self, config: dict = None):
         """Save configuration to file"""
         try:
             config_to_save = config or self.config

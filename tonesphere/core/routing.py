@@ -1,19 +1,21 @@
-from typing import Dict, Tuple, List
-from .models import RoutingConnection, AudioChannel, RoutingState
+
 from tonesphere.utils.logger import logger
+
+from .models import AudioChannel, RoutingConnection, RoutingState
+
 
 class AudioRoutingMatrix:
     """Manages audio routing between inputs and outputs"""
-    
+
     def __init__(self):
-        self.connections: Dict[Tuple[int, int], RoutingConnection] = {}
-        self.channels: Dict[int, AudioChannel] = {}
+        self.connections: dict[tuple[int, int], RoutingConnection] = {}
+        self.channels: dict[int, AudioChannel] = {}
         self.solo_active = False
-        
+
     def add_channel(self, channel: AudioChannel):
         """Add an audio channel"""
         self.channels[channel.id] = channel
-        
+
     def create_routing(self, source_id: int, destination_id: int, volume: float = 1.0) -> tuple[bool, str]:
         """Create a routing connection"""
         key = (source_id, destination_id)
@@ -28,7 +30,7 @@ class AudioRoutingMatrix:
             logger.info(f"Created routing: {source_id} -> {destination_id}")
             return True, "✅ Routing created successfully"
         return False, "⚠️ Routing already exists, skipping command"
-    
+
     def remove_routing(self, source_id: int, destination_id: int) -> bool:
         """Remove a routing connection"""
         key = (source_id, destination_id)
@@ -37,26 +39,26 @@ class AudioRoutingMatrix:
             logger.info(f"Removed routing: {source_id} -> {destination_id}")
             return True
         return False
-    
+
     def set_routing_volume(self, source_id: int, destination_id: int, volume: float):
         """Set volume for a routing connection"""
         key = (source_id, destination_id)
         if key in self.connections:
             self.connections[key].volume = max(0.0, min(2.0, volume))
-    
+
     def toggle_mute(self, source_id: int, destination_id: int):
         """Toggle mute for a routing connection"""
         key = (source_id, destination_id)
         if key in self.connections:
             self.connections[key].muted = not self.connections[key].muted
-    
+
     def set_solo(self, channel_id: int, solo: bool):
         """Set solo state for a channel"""
         if channel_id in self.channels:
             self.channels[channel_id].solo = solo
             self.solo_active = any(ch.solo for ch in self.channels.values())
-    
-    def get_active_routings_for_output(self, output_id: int) -> List[RoutingConnection]:
+
+    def get_active_routings_for_output(self, output_id: int) -> list[RoutingConnection]:
         """Get all active routings for an output"""
         active = []
         for connection in self.connections.values():

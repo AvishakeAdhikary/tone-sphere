@@ -17,8 +17,11 @@ Two kinds of effect live here:
 """
 
 import math
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence
+import subprocess
+import sys
+from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 
@@ -225,11 +228,11 @@ class ParametricEQ:
     """
 
     def __init__(self, samplerate: int, channels: int = 2,
-                 bands: Optional[Sequence[EQBand]] = None):
+                 bands: Sequence[EQBand] | None = None):
         self.samplerate = samplerate
         self.channels = channels
-        self.bands: List[EQBand] = list(bands) if bands else []
-        self._filters: List[Biquad] = []
+        self.bands: list[EQBand] = list(bands) if bands else []
+        self._filters: list[Biquad] = []
         self._rebuild()
 
     def _rebuild(self):
@@ -276,7 +279,7 @@ class ParametricEQ:
         )
 
     def process(self, block: np.ndarray, frames: int) -> np.ndarray:
-        for band, biquad in zip(self.bands, self._filters):
+        for band, biquad in zip(self.bands, self._filters, strict=True):
             if not band.enabled:
                 continue
             if band.gain_db == 0.0 and band.kind in ('peaking', 'lowshelf', 'highshelf'):
@@ -284,12 +287,12 @@ class ParametricEQ:
             biquad.process(block, frames)
         return block
 
-    def response(self, frequencies: Sequence[float]) -> List[float]:
+    def response(self, frequencies: Sequence[float]) -> list[float]:
         """Combined magnitude response in dB, for plotting."""
         result = []
         for frequency in frequencies:
             magnitude = 1.0
-            for band, biquad in zip(self.bands, self._filters):
+            for band, biquad in zip(self.bands, self._filters, strict=True):
                 if band.enabled:
                     magnitude *= biquad.magnitude_at(self.samplerate, frequency)
             result.append(20.0 * math.log10(magnitude) if magnitude > 0 else -120.0)
@@ -493,7 +496,13 @@ class Delay:
 
 
 class PluginChainUnavailable(RuntimeError):
-    """`pedalboard` is not installed, so plugin hosting is not available."""
+    """`pedalboard` is not usable here, so plugin hosting is not available."""
+
+
+# Cache for PluginChain.is_available(): None means "not yet checked". The answer is a
+# property of the installed wheel and the host CPU, so it cannot change during a run, and
+# the check spawns a subprocess — worth paying for once, not on every call.
+_pedalboard_available: bool | None = None
 
 
 class PluginChain:
@@ -515,20 +524,54 @@ class PluginChain:
     def __init__(self, samplerate: int, blocksize: int):
         self.samplerate = samplerate
         self.blocksize = blocksize
-        self._plugins: List[Any] = []
-        self._names: List[str] = []
-        self._bypassed: List[bool] = []
+        self._plugins: list[Any] = []
+        self._names: list[str] = []
+        self._bypassed: list[bool] = []
 
     @staticmethod
     def is_available() -> bool:
+        """
+        Whether `pedalboard` can actually be imported here.
+
+        Checked in a throwaway subprocess rather than by importing it directly in this
+        process. A native extension can fail worse than raising ImportError: this
+        project's own CI hit exactly that when pedalboard's Linux wheel produced
+        `Illegal instruction` (SIGILL) purely from being imported, on a runner CPU
+        missing some instruction the compiled code used unconditionally. SIGILL is a
+        fatal signal, not a Python exception — no `try/except` in this process can
+        survive it, so the only way to ask "can this be imported" without risking the
+        process asking the question is to ask a disposable one instead.
+
+        The result is cached: it cannot legitimately change mid-run (same wheel, same
+        CPU), and re-probing would mean a subprocess launch on every call.
+        """
+        global _pedalboard_available
+
+        if _pedalboard_available is not None:
+            return _pedalboard_available
+
         try:
-            import pedalboard  # noqa: F401
-            return True
-        except ImportError:
-            return False
+            result = subprocess.run(
+                [sys.executable, '-c', 'import pedalboard'],
+                capture_output=True, timeout=20,
+            )
+            available = result.returncode == 0
+            if not available:
+                stderr = result.stderr.decode('utf-8', errors='replace').strip()
+                logger.warning(
+                    "pedalboard could not be imported (exit code "
+                    f"{result.returncode}); VST3/AU plugin hosting is disabled. "
+                    f"{stderr[-300:]}"
+                )
+        except (subprocess.TimeoutExpired, OSError) as e:
+            available = False
+            logger.warning(f"Could not probe pedalboard availability: {e}")
+
+        _pedalboard_available = available
+        return available
 
     @staticmethod
-    def scan_default_paths() -> List[str]:
+    def scan_default_paths() -> list[str]:
         """
         Where VST3 plugins live by convention on each platform.
 
@@ -561,12 +604,12 @@ class PluginChain:
         return [str(path) for path in candidates if path.is_dir()]
 
     @staticmethod
-    def discover(paths: Optional[Sequence[str]] = None) -> List[str]:
+    def discover(paths: Sequence[str] | None = None) -> list[str]:
         """Plugin files found in the given paths, or the platform defaults."""
         from pathlib import Path
 
         search = list(paths) if paths else PluginChain.scan_default_paths()
-        found: List[str] = []
+        found: list[str] = []
 
         for root in search:
             base = Path(root)
@@ -577,20 +620,25 @@ class PluginChain:
 
         return sorted(set(found))
 
-    def load(self, path: str, name: Optional[str] = None) -> int:
+    def load(self, path: str, name: str | None = None) -> int:
         """
         Load a plugin and append it to the chain.
 
         Raises rather than returning a sentinel: a plugin that failed to load is not
         something to carry on quietly with, because the user's chain would silently differ
         from what they configured.
+
+        Checks `is_available()` first rather than importing directly. That check has
+        already proven pedalboard imports cleanly in this exact environment (see its
+        docstring for why that matters); importing it here for real, now that we know it
+        is safe, is what actually lets us load the plugin.
         """
-        try:
-            import pedalboard
-        except ImportError as e:
+        if not PluginChain.is_available():
             raise PluginChainUnavailable(
-                "pedalboard is not installed; plugin hosting unavailable"
-            ) from e
+                "pedalboard is not usable in this environment; plugin hosting unavailable"
+            )
+
+        import pedalboard
 
         plugin = pedalboard.load_plugin(path)
 
@@ -624,7 +672,7 @@ class PluginChain:
         self._bypassed.clear()
 
     @property
-    def names(self) -> List[str]:
+    def names(self) -> list[str]:
         return list(self._names)
 
     @property
@@ -640,7 +688,7 @@ class PluginChain:
         own, and omitting it would make the latency figure we show wrong.
         """
         total = 0
-        for plugin, bypassed in zip(self._plugins, self._bypassed):
+        for plugin, bypassed in zip(self._plugins, self._bypassed, strict=True):
             if bypassed:
                 continue
             total += int(getattr(plugin, 'latency_samples', 0) or 0)
@@ -659,7 +707,7 @@ class PluginChain:
 
         audio = np.ascontiguousarray(block[:frames].T)
 
-        for plugin, bypassed in zip(self._plugins, self._bypassed):
+        for plugin, bypassed in zip(self._plugins, self._bypassed, strict=True):
             if bypassed:
                 continue
             try:
@@ -676,10 +724,10 @@ class PluginChain:
 
         return block
 
-    def describe(self) -> List[Dict[str, Any]]:
+    def describe(self) -> list[dict[str, Any]]:
         return [
             {'index': i, 'name': name, 'bypassed': bypassed}
-            for i, (name, bypassed) in enumerate(zip(self._names, self._bypassed))
+            for i, (name, bypassed) in enumerate(zip(self._names, self._bypassed, strict=True))
         ]
 
 
@@ -701,11 +749,11 @@ class InsertChain:
         self.blocksize = blocksize
         self.channels = channels
 
-        self.highpass: Optional[Biquad] = None
-        self.eq: Optional[ParametricEQ] = None
-        self.compressor: Optional[Compressor] = None
-        self.plugins: Optional[PluginChain] = None
-        self.delay: Optional[Delay] = None
+        self.highpass: Biquad | None = None
+        self.eq: ParametricEQ | None = None
+        self.compressor: Compressor | None = None
+        self.plugins: PluginChain | None = None
+        self.delay: Delay | None = None
 
         self.enabled = True
 
@@ -713,7 +761,7 @@ class InsertChain:
         self.highpass = Biquad(self.channels)
         self.highpass.set_highpass(self.samplerate, frequency, q)
 
-    def enable_eq(self, bands: Optional[Sequence[EQBand]] = None) -> ParametricEQ:
+    def enable_eq(self, bands: Sequence[EQBand] | None = None) -> ParametricEQ:
         self.eq = ParametricEQ(self.samplerate, self.channels, bands)
         return self.eq
 

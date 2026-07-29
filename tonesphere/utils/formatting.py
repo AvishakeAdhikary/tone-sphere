@@ -5,12 +5,13 @@ Single place that decides how an unmeasured value is rendered, so the CLI, GUI a
 API never disagree — and so a missing measurement can never be formatted as 0.0.
 """
 
-from typing import Any, Mapping, Optional
+from collections.abc import Mapping
+from typing import Any
 
 UNKNOWN = "--"
 
 
-def format_measurement(value: Optional[float], unit: str = "", decimals: int = 1) -> str:
+def format_measurement(value: float | None, unit: str = "", decimals: int = 1) -> str:
     """
     Render a possibly-unmeasured number.
 
