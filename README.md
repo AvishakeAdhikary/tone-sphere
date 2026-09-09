@@ -100,6 +100,16 @@ happen. Cables show their gain; muted and broken routes look different.
 indices, so they survive plugging something in. Partial recall: a preset saved with an
 interface attached loads without it and tells you what was missing.
 
+**Settings.** Stored in SQLite under your user data directory —
+`%LOCALAPPDATA%\Neural Nexus Studios\ToneSphere\settings.db` on Windows,
+`$XDG_DATA_HOME/ToneSphere` (or `~/.local/share/ToneSphere`) on Linux,
+`~/Library/Application Support/ToneSphere` on macOS. Not next to the executable: the Store
+build is an MSIX package whose install directory is read-only, and the GUI and the API
+server are expected to be open at once, which one YAML file cannot survive. An
+`audio_engine_config.yaml` left over from an earlier version is imported once, on first
+run, and left where it is. `config/default_config.yaml` holds the defaults, and every key
+in it is read by something.
+
 **Network streaming, both directions.** A realtime UDP transport with a 30-byte binary
 header, sequence numbers and a jitter buffer that reorders, conceals and paces playout, on
 top of the existing TCP path for bulk transfer. Sending was previously a stub that logged a

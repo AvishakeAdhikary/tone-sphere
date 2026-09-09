@@ -1,5 +1,16 @@
-# ToneSphere Configuration File
-# Professional Audio Routing Engine Settings
+# ToneSphere default settings.
+#
+# This file is the packaged default set, read at first run and whenever a setting has
+# never been changed. It is not where your settings are saved: those live in a SQLite
+# database under your user data directory (on Windows,
+# %LOCALAPPDATA%\Neural Nexus Studios\ToneSphere\settings.db), because the install
+# directory is read-only in the Store build. Editing this file changes the defaults, not
+# the values you have already changed.
+#
+# Every key here is read by something. Keys that were not — an `effects` section, a
+# `network` section whose port the network router never consulted, `performance`
+# monitoring intervals nothing polled, `api.cors_enabled` while CORS was enabled
+# unconditionally — have been removed rather than left as knobs that do nothing.
 
 # Audio Engine Configuration
 engine:
@@ -23,39 +34,25 @@ engine:
 
 # API Server Configuration
 api:
-  host: '127.0.0.1'        # API server host (use '0.0.0.0' for all interfaces)
-  port: 8080                # API server port
-  cors_enabled: true        # Enable CORS for web clients
-
-# Network Audio Streaming Configuration
-network:
-  enabled: false            # Enable network audio streaming on startup
-  port: 9001                # Network streaming port
-  max_clients: 10           # Maximum concurrent clients
+  host: '127.0.0.1'           # API server host (use '0.0.0.0' for all interfaces)
+  port: 8080                  # API server port
 
 # Logging Configuration
 logging:
-  level: 'INFO'             # Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL
-  enable_file_logging: false # Enable logging to file
-  log_file: 'tonesphere.log' # Log file name
-  log_dir: 'logs'           # Log directory
-  max_file_size_mb: 10      # Max log file size before rotation
-  backup_count: 5           # Number of backup files to keep
-  colored_console: true     # Use colored console output
-  structured: false         # Use structured JSON logging
-  
+  level: 'INFO'               # Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  enable_file_logging: false  # Enable logging to file
+  log_file: 'tonesphere.log'  # Log file name
+  log_dir: 'logs'             # Log directory
+  max_file_size_mb: 10        # Max log file size before rotation
+  backup_count: 5             # Number of backup files to keep
+  colored_console: true       # Use colored console output
+  structured: false           # Use structured JSON logging
+
 # Mix Buses (named "virtual_devices" for config compatibility)
 #
 # These are summing points INSIDE the ToneSphere process. They are not operating-system
 # audio devices and cannot be selected from other applications — that needs a signed
 # kernel-mode driver, which is Phase 5 on the roadmap.
 virtual_devices:
-  max_inputs: 10            # Maximum number of input buses
-  max_outputs: 10           # Maximum number of output buses
-  default_inputs: 0         # Buses created at startup (0: create them as you need them)
-  default_outputs: 0
-  
-# Performance Monitoring
-performance:
-  monitoring_enabled: true  # Enable performance monitoring
-  update_interval: 1.0      # Update interval in seconds
+  max_inputs: 10              # Maximum number of input buses
+  max_outputs: 10             # Maximum number of output buses
