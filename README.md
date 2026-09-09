@@ -5,6 +5,12 @@
 Low-latency audio routing and mixing for Windows, Linux and macOS.
 **5.7 ms measured round trip** at a 128-frame buffer on WASAPI exclusive, ~5% DSP load.
 
+[![Latest release](https://img.shields.io/github/v/release/AvishakeAdhikary/tone-sphere?style=flat-square&label=latest%20release)](https://github.com/AvishakeAdhikary/tone-sphere/releases/latest)
+[![GitHub Sponsors](https://img.shields.io/badge/GitHub%20Sponsors-ea4aaa?style=flat-square&logo=githubsponsors&logoColor=white)](https://github.com/sponsors/avishakeadhikary)
+[![Patreon](https://img.shields.io/badge/Patreon-f96854?style=flat-square&logo=patreon&logoColor=white)](https://www.patreon.com/avishakeadhikary)
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-ff5e5b?style=flat-square&logo=kofi&logoColor=white)](https://ko-fi.com/avishakeadhikary)
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ffdd00?style=flat-square&logo=buymeacoffee&logoColor=black)](https://www.buymeacoffee.com/avishake69)
+
 ![ToneSphere](./assets/images/screenshot.png)
 
 This is not your usual readme.
@@ -179,6 +185,37 @@ So there is one rule here now, and the test suite enforces it:
 That second half matters more than it sounds. `0.0` renders as a real, healthy-looking
 number. Rendering `--` is the difference between a UI that tells you what it knows and one
 that tells you what you want to hear.
+
+## Sponsor
+
+Everything here is free, and it stays free. No feature is time-limited, no dialog waits five
+minutes before letting you through, and nothing is held back until you pay — the whole reason
+this project exists is that I got tired of exactly that.
+
+If it replaced something you would otherwise have had to buy, you can put that toward the
+next release:
+
+- **GitHub Sponsors** — [github.com/sponsors/avishakeadhikary](https://github.com/sponsors/avishakeadhikary)
+- **Patreon** — [patreon.com/avishakeadhikary](https://www.patreon.com/avishakeadhikary)
+- **Ko-fi** — [ko-fi.com/avishakeadhikary](https://ko-fi.com/avishakeadhikary)
+- **Buy Me a Coffee** — [buymeacoffee.com/avishake69](https://www.buymeacoffee.com/avishake69)
+
+It buys no feature and no priority. It buys time to work on this.
+
+## Legal
+
+Published by **Neural Nexus Studios**, Kolkata, West Bengal, India. No accounts, no telemetry,
+nothing collected — the one thing that sends audio off your machine is the optional network
+stream, and only when you set it up yourself.
+
+- [Terms and Conditions](docs/legal/terms-and-conditions.md) — use of the application itself.
+- [Terms of Service](docs/legal/terms-of-service.md) — what it provides, support, updates,
+  the optional network feature, Microsoft Store distribution.
+- [Privacy Policy](docs/legal/privacy-policy.md) — what stays local, and the one exception.
+
+The same three are published as a site at
+[avishakeadhikary.github.io/tone-sphere](https://avishakeadhikary.github.io/tone-sphere/),
+which is the address to hand to the Microsoft Store as the privacy policy URL.
 
 ## Contributing
 

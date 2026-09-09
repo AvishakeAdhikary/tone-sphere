@@ -1,0 +1,31 @@
+title: ToneSphere
+tagline: Low-latency audio routing and mixing for Windows, Linux and macOS
+description: >-
+  ToneSphere is a local desktop audio router and mixer for Windows, Linux and macOS,
+  published by Neural Nexus Studios. It routes and processes audio on your own machine,
+  hosts the VST3 and AU plugins you already own, and reports the latency it measured
+  rather than the latency it hoped for. This site carries its Terms and Conditions,
+  Terms of Service and Privacy Policy.
+author: Neural Nexus Studios
+lang: en
+
+url: https://avishakeadhikary.github.io
+baseurl: /tone-sphere
+
+theme: minima
+github_username: AvishakeAdhikary
+
+# Listed explicitly rather than left to the theme's gemspec: minima's head and footer call
+# `seo` and `feed_meta`, and a plugin that is not loaded makes those a build error rather
+# than a missing meta tag.
+plugins:
+  - jekyll-seo-tag
+  - jekyll-feed
+
+# Without this, minima's nav lists every page that has a title, which would put the landing
+# page into its own navigation bar next to the site title that already links there.
+header_pages:
+  - legal/terms-and-conditions.md
+  - legal/terms-of-service.md
+  - legal/privacy-policy.md
+  - VIRTUAL_AUDIO_DRIVER.md

@@ -1,3 +1,10 @@
+---
+title: Virtual Audio Driver
+layout: default
+permalink: /virtual-audio-driver/
+description: What an OS-visible virtual audio device actually requires on Windows, Linux and macOS, and why the Windows kernel-driver route is deliberately not attempted here.
+---
+
 # Virtual audio driver — what it takes
 
 This is the one claim ToneSphere has never been able to make good on, and the one people
@@ -106,7 +113,8 @@ right rather than a feature.
 installation, though notarisation is needed for distribution. Substantially easier than
 Windows. BlackHole is the reference implementation and is MIT-licensed.
 
-ToneSphere now ships one: [`native/coreaudio-plugin/`](../native/coreaudio-plugin/), a
+ToneSphere now ships one:
+[`native/coreaudio-plugin/`](https://github.com/AvishakeAdhikary/tone-sphere/tree/main/native/coreaudio-plugin), a
 loopback device called **ToneSphere Audio**, with `create_macos_system_device()` on the
 engine and `/virtual-devices/system/macos` on the REST API to claim it. Read that
 directory's README before relying on it. In short: it is written from Apple's documented
