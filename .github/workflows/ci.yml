@@ -72,17 +72,21 @@ jobs:
         # this is the one Track-2 claim CI can actually verify rather than only assert.
         # The plan flagged these exact flags as unverified until run for real here.
         #
-        # Confirmed by the first real run: pactl reaches the daemon fine (the sink loads),
-        # but the sink never appeared as a PortAudio device — because `libasound2-plugins`
-        # was missing. That package is what makes ALSA's `type pulse` (the whole bridge
-        # `linux_virtual.py`'s ~/.asoundrc block depends on) resolve to anything at all;
-        # without it the block is dead config, not a device.
+        # Confirmed by the first two real runs: pactl reaches the daemon fine (the sink
+        # loads) and libasound2-plugins + a `hint` block in the ~/.asoundrc bridge are both
+        # in place, but the sink still never appeared as a PortAudio device. `aplay -L` —
+        # ALSA's own enumeration, independent of PortAudio — would say whether ALSA itself
+        # ever resolves the bridge at all, but alsa-utils was never installed, so every run
+        # so far has been diagnosing this one-eyed. Installing it turns the next failure
+        # (if there is one) into a real answer instead of another guess.
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get install -y pulseaudio pulseaudio-utils libasound2-plugins
+          sudo apt-get install -y pulseaudio pulseaudio-utils libasound2-plugins alsa-utils
           dbus-run-session -- pulseaudio --start --exit-idle-time=-1
           sleep 2
           pactl info
+          echo "--- aplay -L (ALSA's own view) ---"
+          aplay -L || true
 
       - name: Run tests
         # CI runners have no audio hardware, so hardware-marked tests are excluded.
