@@ -103,6 +103,17 @@ MAX_PAYLOAD_BYTES = MAX_DATAGRAM_BYTES - HEADER_SIZE
 # peer is free to use a larger MTU; nothing can exceed one UDP datagram.
 MAX_ACCEPTED_PAYLOAD_BYTES = 65507 - HEADER_SIZE
 
+# A burst of unpaced sends (a test flushing many blocks at once, or a real sender that has
+# been starved and is catching up) can hand the kernel more datagrams than it can hold
+# before this process's receive thread gets scheduled again. Below this size, some OS
+# defaults are small enough for that to mean real, silent packet loss at the socket layer
+# rather than anything the jitter buffer ever sees to count: macOS's default SO_RCVBUF is a
+# few tens of KB, well under one burst of test-scale traffic (found the hard way — CI on
+# macOS dropped packets a Windows run of the same test never did). Requesting more is
+# best-effort: some sandboxes refuse `setsockopt` outright, and a refusal here must not be
+# fatal to opening the socket.
+SOCKET_BUFFER_BYTES = 1 << 20  # 1 MiB
+
 SEQUENCE_MODULUS = 2 ** 32
 
 OPUS_UNAVAILABLE_REASON = (
@@ -410,6 +421,17 @@ class UdpAudioTransport:
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             try:
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+                # Best-effort: widening the kernel's receive/send buffers is what stands
+                # between a burst and a silent drop before our own code ever sees the
+                # datagram (see SOCKET_BUFFER_BYTES). A platform or sandbox that refuses
+                # this still gets a working socket at its own default size.
+                for option in (socket.SO_RCVBUF, socket.SO_SNDBUF):
+                    try:
+                        sock.setsockopt(socket.SOL_SOCKET, option, SOCKET_BUFFER_BYTES)
+                    except OSError as e:
+                        logger.debug(f"Could not widen UDP socket buffer ({option}): {e}")
+
                 sock.bind((bind_host, bind_port))
                 # A timeout rather than a blocking recv, so `stop()` is noticed promptly
                 # without needing to poke the socket from another thread.
