@@ -665,8 +665,20 @@ class AudioEngine:
                 logger.error(f"Could not create Linux virtual sink '{name}': {e}")
                 return None
 
-            self.refresh_devices()
-            device_id = self._find_device_id_by_name(handle.asoundrc_pcm)
+            # `aplay -L` (a separate process, opening its own connection to PulseAudio)
+            # has, in practice, seen the sink appear slightly after `pactl load-module`
+            # itself returns — PortAudio's own probe of a freshly-created named PCM can
+            # lose that same race and need a moment to catch up. A few short retries costs
+            # nothing when the device was there from the start, and turns a real but
+            # momentary visibility lag into a wait rather than a reported failure.
+            device_id = None
+            for attempt in range(5):
+                self.refresh_devices()
+                device_id = self._find_device_id_by_name(handle.asoundrc_pcm)
+                if device_id is not None:
+                    break
+                if attempt < 4:
+                    time.sleep(0.15)
 
             if device_id is None:
                 # Enough to tell "the bridge never got written", "ALSA sees it but under a
