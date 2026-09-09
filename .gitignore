@@ -10,3 +10,7 @@ wheels/
 .venv
 # PyInstaller
 *.spec.bak
+
+# MSIX logo set: every file is derived from assets/images/ToneSphere.png by
+# packaging/msix/generate_assets.py, which build_msix.ps1 runs before every pack.
+packaging/msix/assets/
