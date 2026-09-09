@@ -74,7 +74,13 @@ def sender():
 
 @pytest.fixture
 def receiver():
-    e = AudioEngine(sample_rate=RATE, buffer_size=BLOCK)
+    # A larger buffer_size than the sender's `BLOCK` on purpose: it is what sets this
+    # engine's ring capacity (`blocksize * RING_BLOCKS`, ~4 blocks), and the destination
+    # route here is filled in real time by the playout thread while the test's own polling
+    # loop drains it -- confirmed by `overflow_count` on a loaded CI runner at the default
+    # 256-frame size (~21ms of headroom). Nothing about the wire protocol or packet framing
+    # depends on this value; it only widens the one ring actually racing anything.
+    e = AudioEngine(sample_rate=RATE, buffer_size=4096)
     yield e
     e.cleanup()
 
