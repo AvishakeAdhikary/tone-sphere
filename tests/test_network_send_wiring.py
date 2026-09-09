@@ -174,6 +174,8 @@ class TestKnownSignalSurvivesUdp:
         # three different bugs that look identical as a bare shape/value mismatch.
         print("receive stats:", receiver.get_network_statistics()['udp']['receive'][str(destination)])
         print("send stats:", sender.get_network_statistics()['udp']['send'])
+        print("destination ring:", receiver.host.route_statistics(
+            node_key(receiver, destination), node_key(receiver, monitor)))
 
         # float32 end to end, so this is exact rather than approximate.
         np.testing.assert_allclose(captured, expected, atol=1e-6)
@@ -257,6 +259,8 @@ class TestKnownSignalSurvivesUdp:
         # See the stereo test above for why this is printed unconditionally.
         print("receive stats:", receiver.get_network_statistics()['udp']['receive'][str(destination)])
         print("send stats:", sender.get_network_statistics()['udp']['send'])
+        print("destination ring:", receiver.host.route_statistics(
+            node_key(receiver, destination), node_key(receiver, monitor)))
 
         assert captured.shape[1] == 1
         np.testing.assert_allclose(captured, expected, atol=1e-6)
@@ -267,9 +271,16 @@ class TestKnownSignalSurvivesUdp:
         """
         Read the destination route as the paced playout thread fills it.
 
-        Draining continuously is not a convenience: the route's ring is four blocks deep,
-        so leaving it alone would make playout's writes start returning 0 and the audio
-        would be lost rather than merely delayed.
+        Draining continuously is not a convenience: the route's ring is four blocks deep
+        (about 21ms of audio at this packet rate), so leaving it alone would make playout's
+        writes start returning 0 and the audio would be lost rather than merely delayed.
+
+        No sleep between empty reads, on purpose: a 2ms poll interval measured fine on a
+        quiet machine but let the ring overflow on a loaded CI runner (confirmed by
+        `overflow_count` on the destination route, printed below on failure) — the playout
+        thread writes a packet roughly every 3ms in real time, so anything slower than that
+        between checks is racing a buffer with only a few packets of headroom. `sleep(0)`
+        still yields the GIL to the receive/playout threads without adding a fixed delay.
         """
         collected: list[np.ndarray] = []
         total = 0
@@ -278,7 +289,7 @@ class TestKnownSignalSurvivesUdp:
         while total < wanted and time.monotonic() < deadline:
             piece = drain(receiver, destination, monitor)
             if piece is None:
-                time.sleep(0.002)
+                time.sleep(0)
                 continue
             collected.append(piece)
             total += piece.shape[0]
