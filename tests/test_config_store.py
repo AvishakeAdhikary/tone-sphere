@@ -18,7 +18,7 @@ import subprocess
 import sys
 from datetime import datetime
 from hashlib import sha256
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 import pytest
 import yaml
@@ -456,8 +456,15 @@ class TestWhereTheDataLives:
         monkeypatch.setattr(sys, "platform", "win32")
         monkeypatch.setenv("LOCALAPPDATA", r"C:\Users\someone\AppData\Local")
 
-        expected = Path(r"C:\Users\someone\AppData\Local\Neural Nexus Studios\ToneSphere")
-        assert paths.app_data_dir() == expected
+        # Compared as `PureWindowsPath`, which reads both separators as separators whatever
+        # the host OS is. Plain `Path` equality passes on Windows and fails on the Linux and
+        # macOS CI runners for a reason that is purely an artefact of the simulation: off
+        # Windows, `Path(r"C:\...")` is one long single-component name, so appending the
+        # publisher joins it with a forward slash and the two spellings stop matching. The
+        # claim worth asserting -- LOCALAPPDATA, then publisher, then app -- is the same on
+        # every host, so it is asserted on every host rather than skipped off Windows.
+        expected = PureWindowsPath(r"C:\Users\someone\AppData\Local\Neural Nexus Studios\ToneSphere")
+        assert PureWindowsPath(paths.app_data_dir()) == expected
 
     def test_the_linux_path_honours_xdg_data_home(self, monkeypatch):
         monkeypatch.setattr(sys, "platform", "linux")
