@@ -378,11 +378,39 @@ class TestThePagesSiteIsBuildable:
         Including `VIRTUAL_AUDIO_DRIVER.md`, which predates the site: a page without front
         matter is the one Jekyll may leave unrendered, which is how a link on the landing
         page becomes a 404.
+
+        Files in `_config.yml`'s `exclude` are skipped, because Jekyll does not serve them
+        at all — owner-facing runbooks live in `docs/` for proximity to what they describe
+        without being pages. The test below keeps that from becoming a way to satisfy this
+        one by excluding everything.
         """
+        excluded = set(site_config().get("exclude", []))
+
         for page in sorted(DOCS.rglob("*.md")):
+            if page.relative_to(DOCS).as_posix() in excluded:
+                continue
             front_matter, _ = split_front_matter(page)
             assert front_matter.get("title"), f"{page.relative_to(REPO_ROOT)} has no title"
             assert front_matter.get("layout"), f"{page.relative_to(REPO_ROOT)} has no layout"
+
+    def test_the_pages_the_site_exists_for_are_not_excluded(self):
+        """
+        `exclude` skips the front matter check above, so it must not be able to hide the
+        documents that are the entire reason this site is published.
+        """
+        excluded = set(site_config().get("exclude", []))
+        required = {"index.md", *(f"legal/{name}" for name in DOCUMENTS)}
+
+        assert not (excluded & required), (
+            f"excluded from the site build: {sorted(excluded & required)} — the Store "
+            f"submission needs the privacy policy reachable at a public URL"
+        )
+
+        for entry in excluded:
+            assert (DOCS / entry).exists(), (
+                f"_config.yml excludes '{entry}', which does not exist — a stale exclude "
+                f"silently widens what the front matter check skips"
+            )
 
     def test_the_landing_page_links_all_three_documents_and_the_downloads(self):
         _, body = split_front_matter(DOCS / "index.md")

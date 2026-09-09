@@ -22,6 +22,12 @@ plugins:
   - jekyll-seo-tag
   - jekyll-feed
 
+# Owner-facing runbooks that live in docs/ for proximity to what they describe, but are not
+# pages of the public site: excluded so Jekyll does not serve them, rather than given front
+# matter and a nav entry nobody visiting a legal page is looking for.
+exclude:
+  - MICROSOFT_STORE.md
+
 # Without this, minima's nav lists every page that has a title, which would put the landing
 # page into its own navigation bar next to the site title that already links there.
 header_pages:
