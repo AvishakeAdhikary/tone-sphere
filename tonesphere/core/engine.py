@@ -669,10 +669,37 @@ class AudioEngine:
             device_id = self._find_device_id_by_name(handle.asoundrc_pcm)
 
             if device_id is None:
+                # Enough to tell "the bridge never got written", "ALSA sees it but under a
+                # name our substring match misses" and "ALSA never resolved it at all"
+                # apart on sight, since only one of those needs a different fix.
+                known_names = [d.name for d in self._device_by_id.values()]
+                asoundrc_text = None
+                try:
+                    from tonesphere.engine.linux_virtual import _asoundrc_path
+                    path = _asoundrc_path()
+                    asoundrc_text = path.read_text(encoding="utf-8") if path.exists() else "<missing>"
+                except OSError as e:
+                    asoundrc_text = f"<could not read: {e}>"
+
+                # ALSA's own view, independent of PortAudio: distinguishes "the bridge
+                # never resolved at the ALSA layer at all" from "ALSA has it but PortAudio
+                # doesn't enumerate it" — each needs a different fix.
+                alsa_pcms = "<aplay unavailable>"
+                try:
+                    import subprocess
+                    result = subprocess.run(
+                        ["aplay", "-L"], capture_output=True, text=True, timeout=5.0,
+                    )
+                    alsa_pcms = result.stdout or result.stderr
+                except (OSError, ValueError) as e:
+                    alsa_pcms = f"<aplay failed: {e}>"
+
                 logger.error(
                     f"'{name}' was loaded via pactl (module {handle.module_id}) but never "
                     f"appeared as a PortAudio device — tearing it down rather than "
-                    f"reporting a device id backed by nothing"
+                    f"reporting a device id backed by nothing. Looked for '{handle.asoundrc_pcm}' "
+                    f"among PortAudio's names: {known_names}. ~/.asoundrc: {asoundrc_text!r}. "
+                    f"`aplay -L`: {alsa_pcms!r}"
                 )
                 try:
                     remove_virtual_sink(handle)
