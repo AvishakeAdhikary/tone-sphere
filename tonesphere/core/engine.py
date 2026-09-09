@@ -19,6 +19,7 @@ device key, buses are allocated from a separate range.
 """
 
 import threading
+import time
 from typing import Any
 
 import numpy as np
@@ -38,15 +39,28 @@ from tonesphere.engine import (
     device_node,
     enumerate_devices,
     linear_to_db,
+    network_node,
     preferred_host_api,
 )
 from tonesphere.network.audio_router import NetworkAudioRouter, NetworkQuality
+from tonesphere.network.jitter_buffer import JitterBuffer
+from tonesphere.network.send_worker import NetworkSendWorker
+from tonesphere.network.udp_transport import MalformedPacket, UdpAudioTransport
 from tonesphere.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 # Buses get ids from here up, so a bus id can never be mistaken for a device id.
 BUS_ID_BASE = 10000
+
+# Network send sinks get ids from here up — above the bus range, so the three id spaces
+# (hardware, bus, network) stay disjoint and a stale int held by a UI can never end up
+# pointing at a different kind of thing than it did.
+NETWORK_ID_BASE = 20000
+
+# Default port for the UDP transport. One above the TCP router's 9001, so the two can run
+# side by side on one machine without either having to be reconfigured.
+DEFAULT_UDP_PORT = 9002
 
 
 class AudioEngine:
@@ -79,6 +93,14 @@ class AudioEngine:
         self.channel_control_manager = ChannelControlManager()
         self.network_router = NetworkAudioRouter(quality=NetworkQuality.HIGH)
 
+        # Both transports live at once rather than one replacing the other: TCP is right
+        # for a bulk feed that must not lose a sample and can afford buffering, UDP for
+        # monitoring that would rather drop a block than wait. Neither opens a socket
+        # until asked.
+        self.udp_transport = UdpAudioTransport(
+            quality=NetworkQuality.HIGH, sample_rate=sample_rate
+        )
+
         # Id bookkeeping.
         self._devices: list[DeviceInfo] = []
         self._id_to_node: dict[int, Any] = {}
@@ -86,6 +108,28 @@ class AudioEngine:
         self._device_by_id: dict[int, DeviceInfo] = {}
         self._bus_meta: dict[int, dict[str, Any]] = {}
         self._next_bus_id = BUS_ID_BASE
+        # Keyed by the bus each capture feeds, so stopping one is the same operation as
+        # removing its bus.
+        self._process_captures: dict[int, dict[str, Any]] = {}
+
+        self._network_sinks: dict[int, dict[str, Any]] = {}
+        self._next_network_id = NETWORK_ID_BASE
+        self._send_worker: NetworkSendWorker | None = None
+        self._udp_receives: dict[int, dict[str, Any]] = {}
+
+        # OS-level virtual endpoints: Linux null-sinks (Track 2) and the macOS CoreAudio
+        # HAL device (Track 3). Both are, once they exist, ordinary PortAudio devices —
+        # PulseAudio/PipeWire and the ALSA bridge in `engine/linux_virtual.py` are the
+        # transport on Linux, and `coreaudiod` is on macOS — so `refresh_devices()`
+        # enumerates one exactly like a sound card and `_reindex()` assigns it an id from
+        # the normal hardware range (below `BUS_ID_BASE`). This dict is keyed by that same
+        # id and never allocates one of its own, so there is no new id range to keep
+        # disjoint from `BUS_ID_BASE`/`NETWORK_ID_BASE` — it exists only to remember which
+        # already-real device ids are ours, which backend put them there (`'backend'`), and
+        # to drive the `origin` label in `get_devices()`. One registry, not one per
+        # platform: the two backends differ in how an endpoint appears, not in what it is
+        # once it has.
+        self._system_virtual_devices: dict[int, dict[str, Any]] = {}
 
         self._lock = threading.RLock()
         self._initialized = False
@@ -133,6 +177,12 @@ class AudioEngine:
         With no routes there is nothing to open, and that is a legitimate idle state rather
         than a failure — `has_routes` distinguishes it so the UI can say "running, nothing
         patched" instead of the contradiction of a stopped engine behind a STOP button.
+
+        A routing that touches no hardware at all — bus to bus, or bus to a network sink —
+        is the same legitimate idle state. It is a complete, working configuration that
+        moves audio through ring buffers and a socket without any PortAudio stream, so
+        reporting "route something to a device first" about it would be wrong twice over:
+        the route exists, and it is already carrying audio.
         """
         with self._lock:
             if not self._initialized:
@@ -146,12 +196,14 @@ class AudioEngine:
 
             self._started = True
 
-            if not self.routing_matrix.connections:
+            graph = self._build_graph()
+
+            if not any(node.kind == 'device' for node in graph.nodes()):
                 self._problems = []
-                logger.info("Engine started with no routes — patch something to hear audio")
+                logger.info("Engine started with no hardware routes — nothing to open")
                 return
 
-            self._problems = self.host.configure(self._build_graph())
+            self._problems = self.host.configure(graph)
             self._problems += self.host.start()
 
             for problem in self._problems:
@@ -207,6 +259,10 @@ class AudioEngine:
             return True, f"{source.name} -> {dest.name}{suffix}"
 
     def stop_engine(self):
+        # Outside the lock: stopping a capture joins its thread, and no other caller
+        # should be blocked behind that.
+        self._stop_all_process_captures()
+
         with self._lock:
             self._started = False
             self.host.stop()
@@ -216,7 +272,22 @@ class AudioEngine:
         return self.host.is_running
 
     def cleanup(self):
+        self._stop_all_process_captures()
+
         with self._lock:
+            # Network threads are torn down here rather than in `stop_engine()`, because
+            # `stop_engine()` is a pause the engine restarts from and a peer should not
+            # have its stream dropped by one. `cleanup()` is the terminal call, so nothing
+            # is left running past it.
+            self.stop_udp_transport()
+            self.network_router.stop_server()
+
+            # Same reasoning as the network transports: a Linux virtual sink is an
+            # OS-level resource, not a thread, so pausing the engine must not unload it —
+            # only the terminal `cleanup()` does, matching the "ephemeral, torn down on
+            # exit" lifecycle Track 2 is designed around.
+            self._teardown_all_system_virtual_devices()
+
             self.host.cleanup()
             logger.info("Engine cleanup complete")
 
@@ -310,6 +381,14 @@ class AudioEngine:
         `latency_ms` is what the driver reports for the device. It is not
         `measured_latency_ms` from the engine statistics — that is what the open stream
         actually achieved, and the two differ substantially.
+
+        `origin` says what actually put this endpoint here — `'hardware'`, an in-process
+        `'in_process_bus'`, or an OS-level `'os_virtual_endpoint'` (a Linux sink from
+        Track 2, or the macOS HAL device from Track 3) — so a caller can tell a real card
+        from a bus from an endpoint ToneSphere published to the OS, without guessing from
+        `host_api`. `host_api` stays PortAudio's literal truth either way (e.g. `"ALSA"`
+        for a Linux sink and `"Core Audio"` for the HAL device, since that is genuinely
+        what enumerated them) rather than being overloaded to carry this.
         """
         with self._lock:
             devices: list[dict] = []
@@ -319,6 +398,11 @@ class AudioEngine:
                 if (not include_all_backends and active_api is not None
                         and device.host_api != active_api):
                     continue
+
+                origin = (
+                    'os_virtual_endpoint' if device_id in self._system_virtual_devices
+                    else 'hardware'
+                )
 
                 if device.can_input:
                     devices.append({
@@ -333,6 +417,7 @@ class AudioEngine:
                         'host_api': device.host_api_name,
                         'supports_exclusive': device.supports_exclusive,
                         'direction': 'input',
+                        'origin': origin,
                     })
 
                 if device.can_output:
@@ -348,6 +433,7 @@ class AudioEngine:
                         'host_api': device.host_api_name,
                         'supports_exclusive': device.supports_exclusive,
                         'direction': 'output',
+                        'origin': origin,
                     })
 
             for bus_id, meta in sorted(self._bus_meta.items()):
@@ -363,6 +449,7 @@ class AudioEngine:
                     'host_api': 'ToneSphere bus (in-process)',
                     'supports_exclusive': False,
                     'direction': meta['direction'],
+                    'origin': 'in_process_bus',
                 })
 
             return devices
@@ -461,6 +548,13 @@ class AudioEngine:
             if meta is None:
                 return False
 
+            # Anything network-attached to this bus goes with it. Left behind, the send
+            # worker would keep reading a route whose source no longer exists and the
+            # playout thread would keep writing into a bus that is gone — both reporting
+            # healthy counts for audio going nowhere.
+            self.disable_network_send(device_id)
+            self.unregister_network_receive(device_id)
+
             node = self._id_to_node.pop(device_id, None)
             if node is not None:
                 self._node_to_id.pop(str(node), None)
@@ -539,6 +633,341 @@ class AudioEngine:
         if meta is None:
             return 0
         return self.host.write_bus(meta['internal'], audio)
+
+    # --- Linux virtual sink (Track 2) ---
+
+    def create_linux_system_sink(self, name: str, channels: int = 2) -> int | None:
+        """
+        Create an OS-visible sink other Linux applications can select, and return the
+        PortAudio device id it enumerates as.
+
+        Unlike a bus, this id comes from the ordinary hardware id space: once
+        `engine/linux_virtual.py` has loaded the null-sink and written its ALSA bridge,
+        `refresh_devices()` finds it exactly as it would find a sound card, and
+        `_reindex()` assigns it a normal id below `BUS_ID_BASE`. `_system_virtual_devices`
+        only remembers *which* real device id is one of these, for `origin` labelling and
+        so `remove_linux_system_sink` knows what to tear down — it does not allocate ids
+        of its own. None, never a placeholder id, if the OS never actually made the
+        sink visible: unavailable on this platform, no Pulse/PipeWire server running, or
+        the sink loaded but the ALSA bridge did not make it enumerable are all real,
+        distinct failures, but none of them get a device id that would carry no audio.
+        """
+        from tonesphere.engine.linux_virtual import (
+            LinuxVirtualSinkError,
+            create_virtual_sink,
+            remove_virtual_sink,
+        )
+
+        with self._lock:
+            try:
+                handle = create_virtual_sink(name, channels=channels, samplerate=self.sample_rate)
+            except LinuxVirtualSinkError as e:
+                logger.error(f"Could not create Linux virtual sink '{name}': {e}")
+                return None
+
+            self.refresh_devices()
+            device_id = self._find_device_id_by_name(handle.asoundrc_pcm)
+
+            if device_id is None:
+                logger.error(
+                    f"'{name}' was loaded via pactl (module {handle.module_id}) but never "
+                    f"appeared as a PortAudio device — tearing it down rather than "
+                    f"reporting a device id backed by nothing"
+                )
+                try:
+                    remove_virtual_sink(handle)
+                except LinuxVirtualSinkError as cleanup_error:
+                    logger.error(f"Could not clean up after a failed sink creation: {cleanup_error}")
+                return None
+
+            self._system_virtual_devices[device_id] = {
+                'name': name, 'handle': handle, 'backend': 'linux-null-sink',
+            }
+            logger.info(f"Created Linux virtual sink '{name}' -> device {device_id}")
+            return device_id
+
+    def _find_device_id_by_name(self, name: str) -> int | None:
+        """Substring match, because both backends' endpoints arrive under a decorated
+        name: ALSA prefixes the pcm name, CoreAudio can suffix the device name."""
+        for device_id, device in self._device_by_id.items():
+            if name in device.name:
+                return device_id
+        return None
+
+    def remove_linux_system_sink(self, device_id: int) -> bool:
+        """
+        Tear down the OS-level sink, then this engine's record of it.
+
+        The OS teardown happens first: if `pactl unload-module` were to fail after the
+        bookkeeping was already cleared, `get_devices()` would start reporting a sink
+        that still exists as ordinary `'hardware'`, which is exactly the mislabelling
+        `origin` exists to prevent.
+        """
+        from tonesphere.engine.linux_virtual import LinuxVirtualSinkError, remove_virtual_sink
+        from tonesphere.engine.macos_virtual import MACOS_BACKEND
+
+        with self._lock:
+            entry = self._system_virtual_devices.get(device_id)
+            if entry is None:
+                return False
+
+            # Both backends share this registry, and both expose a remove endpoint that
+            # takes a device id, so an id from the other one can genuinely arrive here.
+            if entry.get('backend') == MACOS_BACKEND:
+                return False
+
+            try:
+                remove_virtual_sink(entry['handle'])
+            except LinuxVirtualSinkError as e:
+                logger.error(f"Could not remove Linux virtual sink '{entry['name']}': {e}")
+                return False
+
+            self._system_virtual_devices.pop(device_id, None)
+
+            node = self._id_to_node.pop(device_id, None)
+            if node is not None:
+                self._node_to_id.pop(str(node), None)
+                self.host.apply_graph(self.host.graph_holder.current().without_node(node))
+
+            self.refresh_devices()
+            logger.info(f"Removed Linux virtual sink '{entry['name']}'")
+            return True
+
+    # --- macOS CoreAudio HAL device (Track 3) ---
+
+    def create_macos_system_device(self) -> int | None:
+        """
+        Attach to the ToneSphere CoreAudio HAL device and return the PortAudio device id
+        it enumerates as, or None with a logged reason if it is not there.
+
+        Note "attach", not "create": unlike the Linux backend, which loads a null-sink on
+        demand, nothing here can bring a device into existence. Installing a HAL plug-in
+        means copying a bundle into `/Library/Audio/Plug-Ins/HAL` with `sudo` and
+        restarting `coreaudiod`, which interrupts audio for every application on the
+        machine — not something to do behind a REST call. A human runs
+        `native/coreaudio-plugin`'s `make install` once; this method finds the resulting
+        device by the exact name the plug-in publishes and records it in the same
+        `_system_virtual_devices` registry the Linux sinks use, so `get_devices()` labels
+        it `os_virtual_endpoint` rather than plain hardware.
+
+        Matching is on that exact name on purpose: a user who has BlackHole or Soundflower
+        installed has an OS-visible loopback device that ToneSphere did not put there, and
+        claiming it as ours would be a straightforward lie about what this project did.
+        """
+        from tonesphere.engine.macos_virtual import (
+            MACOS_BACKEND,
+            MACOS_DEVICE_NAME,
+            hal_plugin_path,
+            unavailable_reason,
+        )
+
+        with self._lock:
+            reason = unavailable_reason()
+            if reason is not None:
+                logger.error(f"Cannot attach the macOS HAL device: {reason}")
+                return None
+
+            self.refresh_devices()
+            device_id = self._find_device_id_by_name(MACOS_DEVICE_NAME)
+
+            if device_id is None:
+                logger.error(
+                    f"The plug-in bundle is installed at {hal_plugin_path()} but "
+                    f"'{MACOS_DEVICE_NAME}' is not in PortAudio's device list — "
+                    f"coreaudiod has most likely not been restarted since it was "
+                    f"installed (`sudo launchctl kickstart -k "
+                    f"system/com.apple.audio.coreaudiod`)"
+                )
+                return None
+
+            self._system_virtual_devices[device_id] = {
+                'name': MACOS_DEVICE_NAME, 'handle': None, 'backend': MACOS_BACKEND,
+            }
+            logger.info(f"Attached the macOS HAL device '{MACOS_DEVICE_NAME}' -> device {device_id}")
+            return device_id
+
+    def remove_macos_system_device(self, device_id: int) -> bool:
+        """
+        Forget the registration. The device itself keeps existing.
+
+        This is the honest asymmetry with `remove_linux_system_sink`, which really does
+        unload the endpoint: uninstalling a HAL plug-in needs `sudo` and another
+        machine-wide `coreaudiod` restart, so all this can do is stop claiming the device
+        as ToneSphere's — after which `get_devices()` reports it as ordinary hardware,
+        which is exactly what an installed-but-unclaimed HAL device is from ToneSphere's
+        point of view. Existing routes to it are deliberately left alone: unlike a removed
+        null-sink, the device is still there and still carrying whatever was patched to it.
+        """
+        from tonesphere.engine.macos_virtual import MACOS_BACKEND
+
+        with self._lock:
+            entry = self._system_virtual_devices.get(device_id)
+            if entry is None or entry.get('backend') != MACOS_BACKEND:
+                return False
+
+            self._system_virtual_devices.pop(device_id, None)
+            logger.info(
+                f"Released the macOS HAL device at {device_id} "
+                f"(the plug-in stays installed; see native/coreaudio-plugin/README.md)"
+            )
+            return True
+
+    def _teardown_all_system_virtual_devices(self):
+        """
+        No OS-level endpoint outlives the engine that created it.
+
+        The macOS branch releases a registration rather than an OS resource, because that
+        is all it ever held — the plug-in is installed by a human and stays installed.
+        """
+        from tonesphere.engine.macos_virtual import MACOS_BACKEND
+
+        for device_id, entry in list(self._system_virtual_devices.items()):
+            if entry.get('backend') == MACOS_BACKEND:
+                self.remove_macos_system_device(device_id)
+            else:
+                self.remove_linux_system_sink(device_id)
+
+    # --- Per-process capture (Windows) ---
+
+    def start_process_capture(self, pid: int, name: str | None = None,
+                              include_process_tree: bool = True) -> int:
+        """
+        Capture one application's audio output into a new bus, and return the bus id.
+
+        The bus is created inside the capture's `on_format` callback, once Windows has
+        said what it is actually delivering, so its channel count cannot disagree with
+        the audio arriving in it. Raises `ProcessCaptureError` on any real failure — it
+        never hands back a bus id backed by silence, which on Windows is what a naive
+        implementation gets, since activation succeeds for process ids that do not exist.
+        """
+        from tonesphere.engine.process_capture import ProcessCapture, ProcessCaptureError
+
+        with self._lock:
+            if any(c['pid'] == pid for c in self._process_captures.values()):
+                raise ProcessCaptureError(f"Process {pid} is already being captured")
+
+            capture = ProcessCapture(
+                pid, include_process_tree=include_process_tree,
+                sample_rate=self.sample_rate, channels=2)
+
+            created: dict[str, Any] = {}
+
+            def on_format(fmt):
+                bus_id = self.create_virtual_input(
+                    name or f"Capture: process {pid}", channels=fmt.channels)
+                if bus_id is None:
+                    raise ProcessCaptureError(
+                        "No input bus available for the capture (limit reached)")
+
+                created['bus_id'] = bus_id
+                resampler = self._capture_resampler(fmt)
+                created['resampler'] = resampler
+
+                if resampler is None:
+                    return lambda block: self.write_to_bus(bus_id, block)
+                return lambda block: self.write_to_bus(bus_id, resampler(block))
+
+            try:
+                fmt = capture.start(on_format)
+            except ProcessCaptureError:
+                bus_id = created.get('bus_id')
+                if bus_id is not None:
+                    self.remove_virtual_device(bus_id)
+                raise
+
+            bus_id = created['bus_id']
+            self._process_captures[bus_id] = {
+                'capture': capture,
+                'pid': pid,
+                'name': name or f"Capture: process {pid}",
+                'format': fmt,
+                'resampled': created['resampler'] is not None,
+            }
+
+            logger.info(f"Process {pid} capture -> bus {bus_id} ({fmt.describe()})")
+            return bus_id
+
+    def _capture_resampler(self, fmt):
+        """
+        Convert a capture's rate to the engine's, or None when they already agree.
+
+        Measured on Windows 11: process loopback delivers whatever rate it is asked for,
+        so this is normally None. It exists for the case where Windows delivers something
+        else, because the alternative to converting is playing the capture at the wrong
+        pitch and calling it working. `DriftResampler`'s ±0.2% clamp is for clock drift,
+        so the clamp is lifted here — this is outright rate conversion, not drift.
+        """
+        if fmt.sample_rate == self.sample_rate:
+            return None
+
+        from tonesphere.engine.dsp import DriftResampler
+
+        logger.warning(
+            f"Capture delivers {fmt.sample_rate} Hz into a {self.sample_rate} Hz engine; "
+            f"resampling by {fmt.sample_rate / self.sample_rate:.4f}"
+        )
+
+        resampler = DriftResampler(fmt.channels, self.buffer_size,
+                                   max_ratio_deviation=1.0)
+        resampler.set_ratio(fmt.sample_rate / self.sample_rate)
+
+        def convert(block: np.ndarray) -> np.ndarray:
+            frames = int(block.shape[0] / resampler.ratio)
+            if frames < 1:
+                return block[:0]
+            out = np.zeros((frames, fmt.channels), dtype=np.float32)
+            resampler.process(block, out, frames)
+            return out
+
+        return convert
+
+    def stop_process_capture(self, bus_id: int) -> bool:
+        """Stop a capture and remove the bus it fed. False if there is no such capture."""
+        with self._lock:
+            entry = self._process_captures.pop(bus_id, None)
+
+        if entry is None:
+            return False
+
+        entry['capture'].stop()
+
+        with self._lock:
+            self.remove_virtual_device(bus_id)
+
+        logger.info(f"Stopped capture of process {entry['pid']}")
+        return True
+
+    def process_capture_status(self, bus_id: int | None = None) -> list[dict]:
+        """
+        Measured state of every running capture, or just one.
+
+        `running` comes from the capture thread being alive, so a capture that died takes
+        its claim to be running with it instead of leaving a stale flag behind.
+        """
+        with self._lock:
+            entries = (
+                [(bus_id, self._process_captures[bus_id])]
+                if bus_id is not None and bus_id in self._process_captures
+                else sorted(self._process_captures.items())
+            )
+
+            return [
+                {
+                    'bus_id': captured_id,
+                    'name': entry['name'],
+                    'resampled': entry['resampled'],
+                    **entry['capture'].statistics(),
+                }
+                for captured_id, entry in entries
+            ]
+
+    def _stop_all_process_captures(self):
+        """No capture thread outlives the engine that started it."""
+        with self._lock:
+            bus_ids = list(self._process_captures)
+
+        for bus_id in bus_ids:
+            self.stop_process_capture(bus_id)
 
     # --- Routing ---
 
@@ -648,6 +1077,12 @@ class AudioEngine:
 
     def clear_all_routing(self):
         with self._lock:
+            # A network send is a routing-matrix route like any other, so clearing the
+            # patchbay clears it too — and its registration has to go with it, or the send
+            # worker would keep reporting a route the graph no longer contains.
+            for device_id in [meta['device_id'] for meta in self._network_sinks.values()]:
+                self.disable_network_send(device_id)
+
             self.routing_matrix.connections.clear()
             self._publish_graph()
 
@@ -672,7 +1107,13 @@ class AudioEngine:
             self._problems = []
             return []
 
-        needs_streams = self._started and graph.connections
+        # Only a route touching real hardware needs a stream. A graph made only of buses
+        # and network sinks is a complete, working configuration — it moves audio through
+        # ring buffers and a socket — and trying to open streams for it would report
+        # "route something to a device first" about a route that already exists.
+        needs_streams = self._started and any(
+            node.kind == 'device' for node in graph.nodes()
+        )
         must_reconfigure = bool(problems) and self.host.is_running
 
         if needs_streams and (must_reconfigure or not self.host.is_running):
@@ -965,7 +1406,7 @@ class AudioEngine:
             self.host.stop()
 
             self.host.host_api = api
-            self.routing_matrix.connections.clear()
+            self.clear_all_routing()
             self.host.apply_graph(RoutingGraph())
 
             self.refresh_devices()
@@ -1009,6 +1450,12 @@ class AudioEngine:
             self.sample_rate = sample_rate
             self.host.samplerate = sample_rate
 
+            # The network side paces itself from the rate, so leaving it on the old one
+            # would send at the wrong speed and slowly under- or overrun the peer.
+            self.udp_transport.sample_rate = sample_rate
+            if self._send_worker is not None:
+                self._send_worker.sample_rate = sample_rate
+
             if was_running:
                 self.start_engine()
             return True
@@ -1025,11 +1472,14 @@ class AudioEngine:
             self.buffer_size = buffer_size
             self.host.blocksize = buffer_size
 
+            if self._send_worker is not None:
+                self._send_worker.frames_per_read = buffer_size
+
             if was_running:
                 self.start_engine()
             return True
 
-    # --- Network (unchanged; see README for its current state) ---
+    # --- Network: TCP (bulk) ---
 
     def start_network_streaming(self):
         self.network_router.start_server()
@@ -1049,17 +1499,441 @@ class AudioEngine:
     def get_network_connections(self) -> list[str]:
         return self.network_router.get_connections()
 
+    # --- Network: UDP (realtime) ---
+
+    def start_udp_transport(
+        self, bind_host: str = '127.0.0.1', bind_port: int = DEFAULT_UDP_PORT
+    ) -> tuple[bool, str]:
+        """
+        Bind the UDP socket and start receiving.
+
+        Defaults to `127.0.0.1` rather than `0.0.0.0`: binding every interface raises a
+        Windows firewall prompt, which is not a thing a local monitoring setup or a test
+        run should do unasked. A caller that wants to be reachable from another machine
+        passes that machine-visible address in deliberately.
+        """
+        with self._lock:
+            try:
+                host, port = self.udp_transport.start(bind_host, bind_port)
+            except OSError as e:
+                return False, f"Could not bind {bind_host}:{bind_port} — {e}"
+            return True, f"UDP transport listening on {host}:{port}"
+
+    def stop_udp_transport(self):
+        """Stop the socket, the send worker and every playout thread."""
+        with self._lock:
+            if self._send_worker is not None:
+                self._send_worker.stop()
+
+            for state in list(self._udp_receives.values()):
+                self._stop_playout(state)
+            self._udp_receives.clear()
+
+            self.udp_transport.stop()
+
+    def add_udp_peer(self, name: str, host: str, port: int) -> str:
+        return self.udp_transport.add_peer(name, host, port)
+
+    def remove_udp_peer(self, name: str) -> bool:
+        return self.udp_transport.remove_peer(name)
+
+    def get_udp_peers(self) -> dict[str, str]:
+        return {
+            name: f"{host}:{port}"
+            for name, (host, port) in self.udp_transport.peers().items()
+        }
+
+    def set_network_quality(self, quality: str) -> tuple[bool, str]:
+        """Set the quality preset on both transports, so one scale means one thing."""
+        try:
+            preset = NetworkQuality(quality)
+        except ValueError:
+            options = ', '.join(q.value for q in NetworkQuality)
+            return False, f"Unknown quality '{quality}' — choose one of: {options}"
+
+        with self._lock:
+            self.network_router.quality = preset
+            self.udp_transport.quality = preset
+        return True, f"Network quality set to {preset.value}"
+
+    # --- Network send (the direction that was never wired) ---
+
+    def send_device_audio_to_network(
+        self, device_id: int, target: str | None = None, transport: str = 'udp'
+    ) -> tuple[bool, str]:
+        """
+        Stream a device's or bus's audio out over the network.
+
+        The send target is registered as a real routing-matrix connection, not as a tap on
+        the side of the graph. That is not a stylistic choice: `_build_graph` reconstructs
+        the entire host graph from `routing_matrix.connections` and every routing mutation
+        republishes it, so a connection pushed straight into the host would be erased the
+        next time anything else in the patchbay changed. Going through
+        `routing_matrix.create_routing` is the difference between "works" and "works until
+        the user drags a cable".
+
+        Once it is a graph node, the host allocates it a ring like any other route and the
+        send worker is an ordinary consumer of that ring.
+        """
+        if transport != 'udp':
+            # The TCP path has a working receive side and no send side, and this is not
+            # the change that gives it one. Refused rather than logged-and-ignored, which
+            # is what this method did before.
+            return False, (
+                "TCP send is still not wired to the audio path — only its receive side is. "
+                "Use transport='udp' for the realtime path."
+            )
+
+        with self._lock:
+            source = self._node_for(device_id)
+            if source is None:
+                return False, f"Unknown source device {device_id}"
+
+            existing = self._sink_id_for_source(device_id)
+            if existing is not None:
+                return False, (
+                    f"Device {device_id} is already sending to the network "
+                    f"(sink {existing}); disable it first to change the target"
+                )
+
+            if not self.udp_transport.is_running:
+                # Port 0: a send-only peer does not need a predictable port, and asking
+                # for one it does not need is one more thing that can already be in use.
+                started, message = self.start_udp_transport(bind_port=0)
+                if not started:
+                    return False, message
+
+            sink_id = self._next_network_id
+            self._next_network_id += 1
+
+            node = network_node(f"send_{sink_id}")
+            self._id_to_node[sink_id] = node
+            self._node_to_id[str(node)] = sink_id
+
+            success, message = self.create_routing(device_id, sink_id)
+            if not success:
+                self._id_to_node.pop(sink_id, None)
+                self._node_to_id.pop(str(node), None)
+                return False, f"Could not route {device_id} to the network: {message}"
+
+            self._network_sinks[sink_id] = {
+                'device_id': device_id,
+                'source': str(source),
+                'dest': str(node),
+                'target': target,
+                'transport': 'udp',
+            }
+
+            worker = self._ensure_send_worker()
+            worker.add_route(
+                sink_id=sink_id, device_id=device_id,
+                source_key=str(source), dest_key=str(node), target=target,
+            )
+            worker.start()
+
+            peers = len(self.udp_transport.peers())
+            where = f"peer '{target}'" if target else f"{peers} peer(s)"
+            note = "" if peers else " — no peers registered yet, so nothing is leaving this machine"
+            return True, f"Device {device_id} is sending to {where}{note}"
+
+    def disable_network_send(self, device_id: int) -> bool:
+        """Tear a network send route back down, matrix entry included."""
+        with self._lock:
+            sink_id = self._sink_id_for_source(device_id)
+            if sink_id is None:
+                return False
+
+            self.remove_routing(device_id, sink_id)
+
+            if self._send_worker is not None:
+                self._send_worker.remove_route(sink_id)
+                if self._send_worker.route_count == 0:
+                    self._send_worker.stop()
+
+            node = self._id_to_node.pop(sink_id, None)
+            if node is not None:
+                self._node_to_id.pop(str(node), None)
+
+            self._network_sinks.pop(sink_id, None)
+            logger.info(f"Network send disabled for device {device_id}")
+            return True
+
+    def list_network_sends(self) -> list[dict]:
+        return [
+            {'sink_id': sink_id, **meta}
+            for sink_id, meta in sorted(self._network_sinks.items())
+        ]
+
+    def _sink_id_for_source(self, device_id: int) -> int | None:
+        for sink_id, meta in self._network_sinks.items():
+            if meta['device_id'] == device_id:
+                return sink_id
+        return None
+
+    def _ensure_send_worker(self) -> NetworkSendWorker:
+        if self._send_worker is None:
+            self._send_worker = NetworkSendWorker(
+                transport=self.udp_transport,
+                # `read_available`, not `read_route`: the sender is paced by a timer, and
+                # a zero-filled short read would put silence on the wire every time that
+                # timer ran late. See the note in `send_worker`'s docstring.
+                reader=self.host.read_available,
+                sample_rate=self.sample_rate,
+                frames_per_read=self.buffer_size,
+            )
+        return self._send_worker
+
+    # --- Network receive ---
+
+    def register_network_receive(
+        self,
+        device_id: int,
+        transport: str = 'tcp',
+        target_latency_ms: float = 40.0,
+        conceal: str = 'silence',
+    ) -> tuple[bool, str]:
+        """
+        Feed audio arriving from the network into a bus.
+
+        TCP keeps its original behaviour: packets are written to the bus as they arrive,
+        which is acceptable for a path that is already buffered end to end.
+
+        UDP does not. Writing datagrams on arrival hands the audio path the network's
+        timing instead of the clock's, which stutters even on a link losing nothing, so
+        packets go into a `JitterBuffer` and a paced thread drains it. The buffer's
+        geometry is taken from the first packet that actually arrives rather than assumed,
+        because the sender's channel count and packet size are its choice, not ours.
+        """
+        if transport == 'tcp':
+            def receive_callback(audio_data: np.ndarray, packet):
+                self.write_to_bus(device_id, audio_data)
+
+            self.network_router.register_receive_callback(device_id, receive_callback)
+            return True, f"Device {device_id} will receive TCP audio"
+
+        if transport != 'udp':
+            return False, f"Unknown transport '{transport}' — use 'tcp' or 'udp'"
+
+        with self._lock:
+            if device_id not in self._bus_meta:
+                return False, (
+                    f"Device {device_id} is not a bus — network audio can only be "
+                    f"written into a bus"
+                )
+
+            if device_id in self._udp_receives:
+                return False, f"Device {device_id} is already receiving UDP audio"
+
+            if not self.udp_transport.is_running:
+                started, message = self.start_udp_transport()
+                if not started:
+                    return False, message
+
+            state: dict[str, Any] = {
+                'device_id': device_id,
+                'buffer': None,
+                'target_latency_ms': target_latency_ms,
+                'conceal': conceal,
+                'packets_received': 0,
+                'packets_rejected': 0,
+                'frames_written': 0,
+                'writes_refused': 0,
+                'late_wakes': 0,
+                'error': None,
+                'stop': threading.Event(),
+                'thread': None,
+            }
+
+            self.udp_transport.register_handler(
+                device_id, self._make_udp_receive_handler(state)
+            )
+
+            thread = threading.Thread(
+                target=self._playout_loop, args=(state,),
+                name=f"udp-playout-{device_id}", daemon=True,
+            )
+            state['thread'] = thread
+            self._udp_receives[device_id] = state
+            thread.start()
+
+            bound = self.udp_transport.bound_address
+            return True, (
+                f"Device {device_id} will receive UDP audio on "
+                f"{bound[0]}:{bound[1]} ({target_latency_ms:.0f} ms jitter buffer)"
+            )
+
+    def unregister_network_receive(self, device_id: int) -> bool:
+        with self._lock:
+            self.network_router.unregister_receive_callback(device_id)
+            self.udp_transport.unregister_handler(device_id)
+
+            state = self._udp_receives.pop(device_id, None)
+            if state is None:
+                return False
+
+            self._stop_playout(state)
+            return True
+
+    def _make_udp_receive_handler(self, state: dict[str, Any]):
+        """
+        The receive-thread callback for one device.
+
+        Runs on the transport's receive thread, so it does no more than decode and insert.
+        Everything paced happens in `_playout_loop`.
+        """
+        def handler(packet):
+            try:
+                audio = packet.decode()
+            except MalformedPacket as e:
+                state['packets_rejected'] += 1
+                state['error'] = f"undecodable packet: {e}"
+                return
+
+            buffer = state['buffer']
+
+            if buffer is None or buffer.channels != packet.channels \
+                    or buffer.frames_per_packet != packet.frame_count:
+                # First packet, or a sender that changed its geometry mid-stream. Either
+                # way the buffer's existing contents describe a different signal, so it is
+                # rebuilt and re-primed rather than fed blocks it cannot align.
+                buffer = JitterBuffer(
+                    frames_per_packet=packet.frame_count,
+                    channels=packet.channels,
+                    sample_rate=self.sample_rate,
+                    target_latency_ms=state['target_latency_ms'],
+                    conceal=state['conceal'],
+                )
+                state['buffer'] = buffer
+
+            state['packets_received'] += 1
+            buffer.push(packet.sequence, audio)
+
+        return handler
+
+    def _playout_loop(self, state: dict[str, Any]):
+        """
+        Drain one jitter buffer into its bus on a paced clock.
+
+        Pulls one packet per *elapsed* slot rather than one per wake-up, which is the
+        difference between working and not. An MTU-sized packet is about 3 ms of audio,
+        and `threading.Event.wait` resolves to the system tick — measured here at roughly
+        8-15 ms on Windows — so one pull per wake would drain the buffer at a third of the
+        rate packets arrive at. Measured before this was fixed: the buffer climbed to its
+        64-packet cap and started evicting, reporting a healthy link as packet loss.
+
+        Pulling by elapsed time keeps the average rate exact and only coarsens the write
+        granularity, which costs nothing: the destination is a ring buffer drained by the
+        audio callback, not a converter that needs samples handed to it on the tick.
+
+        While no buffer exists — nothing has arrived yet — it polls slowly rather than
+        spinning, and inserts nothing at all: a buffer that has not started is not a
+        buffer producing silence.
+        """
+        stop: threading.Event = state['stop']
+        device_id = state['device_id']
+        next_slot = time.monotonic()
+
+        # A ceiling on catch-up, so a long stall re-bases the clock instead of dumping a
+        # second of audio into the bus in one write.
+        max_slots_per_wake = 32
+
+        while not stop.is_set():
+            buffer = state['buffer']
+
+            if buffer is None:
+                if stop.wait(0.01):
+                    break
+                next_slot = time.monotonic()
+                continue
+
+            slot = buffer.frames_per_packet / self.sample_rate
+            now = time.monotonic()
+
+            if now < next_slot:
+                if stop.wait(next_slot - now):
+                    break
+                now = time.monotonic()
+
+            due = 0
+            while next_slot <= now and due < max_slots_per_wake:
+                next_slot += slot
+                due += 1
+
+            if due >= max_slots_per_wake:
+                state['late_wakes'] += 1
+                next_slot = now + slot
+
+            for _ in range(due):
+                try:
+                    block = buffer.pull()
+                except Exception as e:
+                    # A playout thread that dies must not leave the caller reading healthy
+                    # statistics off a dead thread; record why and stop.
+                    state['error'] = f"playout failed: {e}"
+                    logger.error(f"UDP playout for device {device_id} stopped: {e}")
+                    return
+
+                if block is None:
+                    # Still priming. Re-base the clock so the slots spent waiting are not
+                    # owed later as a burst the moment priming completes.
+                    next_slot = time.monotonic() + slot
+                    break
+
+                written = self.write_to_bus(device_id, block)
+                state['frames_written'] += written
+                if written == 0:
+                    # Nothing is routed out of this bus, so the audio has nowhere to go.
+                    # Counted separately from a network problem, because it is not one.
+                    state['writes_refused'] += 1
+
+    def _stop_playout(self, state: dict[str, Any]):
+        state['stop'].set()
+        thread = state.get('thread')
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=2.0)
+
+    # --- Network statistics ---
+
     def get_network_statistics(self) -> dict:
-        return self.network_router.get_statistics()
+        """
+        Both transports, with TCP's keys left flat where they have always been.
 
-    def register_network_receive(self, device_id: int):
-        """Feed audio arriving from the network into a bus."""
-        def receive_callback(audio_data: np.ndarray, packet):
-            self.write_to_bus(device_id, audio_data)
+        Existing callers read `packets_sent`/`bytes_sent`/`quality` off the top level, so
+        moving them under a `'tcp'` key would break the CLI and the REST response for no
+        gain. UDP is additive, under `'udp'`.
+        """
+        stats = dict(self.network_router.get_statistics())
 
-        self.network_router.register_receive_callback(device_id, receive_callback)
+        receives = {}
+        for device_id, state in self._udp_receives.items():
+            buffer = state['buffer']
+            thread = state.get('thread')
+            receives[str(device_id)] = {
+                'device_id': device_id,
+                'packets_received': state['packets_received'],
+                'packets_rejected': state['packets_rejected'],
+                'frames_written': state['frames_written'],
+                'writes_refused': state['writes_refused'],
+                'late_wakes': state['late_wakes'],
+                'playout_alive': bool(thread is not None and thread.is_alive()),
+                'error': state['error'],
+                # None, not an empty stat block: before the first packet arrives there is
+                # no buffer and therefore nothing measured about one.
+                'jitter_buffer': buffer.statistics() if buffer is not None else None,
+            }
 
-    def send_device_audio_to_network(self, device_id: int, target: str | None = None):
-        logger.warning(
-            "Network send is not wired to the audio path; see the Roadmap in README.md"
+        send = (
+            self._send_worker.statistics() if self._send_worker is not None
+            else {'running': False, 'routes': {}}
         )
+
+        for route in send.get('routes', {}).values():
+            route['ring'] = self.host.route_statistics(route['source'], route['dest'])
+
+        stats['udp'] = {
+            'transport': self.udp_transport.statistics(),
+            'send': send,
+            'receive': receives,
+        }
+
+        return stats

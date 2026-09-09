@@ -1293,19 +1293,22 @@ class AudioHost:
 
         return written
 
-    def read_bus(self, name: str, frames: int, dest: str | None = None) -> np.ndarray | None:
+    def read_route(self, source: str, dest: str | None, frames: int) -> np.ndarray | None:
         """
-        Consume a bus's audio for one destination. Allocates, so not for callbacks.
+        Consume one route's audio from outside a callback. Allocates.
 
-        A bus has one ring per destination, so reading requires knowing which. With `dest`
-        omitted the first is used, which is what a single-consumer test wants.
+        Keyed by node strings rather than by bus name, so it works for any source kind —
+        which is what the network sender needs: it consumes a route out of a *device* as
+        readily as out of a bus, and a device's audio only exists in the route's ring.
+
+        None means there is no such route, which is different from a route that had no
+        audio ready: `read_into` zero-fills a starved read, and the ring's own
+        `underflow_count` is how often that happened.
         """
-        source_key = str(bus_node(name))
-
         if dest is not None:
-            ring = self._routes.ring_for(source_key, dest)
+            ring = self._routes.ring_for(source, dest)
         else:
-            sinks = self._routes.sinks_for(source_key)
+            sinks = self._routes.sinks_for(source)
             ring = sinks[0] if sinks else None
 
         if ring is None:
@@ -1314,6 +1317,52 @@ class AudioHost:
         out = np.zeros((frames, ring.channels), dtype=np.float32)
         ring.read_into(out)
         return out
+
+    def read_available(self, source: str, dest: str, max_frames: int) -> np.ndarray | None:
+        """
+        Take everything a route currently holds, up to `max_frames`.
+
+        The distinction from `read_route` matters for any consumer paced by a timer rather
+        than by an audio clock. `read_route` zero-fills a short read, which is right for a
+        callback that must return a full block; it is wrong for the network sender, where
+        the padding would splice silence into the outgoing stream every time the thread
+        woke late — and on Windows, whose `Event.wait` granularity is coarser than a
+        block, waking late is the normal case.
+
+        None means there is no such route. An empty array means the route exists and had
+        nothing ready, which is what a quiet source looks like and is not a fault.
+        """
+        ring = self._routes.ring_for(source, dest)
+        if ring is None:
+            return None
+
+        frames = min(ring.available, max_frames)
+        if frames <= 0:
+            return np.zeros((0, ring.channels), dtype=np.float32)
+
+        out = np.zeros((frames, ring.channels), dtype=np.float32)
+        ring.read_into(out)
+        return out
+
+    def read_bus(self, name: str, frames: int, dest: str | None = None) -> np.ndarray | None:
+        """
+        Consume a bus's audio for one destination.
+
+        A bus has one ring per destination, so reading requires knowing which. With `dest`
+        omitted the first is used, which is what a single-consumer test wants.
+        """
+        return self.read_route(str(bus_node(name)), dest, frames)
+
+    def route_statistics(self, source: str, dest: str) -> dict | None:
+        """
+        Ring health for one route, or None if the route does not exist.
+
+        `underflow_count` is the honest answer to "is the network sender starving?" — it
+        counts reads the producer had not filled, which is exactly a send that had no audio
+        to send, and it costs nothing because the ring already keeps it.
+        """
+        ring = self._routes.ring_for(source, dest)
+        return ring.statistics() if ring is not None else None
 
     # --- Statistics ---
 

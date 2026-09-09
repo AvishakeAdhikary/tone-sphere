@@ -25,6 +25,7 @@ from tonesphere.engine.graph import (
     db_to_linear,
     device_node,
     linear_to_db,
+    network_node,
 )
 from tonesphere.engine.host import AudioHost, HostStatistics, StreamConfig
 from tonesphere.engine.meters import MeterBank, MeterReading, MeterRegistry
@@ -53,5 +54,6 @@ __all__ = [
     "enumerate_devices",
     "find_device",
     "linear_to_db",
+    "network_node",
     "preferred_host_api",
 ]

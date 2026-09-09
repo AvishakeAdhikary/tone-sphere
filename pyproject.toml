@@ -34,6 +34,7 @@ testpaths = ["tests"]
 addopts = "-ra --strict-markers"
 markers = [
     "hardware: needs a real audio device; skipped on CI runners, which have none",
+    "linux_virtual_sink: needs Linux with a running PulseAudio/PipeWire server; unlike hardware, CI can provide this (see the pulseaudio setup step in ci.yml), so these are not excluded from the CI run — only self-skipped off Linux.",
 ]
 
 [tool.ruff]

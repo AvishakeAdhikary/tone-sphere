@@ -224,7 +224,7 @@ def main():
             return 2
     else:
         from tonesphere import __version__
-        print(f"ToneSphere - Audio Routing Engine (v{__version__}, pre-alpha)")
+        print(f"ToneSphere - Audio Routing Engine (v{__version__})")
         print()
         print("Usage:")
         print("  python main.py server  - Start API server")
@@ -232,10 +232,8 @@ def main():
         print("  python main.py cli     - Interactive CLI mode")
         print("  python main.py test    - Run basic tests")
         print()
-        print("STATUS: ToneSphere does not process audio yet.")
-        print("The routing matrix, mixer state and UI are in place, but the audio")
-        print("path is under construction. Nothing you route will be audible.")
-        print("See the Roadmap in README.md for what works and what is next.")
+        print("ToneSphere routes and processes real audio (see README.md for what works).")
+        print("Run `python main.py test` for a diagnostic report on this machine.")
 
     return 0
 

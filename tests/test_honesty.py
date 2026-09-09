@@ -164,6 +164,85 @@ class TestBusesAreNotSystemDevices:
 
         assert buses
         assert all('in-process' in d['host_api'].lower() for d in buses)
+        assert all(d['origin'] == 'in_process_bus' for d in buses)
+
+    def test_a_linux_system_sink_is_never_mistaken_for_a_bus(self):
+        """
+        Mirror image of the test above, for Track 2: a device `get_devices()` knows was
+        created via `create_linux_system_sink` (tracked in `_system_virtual_devices`) is
+        labelled `os_virtual_endpoint`, and must never be reported as `in_process_bus` —
+        the two are opposite claims (one is a real OS-visible endpoint another
+        application can select, the other is not) and conflating them would be exactly
+        the overclaim this suite exists to catch.
+
+        This only exercises the labelling logic in `get_devices()`, not the real Linux
+        `pactl`/ALSA path — that needs an actual sink id, which `_system_virtual_devices`
+        is populated with here directly rather than through a real (Linux-only)
+        `create_linux_system_sink` call, so this runs and proves the labelling on every
+        platform, this machine included.
+        """
+        engine = AudioEngine()
+        engine.initialize()
+
+        # `get_devices()` filters to the active backend by default, so the id chosen to
+        # relabel has to be one that survives that filter, not merely any key of
+        # `_device_by_id`.
+        visible_ids = [d['id'] for d in engine.get_devices()]
+        if not visible_ids:
+            pytest.skip("no enumerated devices on this machine to relabel")
+
+        sink_device_id = visible_ids[0]
+        engine._system_virtual_devices[sink_device_id] = {'name': 'fake sink', 'handle': None}
+
+        devices = {d['id']: d for d in engine.get_devices() if d['id'] == sink_device_id}
+
+        assert devices, "the relabelled device did not appear in get_devices() at all"
+        assert all(d['origin'] == 'os_virtual_endpoint' for d in devices.values())
+        assert all(d['origin'] != 'in_process_bus' for d in devices.values())
+        assert all('bus' not in d['host_api'].lower() for d in devices.values())
+
+
+class TestCaptureStatusMatchesWhatIsImplemented:
+    """
+    `capture_status()` reported `process_loopback_implemented: False` for as long as it
+    was true. Now that `engine/process_capture.py` exists, the flag has to track the
+    platform rather than stay pinned either way — a hardcoded True on a machine that
+    cannot do it would be the same lie in the other direction.
+    """
+
+    def test_implemented_tracks_platform_support(self):
+        from tonesphere.engine.app_capture import capture_status, process_loopback_supported
+
+        status = capture_status()
+
+        assert status['process_loopback_implemented'] == process_loopback_supported()
+
+    def test_status_does_not_promise_capture_where_it_cannot_happen(self):
+        import platform
+
+        from tonesphere.engine.app_capture import capture_status
+
+        status = capture_status()
+
+        if platform.system() != 'Windows':
+            assert status['process_loopback_supported'] is False
+            assert status['process_loopback_implemented'] is False
+
+    def test_process_capture_module_is_importable_where_it_is_claimed(self):
+        """
+        Claiming the feature while its module fails to import is the failure
+        `tests/test_imports.py` was written for, one layer up.
+        """
+        import importlib
+
+        from tonesphere.engine.app_capture import capture_status
+
+        if not capture_status()['process_loopback_implemented']:
+            pytest.skip("not claimed on this platform")
+
+        module = importlib.import_module('tonesphere.engine.process_capture')
+        assert hasattr(module, 'ProcessCapture')
+        assert issubclass(module.ProcessCaptureError, RuntimeError)
 
 
 class TestNoResurrectedFakes:

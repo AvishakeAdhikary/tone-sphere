@@ -16,9 +16,9 @@ Capture
 Windows 10 build 20348 and later can capture a single process's output through
 `ActivateAudioInterfaceAsync` with `VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK`. That covers
 most of why people install a virtual cable — pulling one app's audio somewhere else —
-with no driver installed at all. It needs a C-level COM call that PortAudio does not
-expose, so this module reports whether the platform supports it and leaves the
-implementation flagged rather than pretending it is done.
+with no driver installed at all. It needs a C-level COM call PortAudio does not expose,
+which `engine/process_capture.py` now makes; this module reports whether the platform
+supports it and enumerates what there is to capture.
 """
 
 import platform
@@ -352,11 +352,14 @@ def capture_status() -> dict:
     """
     What application capture can and cannot do here.
 
-    Deliberately explicit about the unimplemented part. The alternative — a UI listing
-    "capture Discord" that silently produces silence — is the pattern this project is
-    being dug out of.
+    `process_loopback_implemented` tracks `process_loopback_supported()` exactly, because
+    `engine/process_capture.py` implements the whole of what the platform offers — where
+    Windows can do it, ToneSphere can. It is deliberately still two separate fields: on
+    Linux and macOS the answer is no, and reporting a blanket "implemented" on a machine
+    that cannot do it would be the same lie in the other direction.
     """
     sessions = list_audio_sessions()
+    supported = process_loopback_supported()
 
     return {
         'platform': platform.system(),
@@ -366,11 +369,15 @@ def capture_status() -> dict:
         ],
         'session_count': len(sessions),
         'system_loopback_available': bool(system_loopback_devices()),
-        'process_loopback_supported': process_loopback_supported(),
-        'process_loopback_implemented': False,
+        'process_loopback_supported': supported,
+        'process_loopback_implemented': supported,
         'note': (
+            "Per-application capture uses ActivateAudioInterfaceAsync with "
+            "VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK (Windows 10 build 20348+). "
+            "Whole-system loopback works through PortAudio on any Windows."
+            if supported else
             "Per-application capture needs ActivateAudioInterfaceAsync with "
-            "VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK, which PortAudio does not expose. "
-            "Whole-system loopback works today. See the Roadmap in README.md."
+            "VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK, which exists only on Windows 10 "
+            "build 20348 and later. This machine cannot do it."
         ),
     }

@@ -137,6 +137,18 @@ class UnifiedAudioEngine:
     def update_virtual_device_channels(self, device_id: int, channels: int) -> bool:
         return self.engine.update_virtual_device_channels(device_id, channels)
 
+    def create_linux_system_sink(self, name: str, channels: int = 2) -> int | None:
+        return self.engine.create_linux_system_sink(name, channels)
+
+    def remove_linux_system_sink(self, device_id: int) -> bool:
+        return self.engine.remove_linux_system_sink(device_id)
+
+    def create_macos_system_device(self) -> int | None:
+        return self.engine.create_macos_system_device()
+
+    def remove_macos_system_device(self, device_id: int) -> bool:
+        return self.engine.remove_macos_system_device(device_id)
+
     def write_to_bus(self, device_id: int, audio: np.ndarray) -> int:
         return self.engine.write_to_bus(device_id, audio)
 
@@ -231,11 +243,48 @@ class UnifiedAudioEngine:
     def get_network_statistics(self):
         return self.engine.get_network_statistics()
 
-    def register_network_receive(self, device_id: int):
-        return self.engine.register_network_receive(device_id)
+    def register_network_receive(
+        self,
+        device_id: int,
+        transport: str = 'tcp',
+        target_latency_ms: float = 40.0,
+        conceal: str = 'silence',
+    ):
+        return self.engine.register_network_receive(
+            device_id, transport, target_latency_ms, conceal
+        )
 
-    def send_device_to_network(self, device_id: int, target=None):
-        return self.engine.send_device_audio_to_network(device_id, target)
+    def unregister_network_receive(self, device_id: int) -> bool:
+        return self.engine.unregister_network_receive(device_id)
+
+    def send_device_to_network(self, device_id: int, target=None, transport: str = 'udp'):
+        return self.engine.send_device_audio_to_network(device_id, target, transport)
+
+    def disable_network_send(self, device_id: int) -> bool:
+        return self.engine.disable_network_send(device_id)
+
+    def list_network_sends(self) -> list[dict]:
+        return self.engine.list_network_sends()
+
+    def set_network_quality(self, quality: str):
+        return self.engine.set_network_quality(quality)
+
+    # --- Network: UDP (realtime) ---
+
+    def start_udp_transport(self, bind_host: str = '127.0.0.1', bind_port: int = 9002):
+        return self.engine.start_udp_transport(bind_host, bind_port)
+
+    def stop_udp_transport(self):
+        return self.engine.stop_udp_transport()
+
+    def add_udp_peer(self, name: str, host: str, port: int) -> str:
+        return self.engine.add_udp_peer(name, host, port)
+
+    def remove_udp_peer(self, name: str) -> bool:
+        return self.engine.remove_udp_peer(name)
+
+    def get_udp_peers(self) -> dict[str, str]:
+        return self.engine.get_udp_peers()
 
     # --- Channel controls ---
 

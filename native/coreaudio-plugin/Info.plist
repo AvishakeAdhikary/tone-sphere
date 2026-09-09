@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+    Bundle metadata for the ToneSphere AudioServerPlugIn.
+
+    Two keys do the real work and both are load-bearing in ways that fail silently:
+
+      CFPlugInFactories maps a factory UUID (generated once for ToneSphere, below) to the
+      *name of the C function* CFPlugIn should call. It must stay equal to the exported
+      symbol ToneSphereAudio_Create in ToneSphereAudio.c.
+
+      CFPlugInTypes maps the AudioServerPlugIn type UUID to the factories that implement
+      it. 443ABAB8-E7B3-491A-B985-BEB9187030DB is kAudioServerPlugInTypeUUID written out
+      as a string: the byte sequence in Apple's CoreAudio/AudioServerPlugIn.h is
+      0x44 0x3A 0xBA 0xB8 0xE7 0xB3 0x49 0x1A 0xB9 0x85 0xBE 0xB9 0x18 0x70 0x30 0xDB,
+      read from a published copy of that header rather than from memory. If it is wrong,
+      coreaudiod simply never asks this bundle for anything and no error appears anywhere.
+-->
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>English</string>
+    <key>CFBundleExecutable</key>
+    <string>ToneSphereAudio</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.tonesphere.audio.driver</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>ToneSphere Audio</string>
+    <key>CFBundlePackageType</key>
+    <string>BNDL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.1.0</string>
+    <key>CFBundleSignature</key>
+    <string>????</string>
+    <key>CFBundleVersion</key>
+    <string>0.1.0</string>
+    <key>NSHumanReadableCopyright</key>
+    <string>ToneSphere. MIT licensed.</string>
+    <key>CFPlugInFactories</key>
+    <dict>
+        <key>17A1E650-D3D3-4EB9-8E8C-3933052163C2</key>
+        <string>ToneSphereAudio_Create</string>
+    </dict>
+    <key>CFPlugInTypes</key>
+    <dict>
+        <key>443ABAB8-E7B3-491A-B985-BEB9187030DB</key>
+        <array>
+            <string>17A1E650-D3D3-4EB9-8E8C-3933052163C2</string>
+        </array>
+    </dict>
+</dict>
+</plist>

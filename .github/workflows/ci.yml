@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
@@ -64,9 +65,27 @@ jobs:
             libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libgl1 \
             libportaudio2
 
+      - name: Start a headless PulseAudio server (Linux)
+        # Unlike `hardware` (needs a real sound card, which no CI runner has),
+        # `linux_virtual_sink`-marked tests only need *a* running Pulse/PipeWire server —
+        # a dummy one is enough to load a null-sink and prove the ALSA bridge for real, so
+        # this is the one Track-2 claim CI can actually verify rather than only assert.
+        # The plan flagged these exact flags as unverified until run for real here; if the
+        # server this starts is not reachable by the later "Run tests" step (a new shell,
+        # same user/session), that is the first thing to adjust.
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install -y pulseaudio pulseaudio-utils
+          dbus-run-session -- pulseaudio --start --exit-idle-time=-1
+          sleep 2
+          pactl info
+
       - name: Run tests
         # CI runners have no audio hardware, so hardware-marked tests are excluded.
-        # Everything else must pass on every platform.
+        # `linux_virtual_sink`-marked tests are deliberately NOT excluded here: on Linux
+        # the PulseAudio step above gives them a real server to prove Track 2 against; on
+        # Windows/macOS they self-skip via `skipif(sys.platform != 'linux')`, so this one
+        # selection is correct on every runner in the matrix.
         env:
           # Qt needs an offscreen platform plugin with no display attached.
           QT_QPA_PLATFORM: offscreen
@@ -83,3 +102,162 @@ jobs:
         # that it runs to completion rather than raising.
         continue-on-error: true
         run: uv run python main.py test
+
+  build-macos-plugin:
+    # The whole verification story for the macOS CoreAudio HAL plug-in in
+    # native/coreaudio-plugin. That C was written on a Windows machine and has never been
+    # compiled, installed or listened to by its author -- this job is the first thing that
+    # ever runs it, and the only evidence that it works. It does not gate `package`,
+    # deliberately: the plug-in is a separate artifact from the Python app, and a plug-in
+    # that fails to build must not stop the app from being packaged.
+    #
+    # Three of the four steps below can only pass or fail here (a build, a signature, an
+    # install into a system directory), and the fourth measures real audio: a 1 kHz sine
+    # written to the device and captured back from it. What this job still cannot say
+    # anything about is listed in native/coreaudio-plugin/README.md -- System Settings,
+    # Discord/DAW pickers, sleep/wake, Gatekeeper on a downloaded bundle.
+    name: Build and prove the macOS HAL plugin
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --all-groups
+
+      - name: Build the plugin bundle
+        working-directory: native/coreaudio-plugin
+        run: make
+
+      - name: Ad-hoc codesign the bundle
+        # `codesign --sign -` is free -- no Apple Developer account, no notarisation. It is
+        # enough for coreaudiod to load a locally built plug-in, and `make sign` runs
+        # `codesign --verify` straight afterwards so an unsigned or badly signed bundle
+        # fails here rather than silently never appearing as a device.
+        working-directory: native/coreaudio-plugin
+        run: make sign
+
+      - name: Install it and restart coreaudiod
+        # Restarting coreaudiod is what makes it rescan /Library/Audio/Plug-Ins/HAL. The
+        # Makefile tries `launchctl kickstart -k system/com.apple.audio.coreaudiod` and
+        # falls back to `killall coreaudiod`; which one this runner's macOS version
+        # actually accepts is one of the things this job's log settles for the first time.
+        working-directory: native/coreaudio-plugin
+        run: make install
+
+      - name: List the audio devices macOS now reports
+        # Cheap, and the single most useful line in the log when the round trip fails:
+        # it separates "the plug-in never loaded" from "it loaded but carries no audio".
+        continue-on-error: true
+        run: system_profiler SPAudioDataType
+
+      - name: Prove the device round-trips real audio
+        run: uv run python .github/scripts/macos_plugin_roundtrip.py
+
+      - name: Uninstall the plugin
+        # Always, so a failed run leaves the runner's audio stack as it found it -- and so
+        # nothing later in this job could accidentally pass because of a leftover install.
+        if: always()
+        working-directory: native/coreaudio-plugin
+        run: make uninstall
+
+  package:
+    # tonesphere.spec (PyInstaller) has existed at the repo root since Phase 4-5 but was
+    # never actually invoked by CI, so "packaging" was an unverified claim — this job is
+    # what makes it a real one: build the frozen app, launch it, and prove it doesn't
+    # immediately die (the exact failure the spec's own comments say it was built to
+    # prevent: a missing PortAudio/pedalboard native library) before ever calling it done.
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            archive_name: ToneSphere-windows.zip
+          - os: ubuntu-latest
+            archive_name: ToneSphere-linux.tar.gz
+          - os: macos-latest
+            archive_name: ToneSphere-macos.tar.gz
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --all-groups
+
+      - name: Install native runtime libraries
+        # Same libraries and same reason as the test job above: PyInstaller's analysis
+        # phase imports PySide6/sounddevice to introspect them for hooks, and the frozen
+        # app the smoke-test step launches needs them at runtime too.
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libxkbcommon-x11-0 libxcb-cursor0 \
+            libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libgl1 \
+            libportaudio2
+
+      - name: Build with PyInstaller
+        run: uv run pyinstaller tonesphere.spec
+
+      - name: Smoke test the frozen app (Linux, offscreen)
+        # No X server on this runner; same offscreen platform plugin the test job above
+        # uses for the same reason.
+        if: runner.os == 'Linux'
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: uv run python .github/scripts/smoke_test_frozen_app.py
+
+      - name: Smoke test the frozen app
+        if: runner.os != 'Linux'
+        run: uv run python .github/scripts/smoke_test_frozen_app.py
+
+      - name: Archive the build (Windows)
+        if: runner.os == 'Windows'
+        run: Compress-Archive -Path dist/ToneSphere/* -DestinationPath ${{ matrix.archive_name }}
+
+      - name: Archive the build (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: tar -czf ${{ matrix.archive_name }} -C dist ToneSphere
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.archive_name }}
+          path: ${{ matrix.archive_name }}
+          if-no-files-found: error
+
+  release:
+    # Publishes the exact artifacts `package` already built and smoke-tested for this
+    # commit — a tag push reuses those binaries rather than triggering a from-scratch
+    # rebuild. Cutting the first tag is a separate, deliberate action the user confirms
+    # later; this job only reacts to a tag that already exists, it never creates one.
+    name: Publish GitHub Release
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*/*
+          fail_on_unmatched_files: true

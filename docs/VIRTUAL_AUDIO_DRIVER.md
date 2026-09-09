@@ -106,6 +106,18 @@ right rather than a feature.
 installation, though notarisation is needed for distribution. Substantially easier than
 Windows. BlackHole is the reference implementation and is MIT-licensed.
 
+ToneSphere now ships one: [`native/coreaudio-plugin/`](../native/coreaudio-plugin/), a
+loopback device called **ToneSphere Audio**, with `create_macos_system_device()` on the
+engine and `/virtual-devices/system/macos` on the REST API to claim it. Read that
+directory's README before relying on it. In short: it is written from Apple's documented
+`AudioServerPlugIn` interface rather than forked from BlackHole, it was written on a
+machine with no macOS on it, and the `build-macos-plugin` CI job — which builds it, ad-hoc
+signs it, installs it, restarts `coreaudiod` and round-trips a 1 kHz sine through the
+device — is the only evidence that any of it works. Everything about day-to-day use
+(System Settings, an application's own device picker, sleep/wake, Gatekeeper on a
+downloaded bundle) is unverified, and the docs say so rather than rounding it up to
+"macOS supported".
+
 **Linux** does not need one. PipeWire and JACK already provide arbitrary virtual endpoints,
 and `pactl load-module module-null-sink` creates one in a single command. The right move on
 Linux is to use the platform rather than fight it.

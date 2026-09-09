@@ -380,14 +380,25 @@ class DriftResampler:
     """
 
     __slots__ = ('ratio', '_position', 'channels', 'blocksize', '_scratch',
-                 '_indices', '_counter')
+                 '_indices', '_counter', 'max_ratio_deviation')
 
     # Never correct faster than this; a larger step would be audible as pitch movement.
     MAX_RATIO_DEVIATION = 0.002
 
-    def __init__(self, channels: int, blocksize: int):
+    def __init__(self, channels: int, blocksize: int,
+                 max_ratio_deviation: float | None = None):
+        """
+        `max_ratio_deviation` overrides the drift clamp for callers doing outright rate
+        conversion rather than drift correction — a per-process capture Windows delivered
+        at 44.1 kHz into a 48 kHz mixer needs a ratio of 0.919, which the drift clamp
+        would flatten to 0.998 and silently mistune. Left unset it keeps the ±0.2% clamp,
+        which is what clock drift needs and what every existing caller wants.
+        """
         self.channels = channels
         self.blocksize = blocksize
+        self.max_ratio_deviation = (self.MAX_RATIO_DEVIATION
+                                    if max_ratio_deviation is None
+                                    else max_ratio_deviation)
         self.ratio = 1.0
         self._position = 0.0
         # Generous headroom so a ratio below 1.0 asking for more input still fits.
@@ -399,8 +410,8 @@ class DriftResampler:
 
     def set_ratio(self, ratio: float):
         """Clamp the correction so it can never become audible pitch drift."""
-        self.ratio = min(max(ratio, 1.0 - self.MAX_RATIO_DEVIATION),
-                         1.0 + self.MAX_RATIO_DEVIATION)
+        self.ratio = min(max(ratio, 1.0 - self.max_ratio_deviation),
+                         1.0 + self.max_ratio_deviation)
 
     def input_frames_needed(self, output_frames: int) -> int:
         """How much input to produce `output_frames`, given the current position."""

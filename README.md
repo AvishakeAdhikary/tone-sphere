@@ -100,23 +100,56 @@ happen. Cables show their gain; muted and broken routes look different.
 indices, so they survive plugging something in. Partial recall: a preset saved with an
 interface attached loads without it and tells you what was missing.
 
+**Network streaming, both directions.** A realtime UDP transport with a 30-byte binary
+header, sequence numbers and a jitter buffer that reorders, conceals and paces playout, on
+top of the existing TCP path for bulk transfer. Sending was previously a stub that logged a
+warning; it is now a real routing-matrix destination, so it survives the patchbay being
+edited underneath it. Proved by a test that puts a 1 kHz sine into a bus on one engine and
+reads the same samples back out of a bus on another over localhost UDP.
+
+**Per-application capture, on Windows.** Capture one process's audio by PID —
+`ActivateAudioInterfaceAsync` with `VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK`, Windows 10 build
+20348+, no driver and no virtual cable. Proved by capturing ToneSphere's own process while
+it plays a known 1 kHz tone and measuring the frequency and sample rate that come back.
+
+**A Linux sink other applications can select.** A `pactl`-created null sink, bridged into
+PortAudio through an ALSA `pulse` PCM, so routing into it is an ordinary output stream — no
+new IPC. Labelled honestly as an OS-visible endpoint, distinct from the in-process buses.
+
 **Also:** system-wide loopback capture, real audio-session detection (which applications
 are actually playing), a REST API with a WebSocket stats feed, and a CLI.
 
 ## What does not work yet
 
-- **Virtual devices other applications can select.** The buses are in-process summing
-  points; nothing outside ToneSphere can see them. That needs a signed kernel driver —
-  [docs/VIRTUAL_AUDIO_DRIVER.md](docs/VIRTUAL_AUDIO_DRIVER.md) covers exactly what and how
-  much.
-- **Per-application capture.** Windows 10 build 20348+ supports it without a driver, and
-  ToneSphere detects that, but the native call is not written yet. Whole-system loopback
-  works today.
+- **Virtual devices other applications can select, on Windows.** The buses are in-process
+  summing points; nothing outside ToneSphere can see them. On Windows that needs a signed
+  kernel driver — [docs/VIRTUAL_AUDIO_DRIVER.md](docs/VIRTUAL_AUDIO_DRIVER.md) covers
+  exactly what and how much. It is the one deliberately-undone item here.
+- **The macOS virtual device, in day-to-day use.** There is now a real CoreAudio HAL
+  plug-in in [native/coreaudio-plugin/](native/coreaudio-plugin/) that publishes a
+  **ToneSphere Audio** loopback device. It **builds, installs, and round-trips audio in
+  the macOS CI job** — a 1 kHz sine written to the device and captured back from it, with
+  the frequency and RMS asserted. That is the whole of the evidence. Day-to-day
+  device-picker behaviour — System Settings and Audio MIDI Setup, selecting it in
+  Discord/OBS/a DAW, sleep/wake, Gatekeeper on a real user's own install method — is
+  **unverified**, and the plug-in's C was written on a Windows machine by someone who
+  could not compile or listen to it. Treat it as "proven in CI, unproven in life".
 - **ASIO.** Not in the PyPI PortAudio build — Steinberg's SDK cannot be redistributed. It
   appears automatically if you supply a PortAudio built against it. WASAPI exclusive is
   within a few ms anyway.
-- **Network streaming** is TCP, which is the wrong transport for realtime. Fine for moving
-  audio between machines, not for monitoring. Realtime needs UDP with a jitter buffer.
+- **Opus compression for network audio.** The UDP transport carries PCM — float32 or int16,
+  optionally zlib'd — and reserves a codec id for Opus that both encode and decode refuse
+  rather than quietly substituting PCM for. The blocker is packaging, not the codec: PyOgg
+  publishes Windows-only wheels (and its released version exposes no encoder class at all),
+  and `opuslib` publishes no wheels, so either one needs a system libopus installed per
+  platform. A codec path testable on one of the three platforms in CI is not one this
+  project will claim.
+- **TCP send.** The TCP path still only receives; its send side refuses with a message
+  saying so. UDP is the wired direction, and the right one for monitoring anyway.
+- **Adaptive jitter buffering.** The buffer's target latency is one fixed, exposed setting
+  (40 ms by default). Estimating it from measured jitter is a real improvement and is
+  deliberately deferred, because an adaptive control loop in the audio path without a
+  deterministic test for it is worse than a slightly conservative constant.
 
 ## Roadmap
 
@@ -127,7 +160,7 @@ are actually playing), a REST API with a WebSocket stats feed, and a CLI.
 | 2 | Real mixer: pan law, polarity, limiter, drift resampling, metering | done |
 | 3 | Qt interface: mixer strips, dB faders, node-graph patchbay | done |
 | 4 | VST3 hosting, real DSP, honest app detection, presets | done |
-| 5 | Packaging, per-process capture, virtual audio driver | in progress |
+| 5 | Packaging (CI-built and smoke-tested, releases on tag); per-process capture (Windows, done); virtual devices (Linux done; macOS proven in CI, unverified in daily use; Windows kernel driver deliberately not attempted — see [docs/VIRTUAL_AUDIO_DRIVER.md](docs/VIRTUAL_AUDIO_DRIVER.md)) | mostly done |
 
 ## A note on how this was rebuilt
 
@@ -160,5 +193,7 @@ attack time was wrong by a factor of 256 — were caught by exactly that kind of
 nothing else.
 
 P.S. This is not a rickroll.
-I'll work on executables in the future, for now I am busy working in corporate. Inviting others to contribute.
+Executables now build and get smoke-tested in CI on all three platforms, and publish to
+GitHub Releases once a version tag is pushed. Still busy working in corporate. Inviting
+others to contribute.
 Have fun.

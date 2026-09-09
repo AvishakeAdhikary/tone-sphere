@@ -42,11 +42,12 @@ class NodeId:
     """
     Identifies one endpoint in the graph.
 
-    `kind` distinguishes a physical device from an in-process bus, because they are
-    reached differently: a device by PortAudio index, a bus by name.
+    `kind` distinguishes the three things an endpoint can be, because each is reached
+    differently: a device by PortAudio index, a bus by name, a network sink by the
+    registration the send worker holds for it.
     """
-    kind: str   # 'device' | 'bus'
-    ref: str    # device key, or bus name
+    kind: str   # 'device' | 'bus' | 'network'
+    ref: str    # device key, bus name, or network sink reference
 
     def __str__(self) -> str:
         return f"{self.kind}:{self.ref}"
@@ -58,6 +59,20 @@ def device_node(key: str) -> NodeId:
 
 def bus_node(name: str) -> NodeId:
     return NodeId('bus', name)
+
+
+def network_node(ref: str) -> NodeId:
+    """
+    A destination that leaves this machine.
+
+    Nothing else here needs changing to support it: `Connection` and `RoutingGraph` never
+    inspect `kind`, and the host builds a ring per route regardless of what the far end
+    is. That is the point of making a network send target a real graph node rather than a
+    tap bolted onto the side — the engine rebuilds the whole graph from its routing matrix
+    on every edit, so anything not in the matrix is erased the next time a user drags a
+    cable.
+    """
+    return NodeId('network', ref)
 
 
 @dataclass(frozen=True)

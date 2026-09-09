@@ -6,11 +6,13 @@ from fastapi import FastAPI, HTTPException, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 
 from tonesphere.api.models import (
+    CreateLinuxSinkRequest,
     CreateRoutingRequest,
     CreateVirtualDeviceRequest,
     DeviceInfo,
     PerformanceStats,
     SetVolumeRequest,
+    StartProcessCaptureRequest,
 )
 from tonesphere.core.engine_factory import UnifiedAudioEngine
 from tonesphere.utils.config import ConfigManager
@@ -447,36 +449,173 @@ async def get_network_connections():
     return {"incoming": audio_engine.get_network_clients(), "outgoing": []}
 
 @app.post("/network/send/{device_id}")
-async def send_device_to_network(device_id: int, target: str | None = None):
-    """Send device audio over network"""
+async def send_device_to_network(
+    device_id: int, target: str | None = None, transport: str = "tcp"
+):
+    """
+    Send a device's or bus's audio over the network.
+
+    `transport` defaults to "tcp" so a caller written against the old endpoint gets the
+    behaviour it already had. TCP send is still unwired and says so; "udp" is the path
+    that carries audio.
+    """
     if not audio_engine:
         raise HTTPException(status_code=500, detail="Audio engine not initialized")
 
-    if hasattr(audio_engine.engine, 'send_device_audio_to_network'):
-        audio_engine.engine.send_device_audio_to_network(device_id, target)
-        return {"message": f"Sending device {device_id} audio to network"}
-    raise HTTPException(status_code=400, detail="Network routing not available")
+    success, message = audio_engine.engine.send_device_audio_to_network(
+        device_id, target, transport
+    )
+    if not success:
+        raise HTTPException(status_code=400, detail=message)
+    return {"message": message, "sends": audio_engine.engine.list_network_sends()}
+
+@app.delete("/network/send/{device_id}")
+async def disable_network_send(device_id: int):
+    """Stop sending a device's audio, and remove the route it was using"""
+    if not audio_engine:
+        raise HTTPException(status_code=500, detail="Audio engine not initialized")
+
+    if not audio_engine.engine.disable_network_send(device_id):
+        raise HTTPException(
+            status_code=404, detail=f"Device {device_id} is not sending to the network"
+        )
+    return {"message": f"Device {device_id} is no longer sending to the network"}
+
+@app.get("/network/sends")
+async def list_network_sends():
+    """Active network send routes"""
+    if not audio_engine:
+        raise HTTPException(status_code=500, detail="Audio engine not initialized")
+
+    return {"sends": audio_engine.engine.list_network_sends()}
 
 @app.post("/network/receive/{device_id}")
-async def register_network_receive(device_id: int):
-    """Register device to receive network audio"""
+async def register_network_receive(
+    device_id: int,
+    transport: str = "tcp",
+    target_latency_ms: float = 40.0,
+    conceal: str = "silence",
+):
+    """
+    Register a bus to receive network audio.
+
+    `target_latency_ms` and `conceal` apply to the UDP jitter buffer only; TCP arrives
+    pre-buffered by TCP itself and is written straight through as it always was.
+    """
     if not audio_engine:
         raise HTTPException(status_code=500, detail="Audio engine not initialized")
 
-    if hasattr(audio_engine.engine, 'register_network_receive'):
-        audio_engine.engine.register_network_receive(device_id)
-        return {"message": f"Device {device_id} registered for network receive"}
-    raise HTTPException(status_code=400, detail="Network routing not available")
+    success, message = audio_engine.engine.register_network_receive(
+        device_id, transport, target_latency_ms, conceal
+    )
+    if not success:
+        raise HTTPException(status_code=400, detail=message)
+    return {"message": message}
+
+@app.delete("/network/receive/{device_id}")
+async def unregister_network_receive(device_id: int):
+    """Stop a device receiving network audio, and stop its playout thread"""
+    if not audio_engine:
+        raise HTTPException(status_code=500, detail="Audio engine not initialized")
+
+    removed = audio_engine.engine.unregister_network_receive(device_id)
+    return {
+        "message": f"Device {device_id} is no longer receiving network audio",
+        # The TCP callback is unregistered either way; this says whether a UDP jitter
+        # buffer and playout thread were actually torn down, rather than implying both.
+        "udp_playout_stopped": removed,
+    }
+
+@app.post("/network/udp/start")
+async def start_udp_transport(bind_host: str = "127.0.0.1", bind_port: int = 9002):
+    """
+    Bind the realtime UDP socket.
+
+    Defaults to loopback. Binding every interface is a deliberate act — it triggers a
+    Windows firewall prompt — so a caller that wants to be reachable from another machine
+    passes that address explicitly.
+    """
+    if not audio_engine:
+        raise HTTPException(status_code=500, detail="Audio engine not initialized")
+
+    success, message = audio_engine.engine.start_udp_transport(bind_host, bind_port)
+    if not success:
+        raise HTTPException(status_code=400, detail=message)
+    return {
+        "message": message,
+        "transport": audio_engine.engine.udp_transport.statistics(),
+    }
+
+@app.post("/network/udp/stop")
+async def stop_udp_transport():
+    """Close the UDP socket and stop the send worker and every playout thread"""
+    if not audio_engine:
+        raise HTTPException(status_code=500, detail="Audio engine not initialized")
+
+    audio_engine.engine.stop_udp_transport()
+    return {"message": "UDP transport stopped"}
+
+@app.post("/network/udp/peer")
+async def add_udp_peer(name: str, host: str, port: int = 9002):
+    """
+    Register where UDP audio should be sent.
+
+    UDP is connectionless, so there is nothing to connect to and nothing to fail here —
+    a peer is an address we will send to, and whether anything is listening only becomes
+    visible in the peer's own receive statistics.
+    """
+    if not audio_engine:
+        raise HTTPException(status_code=500, detail="Audio engine not initialized")
+
+    audio_engine.engine.add_udp_peer(name, host, port)
+    return {
+        "message": f"UDP peer '{name}' is {host}:{port}",
+        "peers": audio_engine.engine.get_udp_peers(),
+    }
+
+@app.delete("/network/udp/peer/{name}")
+async def remove_udp_peer(name: str):
+    """Remove a UDP peer"""
+    if not audio_engine:
+        raise HTTPException(status_code=500, detail="Audio engine not initialized")
+
+    if not audio_engine.engine.remove_udp_peer(name):
+        raise HTTPException(status_code=404, detail=f"No UDP peer named '{name}'")
+    return {"message": f"Removed UDP peer '{name}'"}
+
+@app.get("/network/udp/peers")
+async def get_udp_peers():
+    """Registered UDP peers"""
+    if not audio_engine:
+        raise HTTPException(status_code=500, detail="Audio engine not initialized")
+
+    return {"peers": audio_engine.engine.get_udp_peers()}
+
+@app.post("/network/quality")
+async def set_network_quality(quality: str):
+    """Set the quality preset for both transports"""
+    if not audio_engine:
+        raise HTTPException(status_code=500, detail="Audio engine not initialized")
+
+    success, message = audio_engine.engine.set_network_quality(quality)
+    if not success:
+        raise HTTPException(status_code=400, detail=message)
+    return {"message": message}
 
 @app.get("/network/statistics")
 async def get_network_statistics():
-    """Get network statistics"""
+    """
+    Network statistics for both transports.
+
+    TCP's counters stay at the top level, where callers have always read them. UDP is
+    added under `udp`, with per-route send statistics and per-device jitter-buffer
+    statistics — `jitter_buffer` is null until a first packet has actually arrived,
+    because before that there is nothing measured about one.
+    """
     if not audio_engine:
         raise HTTPException(status_code=500, detail="Audio engine not initialized")
 
-    if hasattr(audio_engine.engine, 'get_network_statistics'):
-        return audio_engine.engine.get_network_statistics()
-    return {"error": "Network statistics not available"}
+    return audio_engine.engine.get_network_statistics()
 
 # Virtual Device Management Endpoints
 @app.get("/virtual-devices")
@@ -560,6 +699,195 @@ async def update_virtual_device_channels(device_id: int, channels: int):
         return {"message": f"Channels updated to {channels}"}
     else:
         raise HTTPException(status_code=404, detail="Virtual device not found")
+
+# Linux Virtual Sink Endpoints (Track 2)
+@app.post("/virtual-devices/system/linux")
+async def create_linux_virtual_sink(request: CreateLinuxSinkRequest):
+    """
+    Create an OS-visible virtual sink on Linux: a PulseAudio/PipeWire null-sink bridged
+    into ALSA, so other applications — not just ToneSphere — can select it.
+
+    Refused with a real reason on every other platform, and if pactl exists but no
+    Pulse/PipeWire server is running, rather than returning a device id backed by nothing.
+    """
+    import platform
+
+    if not audio_engine:
+        raise HTTPException(status_code=500, detail="Audio engine not initialized")
+
+    if platform.system() != "Linux":
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Linux virtual sinks need pactl and a running PulseAudio/PipeWire "
+                f"server; unavailable on {platform.system()}"
+            ),
+        )
+
+    device_id = audio_engine.create_linux_system_sink(request.name, request.channels)
+    if device_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Could not create '{request.name}' as an OS-visible sink — see the "
+                f"server log for the real reason (pactl failure, or it loaded but never "
+                f"appeared as a PortAudio device)"
+            ),
+        )
+
+    return {
+        "device_id": device_id,
+        "message": f"Created Linux virtual sink '{request.name}'",
+    }
+
+@app.delete("/virtual-devices/system/{device_id}")
+async def remove_linux_virtual_sink(device_id: int):
+    """Tear down a Linux virtual sink's routing node, then the OS-level sink itself."""
+    if not audio_engine:
+        raise HTTPException(status_code=500, detail="Audio engine not initialized")
+
+    if not audio_engine.remove_linux_system_sink(device_id):
+        raise HTTPException(
+            status_code=404, detail=f"No Linux virtual sink at device {device_id}"
+        )
+    return {"message": f"Removed Linux virtual sink (device {device_id})"}
+
+# macOS CoreAudio HAL Device Endpoints (Track 3)
+@app.get("/virtual-devices/system/macos")
+async def get_macos_hal_status():
+    """
+    What is actually true about the ToneSphere CoreAudio HAL plug-in on this machine.
+
+    Three separate facts, never collapsed into one: whether this OS could have it at all,
+    whether the bundle is installed on disk, and whether coreaudiod has actually published
+    the device (`device_visible`, which is null rather than false when nothing looked).
+    """
+    from tonesphere.engine.macos_virtual import plugin_status
+
+    return plugin_status()
+
+@app.post("/virtual-devices/system/macos")
+async def attach_macos_hal_device():
+    """
+    Claim the installed ToneSphere HAL device as an OS-visible ToneSphere endpoint.
+
+    Takes no name or channel count, unlike the Linux sink endpoint: both are compiled into
+    the plug-in bundle, and this cannot create a device — the bundle is installed by a
+    human with `sudo` (see native/coreaudio-plugin/README.md). Refused with a real reason
+    on every other platform, and when the plug-in is not installed or coreaudiod has not
+    been restarted since it was, rather than returning a device id backed by nothing.
+    """
+    from tonesphere.engine.macos_virtual import unavailable_reason
+
+    if not audio_engine:
+        raise HTTPException(status_code=500, detail="Audio engine not initialized")
+
+    reason = unavailable_reason()
+    if reason is not None:
+        raise HTTPException(status_code=400, detail=reason)
+
+    device_id = audio_engine.create_macos_system_device()
+    if device_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "The plug-in is installed but its device is not in PortAudio's device "
+                "list — coreaudiod has most likely not been restarted since the install "
+                "(sudo launchctl kickstart -k system/com.apple.audio.coreaudiod)"
+            ),
+        )
+
+    return {
+        "device_id": device_id,
+        "message": "Attached the macOS HAL device",
+    }
+
+@app.delete("/virtual-devices/system/macos/{device_id}")
+async def release_macos_hal_device(device_id: int):
+    """
+    Stop claiming the HAL device. The device itself stays: uninstalling the plug-in needs
+    sudo and a coreaudiod restart, so this endpoint honestly does not pretend to do it.
+    """
+    if not audio_engine:
+        raise HTTPException(status_code=500, detail="Audio engine not initialized")
+
+    if not audio_engine.remove_macos_system_device(device_id):
+        raise HTTPException(
+            status_code=404, detail=f"No macOS HAL device registered at device {device_id}"
+        )
+    return {
+        "message": (
+            f"Released the macOS HAL device (device {device_id}); the plug-in is still "
+            f"installed — see native/coreaudio-plugin/README.md to uninstall it"
+        )
+    }
+
+# Per-Application Capture Endpoints
+@app.get("/app-capture")
+async def get_app_capture_status():
+    """
+    What per-application capture can do here, and which applications are playing.
+
+    `process_loopback_supported` is the platform's answer and `process_loopback_implemented`
+    is ours; both are reported so a client can tell "this machine cannot" from "ToneSphere
+    cannot" instead of being told a flat no.
+    """
+    from tonesphere.engine.app_capture import capture_status
+
+    status = capture_status()
+
+    if audio_engine:
+        status['active_captures'] = audio_engine.engine.process_capture_status()
+
+    return status
+
+@app.post("/app-capture")
+async def start_app_capture(request: StartProcessCaptureRequest):
+    """
+    Capture a process's audio into a new bus, returning the bus id.
+
+    A failure here is a real refusal — a process that has exited, a build of Windows
+    without process loopback, an application Windows will not let anyone capture — and is
+    returned as an error rather than as a bus id that would only ever carry silence.
+    """
+    if not audio_engine:
+        raise HTTPException(status_code=500, detail="Audio engine not initialized")
+
+    from tonesphere.engine.process_capture import ProcessCaptureError
+
+    try:
+        bus_id = audio_engine.engine.start_process_capture(
+            request.pid, request.name, request.include_process_tree)
+    except ProcessCaptureError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    return {
+        "bus_id": bus_id,
+        "capture": audio_engine.engine.process_capture_status(bus_id)[0],
+    }
+
+@app.get("/app-capture/{bus_id}")
+async def get_one_app_capture(bus_id: int):
+    """Measured statistics for one running capture."""
+    if not audio_engine:
+        raise HTTPException(status_code=500, detail="Audio engine not initialized")
+
+    captures = audio_engine.engine.process_capture_status(bus_id)
+    if not captures:
+        raise HTTPException(status_code=404, detail=f"No capture feeding bus {bus_id}")
+
+    return captures[0]
+
+@app.delete("/app-capture/{bus_id}")
+async def stop_app_capture(bus_id: int):
+    """Stop a capture and remove the bus it fed."""
+    if not audio_engine:
+        raise HTTPException(status_code=500, detail="Audio engine not initialized")
+
+    if not audio_engine.engine.stop_process_capture(bus_id):
+        raise HTTPException(status_code=404, detail=f"No capture feeding bus {bus_id}")
+
+    return {"message": f"Stopped the capture feeding bus {bus_id}"}
 
 # Logging Control Endpoints
 @app.post("/logging/enable")
