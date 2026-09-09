@@ -260,38 +260,90 @@ class TestTheBodySurvivesQtsMarkdownRenderer:
         assert ISSUES_URL in text, "the contact URL has to remain visible once links are rendered"
 
 
-class TestNoLicenceIsClaimedThatTheRepositoryDoesNotCarry:
+class TestTheTermsMatchTheLicenceTheRepositoryCarries:
     """
-    The Terms and Conditions grant a right to use the application and say, in as many
-    words, that the repository holds no licence file — public source is not a grant. If a
-    licence is ever added, that clause becomes false, and this is where that shows up.
+    This class used to assert the opposite: that no licence file existed and that the Terms
+    said so. Adding `LICENSE` made those assertions fail, which is exactly what they were
+    for — the document and the repository cannot disagree about what has been granted.
+
+    Now it guards the other direction. MIT permits redistribution, sublicensing and sale,
+    so the failure mode worth catching is a Terms document that still forbids them: an
+    agreement narrower than the licence it sits on top of is unenforceable noise at best,
+    and misleads a reader who trusts it at worst.
     """
 
-    def test_the_repository_still_has_no_licence_file(self):
-        candidates = ("LICENSE", "LICENSE.md", "LICENSE.txt", "LICENCE", "COPYING")
-        present = [name for name in candidates if (REPO_ROOT / name).exists()]
-        assert not present, (
-            f"{present} now exists; the Terms and Conditions state the repository contains "
-            f"no licence file, so update the document and this check together"
+    LICENCE_FILE = "LICENSE"
+
+    def licence_text(self) -> str:
+        return (REPO_ROOT / self.LICENCE_FILE).read_text(encoding="utf-8")
+
+    def test_the_licence_file_exists_and_is_mit(self):
+        assert (REPO_ROOT / self.LICENCE_FILE).exists(), (
+            "the Terms and Conditions name the MIT Licence as the operative grant, so the "
+            "file it points at has to be there"
         )
 
-    def test_the_terms_say_so_explicitly(self):
-        _, body = load_document("terms-and-conditions.md")
-        assert "contains no licence file" in body.lower()
+        text = self.licence_text()
+        assert "MIT License" in text
+        assert "Neural Nexus Studios" in text, "the copyright holder is the publisher"
+        # MIT's operative verbs. A truncated or reworded MIT is not MIT.
+        for right in ("use", "copy", "modify", "merge", "publish", "distribute",
+                      "sublicense", "sell"):
+            assert right in text, f"MIT grants the right to {right}; this text does not"
+        assert "WITHOUT WARRANTY OF ANY KIND" in text
 
-    def test_every_mention_of_open_source_is_a_denial(self):
-        denials = ("no open-source", "no open source", "not be described as open-source",
-                   "not open-source", "not open source")
-        for filename in DOCUMENTS:
-            _, body = load_document(filename)
-            for sentence in re.split(r"(?<=[.;])\s+", body):
-                lowered = " ".join(sentence.lower().split())
-                if "open-source" not in lowered and "open source" not in lowered:
-                    continue
-                assert any(denial in lowered for denial in denials), (
-                    f"{filename}: {lowered!r} reads as a claim that the application is "
-                    f"open-source, which no licence in this repository supports"
-                )
+    def test_the_terms_point_at_the_licence_rather_than_restating_it(self):
+        _, body = load_document("terms-and-conditions.md")
+
+        assert "MIT" in body, "the Terms have to say which licence actually governs"
+        assert self.LICENCE_FILE in body, (
+            "the Terms should point the reader at the licence file, not paraphrase it"
+        )
+
+    def test_the_terms_do_not_forbid_what_mit_permits(self):
+        """
+        The specific clauses that had to change when MIT was added: a blanket ban on
+        redistribution, and a grant described as revocable.
+        """
+        _, body = load_document("terms-and-conditions.md")
+        lowered = " ".join(body.lower().split())
+
+        assert "contains no licence file" not in lowered, (
+            "stale clause: the repository does carry a licence file now"
+        )
+        assert "does not grant rights to relicense, sublicense, sell, or redistribute" not in lowered, (
+            "stale clause: MIT grants exactly those rights"
+        )
+
+        for sentence in re.split(r"(?<=[.;])\s+", body):
+            flat = " ".join(sentence.lower().split())
+            if "you may not" in flat or "may not:" in flat:
+                for forbidden in ("redistribute", "resell", "sublicense"):
+                    assert forbidden not in flat, (
+                        f"the Terms forbid {forbidden!r} in {flat!r}, which the MIT Licence "
+                        f"in the same repository permits"
+                    )
+
+    def test_attribution_is_named_as_the_condition(self):
+        """MIT's single condition. A Terms document that omits it under-describes the deal."""
+        _, body = load_document("terms-and-conditions.md")
+        lowered = body.lower()
+
+        assert "copyright notice" in lowered
+        assert "permission notice" in lowered or "attribution" in lowered
+
+    def test_trademark_is_carved_out_of_the_licence(self):
+        """
+        MIT covers the software and says nothing about names. If the Terms do not carve the
+        product and publisher names out, nothing does.
+        """
+        _, body = load_document("terms-and-conditions.md")
+        lowered = body.lower()
+
+        assert "trademark" in lowered
+        assert "endors" in lowered, (
+            "a redistributed build must be told not to imply endorsement"
+        )
 
 
 class TestTheTwoTermsDocumentsHaveDistinctScope:

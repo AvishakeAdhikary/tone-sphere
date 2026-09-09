@@ -6,6 +6,7 @@ Low-latency audio routing and mixing for Windows, Linux and macOS.
 **5.7 ms measured round trip** at a 128-frame buffer on WASAPI exclusive, ~5% DSP load.
 
 [![Latest release](https://img.shields.io/github/v/release/AvishakeAdhikary/tone-sphere?style=flat-square&label=latest%20release)](https://github.com/AvishakeAdhikary/tone-sphere/releases/latest)
+[![Licence: MIT](https://img.shields.io/badge/licence-MIT-blue?style=flat-square)](LICENSE)
 [![GitHub Sponsors](https://img.shields.io/badge/GitHub%20Sponsors-ea4aaa?style=flat-square&logo=githubsponsors&logoColor=white)](https://github.com/sponsors/avishakeadhikary)
 [![Patreon](https://img.shields.io/badge/Patreon-f96854?style=flat-square&logo=patreon&logoColor=white)](https://www.patreon.com/avishakeadhikary)
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-ff5e5b?style=flat-square&logo=kofi&logoColor=white)](https://ko-fi.com/avishakeadhikary)
@@ -226,6 +227,13 @@ stream, and only when you set it up yourself.
 The same three are published as a site at
 [avishakeadhikary.github.io/tone-sphere](https://avishakeadhikary.github.io/tone-sphere/),
 which is the address to hand to the Microsoft Store as the privacy policy URL.
+
+## Licence
+
+[MIT](LICENSE). Use it, change it, ship it, sell it — keep the copyright and permission
+notice, and don't imply that a build you changed is the official one or that it comes from
+us. The MIT text is the grant; the Terms and Conditions above only add what a licence does
+not speak to, and cannot narrow it.
 
 ## Contributing
 

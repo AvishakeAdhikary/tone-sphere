@@ -45,33 +45,41 @@ organisation, you confirm that you are authorised to accept these terms on its b
 
 ## 3. Grant of use
 
-We grant you a personal, non-exclusive, non-transferable, revocable right to install and
-use the Application on devices that you own or control, for your own personal or internal
-business purposes, for as long as you comply with this agreement.
+**The Application is released under the MIT Licence.** The full text is in the `LICENSE`
+file at the root of the project repository, and it — not this section — is the operative
+grant. If anything in this document appears to narrow it, the MIT Licence wins.
 
-That is the whole of what is granted, and it is worth being precise about the limits of it:
+What that means in practice, stated plainly because MIT is short enough to be easy to
+under-read:
 
-- **No fee is charged** by us for the Application as we distribute it. This grant is not a
-  sale, and no ownership in the Application passes to you.
-- **All rights not expressly granted are reserved.** This document grants a right to *use*
-  the Application. It does not grant rights to relicense, sublicense, sell, or redistribute
-  it, and it does not transfer any intellectual property.
-- **Public source code is not a licence.** The Application's source code is publicly
-  visible in the project repository. The repository contains no licence file, and no
-  open-source or free-software licence has been granted over it. Public visibility is not a
-  grant of rights, and the Application should not be described as open-source software.
-  Contributions and forks are welcome in the ordinary GitHub sense — issues and pull
-  requests — but if you want rights beyond the use granted in this section, ask first
-  through the contact channel in section 15.
+- **You may use, copy, modify, merge, publish, distribute, sublicense and sell** copies of
+  the Application, including for commercial purposes, and you do not need our permission
+  to do so.
+- **The one condition is attribution.** The copyright notice and the permission notice must
+  be included in all copies or substantial portions of the Application. Removing them is
+  the one thing that takes you outside the licence.
+- **No fee is charged** by us for the Application as we distribute it, through either the
+  Microsoft Store or the project's releases.
+- **The licence covers the software, not the name.** "ToneSphere" and "Neural Nexus Studios"
+  are ours. MIT grants no trademark rights, so a modified or redistributed build must not be
+  presented in a way that suggests it is the official Application or that we endorse,
+  support or published it. Rename it, or say clearly what it is.
+- **Third-party components keep their own licences.** See section 8.
 
 ## 4. Acceptable use
 
+The MIT Licence in section 3 governs what you may do with the software itself, and this
+section does not take any of it back. What follows is about conduct the licence does not
+speak to — the law, other people's audio, and other people's trademarks.
+
 You may not:
 
-- redistribute, resell, rent or sublicense the Application, or offer it as part of a paid
-  product or service, without our prior written permission;
-- remove, obscure or alter any authorship, copyright or attribution notice in the
-  Application or its documentation;
+- remove, obscure or alter the copyright and permission notices. This is not an extra
+  restriction we are adding; it is the MIT Licence's one condition, restated here because
+  it is the term most often overlooked;
+- present a modified or redistributed build as the official Application, or in a way that
+  implies our endorsement. MIT grants no rights in the "ToneSphere" or "Neural Nexus
+  Studios" names;
 - misrepresent the Application's capabilities when describing or redistributing it. The
   project documents, deliberately and in detail, which of its features are proven, which
   are measured on which hardware, and which are unverified. Presenting an unverified
@@ -181,9 +189,14 @@ handled.
 
 This agreement applies for as long as you use the Application.
 
-Your rights under section 3 end automatically if you materially breach this agreement. You
-may end this agreement at any time by uninstalling the Application and deleting your copies
-of it. Sections 8, 9 and 13 survive termination.
+**Your MIT Licence rights are not revocable by us, and nothing here ends them.** The MIT
+Licence is a grant, not a subscription: it continues for as long as you meet its one
+condition, and this agreement cannot and does not take it away. What can lapse for breach
+of this agreement is anything granted *beyond* MIT — permission to use our names, and any
+support or goodwill we extend voluntarily under section 10.
+
+You may stop using the Application at any time by uninstalling it. Sections 8, 9 and 13
+survive.
 
 ## 12. Changes to these terms
 
