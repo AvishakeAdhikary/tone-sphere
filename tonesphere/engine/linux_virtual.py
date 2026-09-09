@@ -87,6 +87,13 @@ def _write_asoundrc_block(sink_name: str, pcm_name: str) -> None:
     Append a clearly-delimited block bridging `pcm_name` (and `{pcm_name}_monitor`) to the
     null-sink through ALSA's `pulse` plugin. `remove_virtual_sink` deletes exactly this
     block by its markers, never touching anything else a user has in this file.
+
+    The `hint` sub-block is not decoration. Confirmed against a real CI run: without it, a
+    custom `pcm.NAME {}` is fully openable by name but invisible to `snd_device_name_hint`
+    (the call PortAudio's ALSA enumeration is built on) — the file was there, the type was
+    valid, and the device still never appeared in `sounddevice.query_devices()`, which only
+    ever saw ALSA's two built-in hinted entries, `pulse` and `default`. `show on` is what
+    actually asks to be listed; the `description` shows up as PortAudio's device name.
     """
     begin, end = _markers(sink_name)
     block = (
@@ -94,10 +101,18 @@ def _write_asoundrc_block(sink_name: str, pcm_name: str) -> None:
         f'pcm.{pcm_name} {{\n'
         f'    type pulse\n'
         f'    device "{sink_name}"\n'
+        f'    hint {{\n'
+        f'        show on\n'
+        f'        description "{pcm_name}"\n'
+        f'    }}\n'
         f'}}\n'
         f'pcm.{pcm_name}_monitor {{\n'
         f'    type pulse\n'
         f'    device "{sink_name}.monitor"\n'
+        f'    hint {{\n'
+        f'        show on\n'
+        f'        description "{pcm_name}_monitor"\n'
+        f'    }}\n'
         f'}}\n'
         f"{end}\n"
     )
