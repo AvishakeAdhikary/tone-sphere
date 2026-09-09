@@ -426,11 +426,19 @@ class UdpAudioTransport:
                 # between a burst and a silent drop before our own code ever sees the
                 # datagram (see SOCKET_BUFFER_BYTES). A platform or sandbox that refuses
                 # this still gets a working socket at its own default size.
-                for option in (socket.SO_RCVBUF, socket.SO_SNDBUF):
+                #
+                # Logged at info, not debug: the OS is free to round up, cap, or silently
+                # ignore the request (Linux doubles it for bookkeeping; macOS and Linux both
+                # cap it below what a large ask requests unless a sysctl has been raised),
+                # so what `getsockopt` reports back is the only way to know what a burst is
+                # actually landing in, rather than assuming the request was honoured.
+                for option, opt_name in ((socket.SO_RCVBUF, 'SO_RCVBUF'), (socket.SO_SNDBUF, 'SO_SNDBUF')):
                     try:
                         sock.setsockopt(socket.SOL_SOCKET, option, SOCKET_BUFFER_BYTES)
+                        actual = sock.getsockopt(socket.SOL_SOCKET, option)
+                        logger.info(f"UDP socket {opt_name}: requested {SOCKET_BUFFER_BYTES}, got {actual}")
                     except OSError as e:
-                        logger.debug(f"Could not widen UDP socket buffer ({option}): {e}")
+                        logger.info(f"Could not widen UDP socket buffer ({opt_name}): {e}")
 
                 sock.bind((bind_host, bind_port))
                 # A timeout rather than a blocking recv, so `stop()` is noticed promptly

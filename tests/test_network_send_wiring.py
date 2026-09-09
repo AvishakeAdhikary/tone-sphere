@@ -169,10 +169,11 @@ class TestKnownSignalSurvivesUdp:
         )
 
         # Printed unconditionally rather than only asserted below: if the exact comparison
-        # below fails, these counts are what actually tells apart "packets were lost/evicted
-        # on this run" from "the same samples landed in the wrong slot" -- two different
-        # bugs that look identical as a bare shape/value mismatch.
+        # below fails, these counts are what actually tells apart "the sender never sent it"
+        # / "it never reached this socket" / "it arrived but landed in the wrong slot" --
+        # three different bugs that look identical as a bare shape/value mismatch.
         print("receive stats:", receiver.get_network_statistics()['udp']['receive'][str(destination)])
+        print("send stats:", sender.get_network_statistics()['udp']['send'])
 
         # float32 end to end, so this is exact rather than approximate.
         np.testing.assert_allclose(captured, expected, atol=1e-6)
@@ -255,6 +256,7 @@ class TestKnownSignalSurvivesUdp:
 
         # See the stereo test above for why this is printed unconditionally.
         print("receive stats:", receiver.get_network_statistics()['udp']['receive'][str(destination)])
+        print("send stats:", sender.get_network_statistics()['udp']['send'])
 
         assert captured.shape[1] == 1
         np.testing.assert_allclose(captured, expected, atol=1e-6)
