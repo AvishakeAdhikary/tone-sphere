@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<!--
+  ToneSphere as a Desktop Bridge MSIX package.
+
+  This is a full-trust Win32 application (a PyInstaller freeze of a PySide6 app that opens
+  PortAudio streams and makes raw WASAPI COM calls), so the entry point is
+  Windows.FullTrustApplication and the package declares runFullTrust. It is not a UWP app
+  and nothing here should be turned into one.
+
+  THREE VALUES IN <Identity> BELOW ARE PLACEHOLDERS. They are valid enough to pack and
+  sideload locally, and they are NOT what the Store will accept. Partner Center assigns the
+  real ones once the app name is reserved; docs/MICROSOFT_STORE.md says exactly where each
+  is found and what it is replaced with. Version is stamped from pyproject.toml by
+  build_msix.ps1 at pack time, so the value checked in here only has to stay in step with
+  the project version; tests/test_msix_packaging.py fails when it does not.
+-->
+
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap rescap">
+
+  <!--
+    Name      PLACEHOLDER - replace with Partner Center > Product identity > Package/Identity/Name
+                            (a Store-assigned string, typically "<12 digits>.ToneSphere").
+    Publisher PLACEHOLDER - replace with Partner Center > Product identity > Package/Identity/Publisher
+                            (a "CN=<guid>" string, NOT the display name). For a local
+                            sideload build this must instead equal the subject of the test
+                            certificate you sign with, exactly.
+    Version   Four parts, and the Store rejects a non-zero fourth part. Stamped from
+              pyproject.toml by build_msix.ps1.
+  -->
+  <Identity
+    Name="NeuralNexusStudios.ToneSphere"
+    Publisher="CN=Neural Nexus Studios"
+    Version="0.1.0.0"
+    ProcessorArchitecture="x64" />
+
+  <Properties>
+    <DisplayName>ToneSphere</DisplayName>
+    <PublisherDisplayName>Neural Nexus Studios</PublisherDisplayName>
+    <Description>Low-latency audio routing and mixing: patch any input, application or network source to any output, with EQ, compression, VST3 effects and real metering.</Description>
+    <Logo>assets\StoreLogo.png</Logo>
+  </Properties>
+
+  <Dependencies>
+    <!--
+      17763 (1809) is the floor Qt 6.11 itself supports, so nothing below it can run this
+      app regardless of what the manifest allows. MaxVersionTested is the SDK's required
+      "highest version this was tested against" declaration; no Windows build has yet run
+      this package as an installed MSIX at all (see docs/MICROSOFT_STORE.md), so treat the
+      value as the schema obligation it is and raise it after real testing.
+    -->
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="en-us" />
+  </Resources>
+
+  <Applications>
+    <!-- Executable is relative to the package root; build_msix.ps1 stages the PyInstaller
+         one-folder output under a "ToneSphere" subdirectory of the layout. -->
+    <Application
+      Id="ToneSphere"
+      Executable="ToneSphere\ToneSphere.exe"
+      EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="ToneSphere"
+        Description="Low-latency audio routing and mixing for Windows."
+        BackgroundColor="transparent"
+        Square150x150Logo="assets\Square150x150Logo.png"
+        Square44x44Logo="assets\Square44x44Logo.png">
+        <uap:DefaultTile
+          ShortName="ToneSphere"
+          Square71x71Logo="assets\Square71x71Logo.png"
+          Square310x310Logo="assets\Square310x310Logo.png"
+          Wide310x150Logo="assets\Wide310x150Logo.png">
+          <uap:ShowNameOnTiles>
+            <uap:ShowOn Tile="square150x150Logo" />
+            <uap:ShowOn Tile="wide310x150Logo" />
+            <uap:ShowOn Tile="square310x310Logo" />
+          </uap:ShowNameOnTiles>
+        </uap:DefaultTile>
+        <!-- No uap:SplashScreen: a Windows.FullTrustApplication never shows one, so
+             declaring an image for it would be a logo the package ships and never uses. -->
+      </uap:VisualElements>
+    </Application>
+  </Applications>
+
+  <!--
+    Exactly two capabilities, both of which the code actually exercises:
+
+      runFullTrust  - the app is a frozen Win32 process that loads native libraries
+                      (PortAudio via cffi, pedalboard's VST3 host), calls WASAPI COM
+                      interfaces directly through ctypes, and spawns powershell.exe to read
+                      the Audio Session API. None of that survives an AppContainer.
+      microphone    - the device capability that gates audio *capture*. The engine opens
+                      real input streams (tonesphere/engine/host.py) and, on Windows 10
+                      build 20348+, per-process WASAPI loopback
+                      (tonesphere/engine/process_capture.py). Windows treats both as
+                      microphone access and shows them under Settings > Privacy >
+                      Microphone.
+
+    Deliberately absent, and not to be added "just in case":
+
+      internetClient / internetClientServer / privateNetworkClientServer - the REST/WebSocket
+        server (tonesphere/api) and the TCP audio router (tonesphere/network) do open
+        sockets, but a runFullTrust process is not in an AppContainer, so these capabilities
+        gate nothing for this app. Declaring them would widen the permission prompt the user
+        sees and give Store review something extra to question, in exchange for no behaviour.
+      broadFileSystemAccess - presets are YAML under the user's own profile; the app reads
+        and writes nothing it was not handed.
+  -->
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+    <DeviceCapability Name="microphone" />
+  </Capabilities>
+
+</Package>

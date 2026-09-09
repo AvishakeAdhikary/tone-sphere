@@ -176,7 +176,7 @@ are actually playing), a REST API with a WebSocket stats feed, and a CLI.
 | 2 | Real mixer: pan law, polarity, limiter, drift resampling, metering | done |
 | 3 | Qt interface: mixer strips, dB faders, node-graph patchbay | done |
 | 4 | VST3 hosting, real DSP, honest app detection, presets | done |
-| 5 | Packaging (CI-built and smoke-tested, releases on tag); per-process capture (Windows, done); virtual devices (Linux done; macOS proven in CI, unverified in daily use; Windows kernel driver deliberately not attempted — see [docs/VIRTUAL_AUDIO_DRIVER.md](docs/VIRTUAL_AUDIO_DRIVER.md)) | mostly done |
+| 5 | Packaging (CI-built and smoke-tested, releases on tag); per-process capture (Windows, done); virtual devices (Linux done; macOS proven in CI, unverified in daily use; Windows kernel driver deliberately not attempted — see [docs/VIRTUAL_AUDIO_DRIVER.md](docs/VIRTUAL_AUDIO_DRIVER.md)); Microsoft Store MSIX — manifest, logo generation and a local pack script exist and the manifest validates against the real `makeappx`, but nothing has been signed, installed from a package, or submitted, and the Store identity does not exist yet (see [docs/MICROSOFT_STORE.md](docs/MICROSOFT_STORE.md)) | mostly done |
 
 ## A note on how this was rebuilt
 
