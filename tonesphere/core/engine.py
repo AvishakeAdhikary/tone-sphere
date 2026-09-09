@@ -639,18 +639,26 @@ class AudioEngine:
     def create_linux_system_sink(self, name: str, channels: int = 2) -> int | None:
         """
         Create an OS-visible sink other Linux applications can select, and return the
-        PortAudio device id it enumerates as.
+        PortAudio device id that reaches it.
 
-        Unlike a bus, this id comes from the ordinary hardware id space: once
-        `engine/linux_virtual.py` has loaded the null-sink and written its ALSA bridge,
-        `refresh_devices()` finds it exactly as it would find a sound card, and
-        `_reindex()` assigns it a normal id below `BUS_ID_BASE`. `_system_virtual_devices`
-        only remembers *which* real device id is one of these, for `origin` labelling and
-        so `remove_linux_system_sink` knows what to tear down — it does not allocate ids
-        of its own. None, never a placeholder id, if the OS never actually made the
-        sink visible: unavailable on this platform, no Pulse/PipeWire server running, or
-        the sink loaded but the ALSA bridge did not make it enumerable are all real,
-        distinct failures, but none of them get a device id that would carry no audio.
+        Confirmed on real CI, the hard way (see `engine/linux_virtual.py`'s module
+        docstring): PortAudio's ALSA backend does not enumerate a custom-named PCM even
+        with a proper ALSA `hint` block and even after retrying past any startup race —
+        `aplay -L` sees it, `sd.query_devices()` never does. What PortAudio *does* always
+        expose is the generic `pulse` device, which is simply "whatever PulseAudio's
+        current default sink/source is" — so `linux_virtual.create_virtual_sink` points
+        those defaults at the sink it just made, and this method hands back `pulse`'s own
+        device id. `_system_virtual_devices` remembers which id that is, for `origin`
+        labelling and so `remove_linux_system_sink` knows what to restore — it does not
+        allocate ids of its own. None, never a placeholder id, if the OS never actually
+        made the sink reachable this way: unavailable on this platform, no Pulse/PipeWire
+        server running, or no `pulse` PortAudio device at all are real, distinct failures,
+        but none of them get a device id that would carry no audio.
+
+        Because this retargets PulseAudio's one system-wide default, only one Linux system
+        sink can be meaningfully active at a time — a second call while one is already
+        active just retargets the same default again, which `linux_virtual`'s own module
+        docstring states plainly rather than pretending both could be independently live.
         """
         from tonesphere.engine.linux_virtual import (
             LinuxVirtualSinkError,
@@ -665,53 +673,16 @@ class AudioEngine:
                 logger.error(f"Could not create Linux virtual sink '{name}': {e}")
                 return None
 
-            # `aplay -L` (a separate process, opening its own connection to PulseAudio)
-            # has, in practice, seen the sink appear slightly after `pactl load-module`
-            # itself returns — PortAudio's own probe of a freshly-created named PCM can
-            # lose that same race and need a moment to catch up. A few short retries costs
-            # nothing when the device was there from the start, and turns a real but
-            # momentary visibility lag into a wait rather than a reported failure.
-            device_id = None
-            for attempt in range(5):
-                self.refresh_devices()
-                device_id = self._find_device_id_by_name(handle.asoundrc_pcm)
-                if device_id is not None:
-                    break
-                if attempt < 4:
-                    time.sleep(0.15)
+            self.refresh_devices()
+            device_id = self._find_device_id_by_name('pulse')
 
             if device_id is None:
-                # Enough to tell "the bridge never got written", "ALSA sees it but under a
-                # name our substring match misses" and "ALSA never resolved it at all"
-                # apart on sight, since only one of those needs a different fix.
                 known_names = [d.name for d in self._device_by_id.values()]
-                asoundrc_text = None
-                try:
-                    from tonesphere.engine.linux_virtual import _asoundrc_path
-                    path = _asoundrc_path()
-                    asoundrc_text = path.read_text(encoding="utf-8") if path.exists() else "<missing>"
-                except OSError as e:
-                    asoundrc_text = f"<could not read: {e}>"
-
-                # ALSA's own view, independent of PortAudio: distinguishes "the bridge
-                # never resolved at the ALSA layer at all" from "ALSA has it but PortAudio
-                # doesn't enumerate it" — each needs a different fix.
-                alsa_pcms = "<aplay unavailable>"
-                try:
-                    import subprocess
-                    result = subprocess.run(
-                        ["aplay", "-L"], capture_output=True, text=True, timeout=5.0,
-                    )
-                    alsa_pcms = result.stdout or result.stderr
-                except (OSError, ValueError) as e:
-                    alsa_pcms = f"<aplay failed: {e}>"
-
                 logger.error(
-                    f"'{name}' was loaded via pactl (module {handle.module_id}) but never "
-                    f"appeared as a PortAudio device — tearing it down rather than "
-                    f"reporting a device id backed by nothing. Looked for '{handle.asoundrc_pcm}' "
-                    f"among PortAudio's names: {known_names}. ~/.asoundrc: {asoundrc_text!r}. "
-                    f"`aplay -L`: {alsa_pcms!r}"
+                    f"'{name}' was loaded via pactl (module {handle.module_id}) and made "
+                    f"PulseAudio's default, but this machine's PortAudio has no 'pulse' "
+                    f"device at all to reach it through — tearing it down rather than "
+                    f"reporting a device id backed by nothing. PortAudio's names: {known_names}."
                 )
                 try:
                     remove_virtual_sink(handle)
@@ -722,7 +693,7 @@ class AudioEngine:
             self._system_virtual_devices[device_id] = {
                 'name': name, 'handle': handle, 'backend': 'linux-null-sink',
             }
-            logger.info(f"Created Linux virtual sink '{name}' -> device {device_id}")
+            logger.info(f"Created Linux virtual sink '{name}' -> device {device_id} (via 'pulse')")
             return device_id
 
     def _find_device_id_by_name(self, name: str) -> int | None:

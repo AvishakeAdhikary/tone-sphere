@@ -2,10 +2,12 @@
 Track 2 — the Linux virtual sink.
 
 Per `docs/VIRTUAL_AUDIO_DRIVER.md` and the plan this implements, an OS-visible sink on
-Linux is "configuration, not code": `pactl load-module module-null-sink` plus a small
-`~/.asoundrc` bridge so PortAudio's ALSA backend enumerates it like any sound card. That
-bridge is the one part of this design that could not be exercised on the machine that
-wrote it — it needs a live PulseAudio/PipeWire server to prove for real.
+Linux is "configuration, not code": `pactl load-module module-null-sink` makes it. How
+ToneSphere itself reaches it through PortAudio changed after real CI proved the first
+design wrong — see `engine/linux_virtual.py`'s module docstring for the full story; in
+short, PortAudio never enumerates a custom-named ALSA PCM in this environment no matter
+how it is bridged, but it always exposes a generic `pulse` device, so `create_virtual_sink`
+now points PulseAudio's default sink/source at the sink instead and `pulse` is what's used.
 
 So this file has two honesty tiers, matching `tests/test_process_capture.py`'s split for
 Track 1:
@@ -98,6 +100,7 @@ class TestPlatformGuardIsHonest:
             name="test-sink", sink_name="tonesphere_test_sink", module_id=0,
             channels=2, sample_rate=RATE, monitor_name="tonesphere_test_sink.monitor",
             asoundrc_pcm="tonesphere_test_sink",
+            previous_default_sink=None, previous_default_source=None,
         )
 
         from tonesphere.engine.linux_virtual import remove_virtual_sink
@@ -360,22 +363,19 @@ class TestRealLinuxSink:
 
             engine.start_engine()
 
-            monitor_pcm = f"{handle.asoundrc_pcm}_monitor"
-            devices = sd.query_devices()
-            monitor_index = next(
-                (i for i, d in enumerate(devices) if monitor_pcm in d["name"]), None
-            )
-            assert monitor_index is not None, (
-                f"'{monitor_pcm}' never appeared as a PortAudio input device"
-            )
-
+            # Both directions go through the same 'pulse' device now: `create_virtual_sink`
+            # pointed PulseAudio's default *sink* at this sink and its default *source* at
+            # this sink's monitor, so opening `device_id` for input is what reaches the
+            # monitor — there is no separate named monitor device to look up any more (see
+            # `engine/linux_virtual.py`'s module docstring for why the original per-device
+            # design was replaced).
             captured: list[np.ndarray] = []
 
             def on_block(indata, frames, time_info, status):
                 captured.append(indata.copy())
 
             with sd.InputStream(
-                device=monitor_index, channels=2, samplerate=RATE,
+                device=device_id, channels=2, samplerate=RATE,
                 blocksize=BLOCK, dtype="float32", callback=on_block,
             ):
                 phase = 0
