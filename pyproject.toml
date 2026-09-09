@@ -16,7 +16,10 @@ dependencies = [
     "sounddevice>=0.5.2",
     "uvicorn>=0.37.0",
     "websockets>=15.0.1",
-    "pystray>=0.19.5",
+    # Pillow is not used by the application itself — only by
+    # packaging/msix/generate_assets.py, to produce the Store's required logo sizes from
+    # assets/images/ToneSphere.png. It stays a main dependency rather than a dev one so a
+    # source checkout can build a Store package without a second install step.
     "pillow>=10.0.0",
     "pyside6>=6.11.1",
     "pedalboard>=0.9.24",

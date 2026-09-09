@@ -461,3 +461,29 @@ class TestMonitorPatchIsSafe:
         assert routes
         assert all(r['muted'] for r in routes.values())
         assert 'muted' in message
+
+
+class TestTheReportedVersionIsTheReleasedVersion:
+    """
+    `pyproject.toml`'s version is what CI tags and releases (see the `tag-release` job);
+    `tonesphere.__version__` is what the About dialog and the CLI banner tell the user they
+    are running. Two places to bump is two places to forget, and the failure is silent in
+    the worst direction: a release tagged v0.2.0 whose own About box still claims 0.1.0.
+    """
+
+    @staticmethod
+    def _pyproject_version() -> str:
+        import tomllib
+        from pathlib import Path
+
+        pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
+        with open(pyproject, "rb") as f:
+            return tomllib.load(f)["project"]["version"]
+
+    def test_package_version_matches_pyproject(self):
+        from tonesphere import __version__
+
+        assert __version__ == self._pyproject_version(), (
+            "tonesphere.__version__ and pyproject.toml's version have drifted; CI would "
+            "tag one and the app would report the other"
+        )
