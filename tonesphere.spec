@@ -7,9 +7,26 @@
 #
 # Build:   uv run pyinstaller tonesphere.spec
 # Output:  dist/ToneSphere/ToneSphere.exe  (or the platform equivalent)
+#
+# Two layouts, one spec
+# ----------------------
+# Default is one-folder (COLLECT): an `_internal` directory of loose DLLs next to the exe.
+# That is what packaging/msix/build_msix.ps1 stages into the MSIX layout, and it must keep
+# producing exactly that — nothing here changes for it.
+#
+# Set ONEFILE=1 to build a single self-contained executable instead, for the GitHub
+# Releases download: a user fetching a "single executable" should get one, not a zip of
+# 279 loose files. Trade-off, stated because it is real: a one-file build self-extracts to
+# a temp directory on every launch, which costs a startup delay the one-folder build does
+# not pay. That is the right trade for something downloaded and double-clicked occasionally,
+# and the wrong one for what the MSIX installs permanently — hence two modes, not a switch
+# of the default.
 
+import os
 import sys
 from pathlib import Path
+
+ONEFILE = os.environ.get('ONEFILE') == '1'
 
 from PyInstaller.utils.hooks import (
     collect_data_files, collect_dynamic_libs, collect_submodules,
@@ -89,8 +106,12 @@ icon_path = project_root / 'assets' / 'images' / 'ToneSphere.png'
 executable = EXE(
     pyz,
     analysis.scripts,
-    [],
-    exclude_binaries=True,
+    # One-file bundles the binaries/zipfiles/datas straight into the exe; one-folder
+    # leaves them out here so COLLECT can lay them beside it instead.
+    analysis.binaries if ONEFILE else [],
+    analysis.zipfiles if ONEFILE else [],
+    analysis.datas if ONEFILE else [],
+    exclude_binaries=not ONEFILE,
     name='ToneSphere',
     debug=False,
     bootloader_ignore_signals=False,
@@ -105,13 +126,14 @@ executable = EXE(
     icon=str(icon_path) if icon_path.exists() else None,
 )
 
-collection = COLLECT(
-    executable,
-    analysis.binaries,
-    analysis.zipfiles,
-    analysis.datas,
-    strip=False,
-    upx=False,
-    upx_exclude=[],
-    name='ToneSphere',
-)
+if not ONEFILE:
+    collection = COLLECT(
+        executable,
+        analysis.binaries,
+        analysis.zipfiles,
+        analysis.datas,
+        strip=False,
+        upx=False,
+        upx_exclude=[],
+        name='ToneSphere',
+    )

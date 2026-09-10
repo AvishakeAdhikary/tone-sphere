@@ -23,11 +23,18 @@ SHUTDOWN_TIMEOUT_SECONDS = 10
 
 
 def frozen_executable() -> Path:
+    """
+    The exe this build produced, in whichever of the two layouts `tonesphere.spec`
+    supports: `ONEFILE=1` puts it directly under `dist/`, the default one-folder layout
+    puts it under `dist/ToneSphere/` beside `_internal`. Checking both means this script
+    does not need to know which one the caller asked for.
+    """
     name = "ToneSphere.exe" if platform.system() == "Windows" else "ToneSphere"
-    exe = Path("dist") / "ToneSphere" / name
-    if not exe.exists():
-        sys.exit(f"Frozen executable not found at {exe} -- did the PyInstaller build step run first?")
-    return exe
+    for candidate in (Path("dist") / name, Path("dist") / "ToneSphere" / name):
+        if candidate.exists():
+            return candidate
+    sys.exit(f"Frozen executable not found as dist/{name} or dist/ToneSphere/{name} "
+              f"-- did the PyInstaller build step run first?")
 
 
 def main() -> int:

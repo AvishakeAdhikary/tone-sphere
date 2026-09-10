@@ -180,17 +180,24 @@ jobs:
     # what makes it a real one: build the frozen app, launch it, and prove it doesn't
     # immediately die (the exact failure the spec's own comments say it was built to
     # prevent: a missing PortAudio/pedalboard native library) before ever calling it done.
+    #
+    # Built with ONEFILE=1: a user fetching "download for Windows" from a Releases page
+    # expects one executable, not a zip holding 279 loose files including an `_internal`
+    # DLL directory. A single self-contained binary is the release artifact; the default
+    # one-folder layout tonesphere.spec still produces without ONEFILE is what
+    # packaging/msix/build_msix.ps1 stages into the Store package, and stays that way
+    # deliberately — see tonesphere.spec's own comment for why those are different trades.
     needs: test
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: windows-latest
-            archive_name: ToneSphere-windows.zip
+            asset_name: ToneSphere-windows.exe
           - os: ubuntu-latest
-            archive_name: ToneSphere-linux.tar.gz
+            asset_name: ToneSphere-linux
           - os: macos-latest
-            archive_name: ToneSphere-macos.tar.gz
+            asset_name: ToneSphere-macos
 
     runs-on: ${{ matrix.os }}
 
@@ -216,8 +223,10 @@ jobs:
             libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libgl1 \
             libportaudio2
 
-      - name: Build with PyInstaller
+      - name: Build with PyInstaller (one-file)
         run: uv run pyinstaller tonesphere.spec
+        env:
+          ONEFILE: '1'
 
       - name: Smoke test the frozen app (Linux, offscreen)
         # No X server on this runner; same offscreen platform plugin the test job above
@@ -231,19 +240,24 @@ jobs:
         if: runner.os != 'Linux'
         run: uv run python .github/scripts/smoke_test_frozen_app.py
 
-      - name: Archive the build (Windows)
+      - name: Name the executable for its platform (Windows)
         if: runner.os == 'Windows'
-        run: Compress-Archive -Path dist/ToneSphere/* -DestinationPath ${{ matrix.archive_name }}
+        run: Copy-Item dist/ToneSphere.exe ${{ matrix.asset_name }}
 
-      - name: Archive the build (Linux/macOS)
+      - name: Name the executable for its platform, and mark it runnable (Linux/macOS)
+        # A raw binary downloaded from a Releases page does not keep the +x bit through
+        # every download path regardless of what is uploaded, so this is a courtesy, not
+        # a guarantee -- documented on the release itself rather than assumed.
         if: runner.os != 'Windows'
-        run: tar -czf ${{ matrix.archive_name }} -C dist ToneSphere
+        run: |
+          cp dist/ToneSphere ${{ matrix.asset_name }}
+          chmod +x ${{ matrix.asset_name }}
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.archive_name }}
-          path: ${{ matrix.archive_name }}
+          name: ${{ matrix.asset_name }}
+          path: ${{ matrix.asset_name }}
           if-no-files-found: error
 
   tag-release:
