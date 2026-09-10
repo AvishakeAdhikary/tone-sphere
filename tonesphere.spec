@@ -52,6 +52,10 @@ except Exception:
 datas = [
     (str(project_root / 'config'), 'config'),
     (str(project_root / 'assets' / 'images'), 'assets/images'),
+    # tonesphere/i18n.py's bundled_locale_dir() looks for these under sys._MEIPASS in a
+    # frozen build; without this a frozen build ships with no catalogs at all, since a
+    # .py package's own directory does not survive freezing the way this data does.
+    (str(project_root / 'tonesphere' / 'locale'), 'tonesphere/locale'),
 ]
 
 hiddenimports = [

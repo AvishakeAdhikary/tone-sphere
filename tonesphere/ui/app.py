@@ -4,9 +4,11 @@ Application entry point for the Qt interface.
 
 import sys
 
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QIcon, QPalette
 from PySide6.QtWidgets import QApplication
 
+from tonesphere.i18n import is_rtl
 from tonesphere.ui.theme import Colors, Type, stylesheet
 from tonesphere.utils.config import ConfigManager
 from tonesphere.utils.logger import get_logger
@@ -44,6 +46,19 @@ def _apply_palette(app: QApplication):
     app.setPalette(palette)
 
 
+def apply_layout_direction(app: QApplication):
+    """
+    Match the layout direction to the active locale.
+
+    Set on the application rather than on each widget: Qt propagates a change here to
+    every widget that already exists, which is what makes switching to Arabic mirror the
+    interface on screen instead of only the parts built after the switch.
+    """
+    app.setLayoutDirection(
+        Qt.LayoutDirection.RightToLeft if is_rtl() else Qt.LayoutDirection.LeftToRight
+    )
+
+
 def create_app(argv: list | None = None) -> QApplication:
     """Build the QApplication with theme and DPI handling in place."""
     app = QApplication.instance()
@@ -78,7 +93,9 @@ def run(config_manager: ConfigManager | None = None) -> int:
 
     app = create_app()
 
+    # After the window exists, so the direction reaches its widgets too.
     window = MainWindow(config_manager)
+    apply_layout_direction(app)
     window.show()
 
     return app.exec()

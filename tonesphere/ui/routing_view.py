@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from tonesphere.i18n import tr
 from tonesphere.ui.theme import Colors, Spacing, Type, format_db
 
 NODE_WIDTH = 172
@@ -54,7 +55,7 @@ class PortItem(QGraphicsObject):
 
         self.setAcceptHoverEvents(True)
         self.setCursor(Qt.CursorShape.CrossCursor)
-        self.setToolTip("Drag to patch" if is_output else "Drop a cable here")
+        self.setToolTip(tr('port.output_tooltip') if is_output else tr('port.input_tooltip'))
 
     def boundingRect(self) -> QRectF:
         r = PORT_RADIUS * 2
@@ -123,7 +124,7 @@ class NodeItem(QGraphicsObject):
             self.output_port = PortItem(self, is_output=True)
             self.output_port.setPos(NODE_WIDTH, NODE_HEIGHT / 2)
 
-        self.setToolTip(f"{name}\n{subtitle}")
+        self.setToolTip(tr('node.tooltip', name=name, subtitle=subtitle))
 
     def boundingRect(self) -> QRectF:
         return QRectF(-PORT_RADIUS * 2, 0,
@@ -193,7 +194,10 @@ class NodeItem(QGraphicsObject):
 
     def set_failed(self, reason: str | None):
         self.failed = reason
-        self.setToolTip(f"{self.name}\n{reason}" if reason else f"{self.name}\n{self.subtitle}")
+        self.setToolTip(
+            tr('node.failed_tooltip', name=self.name, reason=reason) if reason
+            else tr('node.tooltip', name=self.name, subtitle=self.subtitle)
+        )
         self.update()
 
     def register_cable(self, cable: "CableItem"):
@@ -301,7 +305,7 @@ class CableItem(QGraphicsObject):
 
     def _paint_label(self, painter: QPainter):
         midpoint = self._path.pointAtPercent(0.5)
-        text = "muted" if self.muted else format_db(self.gain_db)
+        text = tr('cable.muted') if self.muted else format_db(self.gain_db)
 
         painter.setFont(Type.numeric(Type.TINY))
         metrics = painter.fontMetrics()
@@ -448,13 +452,13 @@ class RoutingScene(QGraphicsScene):
         menu = QMenu()
         source_id, dest_id = cable.key
 
-        toggle = menu.addAction("Unmute" if cable.muted else "Mute")
+        toggle = menu.addAction(tr('cable.menu.unmute') if cable.muted else tr('cable.menu.mute'))
         menu.addSeparator()
-        unity = menu.addAction("Set to unity (0 dB)")
-        down6 = menu.addAction("-6 dB")
-        down12 = menu.addAction("-12 dB")
+        unity = menu.addAction(tr('cable.menu.unity'))
+        down6 = menu.addAction(tr('cable.menu.minus_6'))
+        down12 = menu.addAction(tr('cable.menu.minus_12'))
         menu.addSeparator()
-        remove = menu.addAction("Disconnect")
+        remove = menu.addAction(tr('cable.menu.disconnect'))
 
         chosen = menu.exec(event.screenPos())
 

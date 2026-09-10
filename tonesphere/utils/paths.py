@@ -66,3 +66,25 @@ def bundled_default_config() -> Path | None:
             return candidate
 
     return None
+
+
+def bundled_locale_dir() -> Path:
+    """
+    The directory holding the JSON translation catalogs.
+
+    The same two locations as `bundled_default_config`, for the same reason: PyInstaller
+    unpacks `datas` into `sys._MEIPASS` (see `tonesphere.spec`, which bundles
+    `tonesphere/locale`), while a source checkout and an installed wheel carry the
+    catalogs inside the package.
+
+    Unlike the packaged defaults there is no in-code substitute for a catalog, so this
+    returns where to look rather than None — a build carrying none is broken, and
+    `i18n` says so with that path in the message.
+    """
+    bundle = getattr(sys, '_MEIPASS', None)
+    if bundle:
+        unpacked = Path(bundle) / 'tonesphere' / 'locale'
+        if unpacked.is_dir():
+            return unpacked
+
+    return Path(__file__).resolve().parents[1] / 'locale'

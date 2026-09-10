@@ -23,6 +23,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
+from tonesphere.i18n import tr
 from tonesphere.ui.theme import (
     METER_HIGH_DB,
     METER_MIN_DB,
@@ -81,7 +82,7 @@ class LevelMeter(QWidget):
             self.setMinimumHeight(80)
             self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
 
-        self.setToolTip("Click to clear the clip indicator")
+        self.setToolTip(tr('meter.tooltip'))
 
     def set_levels(self, peaks, rms=None, holds=None, clipped: bool = False):
         """
@@ -262,7 +263,7 @@ class Fader(QWidget):
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.setToolTip("Drag to set gain · Shift for fine · double-click for unity")
+        self.setToolTip(tr('fader.tooltip'))
 
     @property
     def db(self) -> float:
@@ -405,7 +406,7 @@ class PanKnob(QWidget):
         self._label_height = 12
         self.setFixedSize(METRICS.KNOB_SIZE, METRICS.KNOB_SIZE + self._label_height)
         self.setCursor(Qt.CursorShape.SizeHorCursor)
-        self.setToolTip("Drag to pan · Shift for fine · double-click to centre")
+        self.setToolTip(tr('pan.tooltip'))
 
     @property
     def pan(self) -> float:
@@ -480,8 +481,8 @@ class PanKnob(QWidget):
 
     def _label(self) -> str:
         if self._pan == 0.0:
-            return "C"
-        side = "L" if self._pan < 0 else "R"
+            return tr('pan.center')
+        side = tr('pan.left') if self._pan < 0 else tr('pan.right')
         return f"{side}{abs(self._pan) * 100:.0f}"
 
 
@@ -507,6 +508,11 @@ class StatusPill(QWidget):
     def set_value(self, value: str | None, tone: QColor | None = None):
         self._value = value if value is not None else "--"
         self._tone = tone
+        self._resize_to_fit()
+        self.update()
+
+    def set_label(self, label: str):
+        self._label = label
         self._resize_to_fit()
         self.update()
 

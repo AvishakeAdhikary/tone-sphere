@@ -11,7 +11,7 @@ keeps them testable and keeps the audio layer free of Qt.
 
 
 from PySide6.QtCore import QPointF, Qt, QTimer
-from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtGui import QAction, QActionGroup, QKeySequence
 from PySide6.QtWidgets import (
     QComboBox,
     QFrame,
@@ -26,8 +26,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from tonesphere import i18n
 from tonesphere.core.engine_factory import UnifiedAudioEngine
 from tonesphere.engine.graph import db_to_linear
+from tonesphere.i18n import active_locale, available_locales, locale_info, set_active_locale, tr
 from tonesphere.ui.routing_view import RoutingScene, RoutingView
 from tonesphere.ui.strip import ChannelStripWidget, HardwareBar, MasterStrip
 from tonesphere.ui.theme import METRICS, Colors, Spacing, Type
@@ -49,13 +51,17 @@ class MainWindow(QMainWindow):
         super().__init__()
 
         self.config_manager = config_manager or ConfigManager()
+        # Before anything below calls tr(): i18n's active locale is otherwise read from
+        # whatever ConfigManager a previous window or test last pointed it at, not this
+        # window's own settings store.
+        i18n.use_config(self.config_manager)
         self.engine = UnifiedAudioEngine(self.config_manager)
         self.engine.initialize()
 
         self._strips: dict[int, ChannelStripWidget] = {}
         self._node_positions: dict[int, QPointF] = {}
 
-        self.setWindowTitle("ToneSphere")
+        self.setWindowTitle(tr('app.name'))
         self.resize(1360, 880)
         self.setMinimumSize(1000, 640)
 
@@ -103,7 +109,7 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(Spacing.LG, Spacing.MD, Spacing.LG, Spacing.MD)
         layout.setSpacing(Spacing.LG)
 
-        self.engine_button = QPushButton("Start Engine")
+        self.engine_button = QPushButton(tr('transport.start_engine'))
         self.engine_button.setObjectName("Primary")
         self.engine_button.setMinimumWidth(130)
         self.engine_button.setMinimumHeight(30)
@@ -113,54 +119,54 @@ class MainWindow(QMainWindow):
         self.backend_combo = QComboBox()
         self.backend_combo.setMinimumWidth(180)
         self.backend_combo.currentTextChanged.connect(self._switch_backend)
-        layout.addLayout(self._labelled("BACKEND", self.backend_combo))
+        self.backend_caption = self._labelled(
+            tr('transport.caption.backend'), self.backend_combo, layout
+        )
 
-        self.exclusive_button = QPushButton("Exclusive")
+        self.exclusive_button = QPushButton(tr('transport.exclusive'))
         self.exclusive_button.setCheckable(True)
         self.exclusive_button.setChecked(True)
         self.exclusive_button.setMinimumHeight(METRICS.BUTTON_HEIGHT + 4)
-        self.exclusive_button.setToolTip(
-            "Bypass the OS mixer for the lowest latency.\n"
-            "Measured here: 8.3 ms exclusive against 22 ms shared on the same device.\n"
-            "No other application can use the device while ToneSphere holds it."
-        )
+        self.exclusive_button.setToolTip(tr('transport.exclusive_tooltip'))
         self.exclusive_button.toggled.connect(self._toggle_exclusive)
-        layout.addLayout(self._labelled("MODE", self.exclusive_button))
+        self.mode_caption = self._labelled(
+            tr('transport.caption.mode'), self.exclusive_button, layout
+        )
 
         self.buffer_combo = QComboBox()
         self.buffer_combo.setMinimumWidth(90)
         for size in (64, 128, 256, 512, 1024):
-            self.buffer_combo.addItem(f"{size} frames", size)
+            self.buffer_combo.addItem(tr('transport.buffer_frames', frames=size), size)
         index = self.buffer_combo.findData(self.engine.buffer_size)
         if index >= 0:
             self.buffer_combo.setCurrentIndex(index)
-        self.buffer_combo.setToolTip(
-            "Frames per callback. Smaller is lower latency with less margin before a\n"
-            "dropout — watch the XRUNS counter after lowering it."
-        )
+        self.buffer_combo.setToolTip(tr('transport.buffer_tooltip'))
         self.buffer_combo.currentIndexChanged.connect(self._change_buffer)
-        layout.addLayout(self._labelled("BUFFER", self.buffer_combo))
+        self.buffer_caption = self._labelled(
+            tr('transport.caption.buffer'), self.buffer_combo, layout
+        )
 
         layout.addStretch()
 
-        monitor = QPushButton("Monitor Input")
-        monitor.setToolTip("Patch the default input straight to the default output")
-        monitor.clicked.connect(self._create_monitor_patch)
-        layout.addWidget(monitor)
+        self.monitor_button = QPushButton(tr('transport.monitor'))
+        self.monitor_button.setToolTip(tr('transport.monitor_tooltip'))
+        self.monitor_button.clicked.connect(self._create_monitor_patch)
+        layout.addWidget(self.monitor_button)
 
-        rescan = QPushButton("Rescan")
-        rescan.setToolTip("Re-enumerate audio hardware (F5)")
-        rescan.clicked.connect(self._rescan)
-        layout.addWidget(rescan)
+        self.rescan_button = QPushButton(tr('transport.rescan'))
+        self.rescan_button.setToolTip(tr('transport.rescan_tooltip'))
+        self.rescan_button.clicked.connect(self._rescan)
+        layout.addWidget(self.rescan_button)
 
         return panel
 
-    def _labelled(self, text: str, control: QWidget) -> QVBoxLayout:
+    def _labelled(self, text: str, control: QWidget, parent_layout: QHBoxLayout) -> QLabel:
         """
-        Stack a small caption above its control.
+        Stack a small caption above its control, and add the pair to `parent_layout`.
 
         Captions beside controls collide the moment a device name is long; above, they
-        stay legible and the controls keep a single baseline across the bar.
+        stay legible and the controls keep a single baseline across the bar. Returns the
+        caption label so a language switch can retranslate it later.
         """
         column = QVBoxLayout()
         column.setSpacing(1)
@@ -173,7 +179,8 @@ class MainWindow(QMainWindow):
 
         column.addWidget(caption)
         column.addWidget(control)
-        return column
+        parent_layout.addLayout(column)
+        return caption
 
     def _build_routing_panel(self) -> QWidget:
         panel = QFrame()
@@ -184,22 +191,23 @@ class MainWindow(QMainWindow):
         layout.setSpacing(Spacing.MD)
 
         header = QHBoxLayout()
-        title = QLabel("Patchbay")
-        title.setObjectName("Heading")
-        header.addWidget(title)
+        self.patchbay_title = QLabel(tr('patchbay.title'))
+        self.patchbay_title.setObjectName("Heading")
+        header.addWidget(self.patchbay_title)
 
-        hint = QLabel("drag a right-hand port onto a left-hand port to patch  ·  "
-                      "right-click a cable for options  ·  middle-drag to pan")
-        hint.setObjectName("Dim")
-        header.addWidget(hint)
+        self.patchbay_hint = QLabel(tr('patchbay.hint'))
+        self.patchbay_hint.setObjectName("Dim")
+        header.addWidget(self.patchbay_hint)
         header.addStretch()
 
-        for text, slot in (("Fit", lambda: self.routing_view.fit_content()),
-                           ("100%", lambda: self.routing_view.reset_zoom()),
-                           ("Auto-arrange", self._auto_arrange)):
-            button = QPushButton(text)
+        self.patchbay_buttons: dict[str, QPushButton] = {}
+        for key, slot in (('patchbay.fit', lambda: self.routing_view.fit_content()),
+                          ('patchbay.zoom_reset', lambda: self.routing_view.reset_zoom()),
+                          ('patchbay.auto_arrange', self._auto_arrange)):
+            button = QPushButton(tr(key))
             button.clicked.connect(slot)
             header.addWidget(button)
+            self.patchbay_buttons[key] = button
 
         layout.addLayout(header)
 
@@ -223,15 +231,15 @@ class MainWindow(QMainWindow):
         layout.setSpacing(Spacing.MD)
 
         header = QHBoxLayout()
-        title = QLabel("Mixer")
-        title.setObjectName("Heading")
-        header.addWidget(title)
+        self.mixer_title = QLabel(tr('mixer.title'))
+        self.mixer_title.setObjectName("Heading")
+        header.addWidget(self.mixer_title)
         header.addStretch()
 
-        add_bus = QPushButton("Add Bus")
-        add_bus.setToolTip("Create an in-process mix bus (not visible to other apps)")
-        add_bus.clicked.connect(self._add_bus)
-        header.addWidget(add_bus)
+        self.add_bus_button = QPushButton(tr('mixer.add_bus'))
+        self.add_bus_button.setToolTip(tr('mixer.add_bus_tooltip'))
+        self.add_bus_button.clicked.connect(self._add_bus)
+        header.addWidget(self.add_bus_button)
         layout.addLayout(header)
 
         row = QHBoxLayout()
@@ -259,41 +267,64 @@ class MainWindow(QMainWindow):
         return panel
 
     def _build_menu(self):
-        engine_menu = self.menuBar().addMenu("&Engine")
+        """
+        (Re)build the whole menu bar.
 
-        toggle = QAction("Start / Stop", self)
+        Called once at startup and again on every language switch: a `QAction`'s text
+        cannot be swapped without keeping a reference to each one, and a menu bar is cheap
+        enough to throw away and rebuild fresh rather than track two dozen extra
+        attributes purely to retranslate them. `_change_language` clears the menu bar and
+        calls this again.
+        """
+        engine_menu = self.menuBar().addMenu(tr('menu.engine'))
+
+        toggle = QAction(tr('menu.engine.start_stop'), self)
         toggle.setShortcut(QKeySequence("Space"))
         toggle.triggered.connect(self._toggle_engine)
         engine_menu.addAction(toggle)
 
-        rescan = QAction("Rescan Devices", self)
+        rescan = QAction(tr('menu.engine.rescan'), self)
         rescan.setShortcut(QKeySequence("F5"))
         rescan.triggered.connect(self._rescan)
         engine_menu.addAction(rescan)
 
         engine_menu.addSeparator()
-        quit_action = QAction("Quit", self)
+        quit_action = QAction(tr('menu.engine.quit'), self)
         quit_action.setShortcut(QKeySequence.StandardKey.Quit)
         quit_action.triggered.connect(self.close)
         engine_menu.addAction(quit_action)
 
-        patch_menu = self.menuBar().addMenu("&Patch")
+        patch_menu = self.menuBar().addMenu(tr('menu.patch'))
 
-        monitor = QAction("Monitor Input to Output", self)
+        monitor = QAction(tr('menu.patch.monitor'), self)
         monitor.triggered.connect(self._create_monitor_patch)
         patch_menu.addAction(monitor)
 
-        clear = QAction("Clear All Routing", self)
+        clear = QAction(tr('menu.patch.clear'), self)
         clear.triggered.connect(self._clear_routing)
         patch_menu.addAction(clear)
 
         patch_menu.addSeparator()
-        arrange = QAction("Auto-arrange", self)
+        arrange = QAction(tr('menu.patch.auto_arrange'), self)
         arrange.triggered.connect(self._auto_arrange)
         patch_menu.addAction(arrange)
 
-        help_menu = self.menuBar().addMenu("&Help")
-        about = QAction("About", self)
+        language_menu = self.menuBar().addMenu(tr('menu.language'))
+        group = QActionGroup(language_menu)
+        group.setExclusive(True)
+        current = active_locale()
+
+        for info in available_locales():
+            action = QAction(info.native_name, group)
+            action.setCheckable(True)
+            action.setChecked(info.code == current)
+            if info.review_status != 'source':
+                action.setToolTip(tr('menu.language.unreviewed'))
+            action.triggered.connect(lambda checked=False, code=info.code: self._change_language(code))
+            language_menu.addAction(action)
+
+        help_menu = self.menuBar().addMenu(tr('menu.help'))
+        about = QAction(tr('menu.help.about'), self)
         about.triggered.connect(self._show_about)
         help_menu.addAction(about)
 
@@ -340,10 +371,11 @@ class MainWindow(QMainWindow):
         self._strips.clear()
 
     def _add_strip(self, device: dict):
+        direction_key = f"device.direction.{device['direction']}"
         strip = ChannelStripWidget(
             device_id=device['id'],
             name=device['name'],
-            subtitle=f"{device['direction']} · {device['channels']} ch",
+            subtitle=tr('device.subtitle', direction=tr(direction_key), channels=device['channels']),
             channels=min(device['channels'], 2),
         )
         strip.gain_changed.connect(self._set_device_gain)
@@ -418,7 +450,7 @@ class MainWindow(QMainWindow):
             else:
                 self.engine.start_engine()
         except Exception as e:
-            self._error("Engine", str(e))
+            self._error(tr('dialog.engine_error'), str(e))
 
         self._update_stats()
 
@@ -429,7 +461,7 @@ class MainWindow(QMainWindow):
             if self.engine.switch_driver(name):
                 self._rebuild_from_engine()
         except Exception as e:
-            self._error("Backend", str(e))
+            self._error(tr('dialog.backend_error'), str(e))
 
     def _toggle_exclusive(self, exclusive: bool):
         self.engine.set_exclusive_mode(exclusive)
@@ -449,16 +481,14 @@ class MainWindow(QMainWindow):
         success, message = self.engine.create_monitor_patch(muted=True)
 
         if not success:
-            self._error("Monitor patch", message)
+            self._error(tr('dialog.monitor_error'), message)
             return
 
         self._sync_cables()
 
         answer = QMessageBox.question(
-            self, "Unmute monitoring?",
-            f"Patched {message}\n\n"
-            "It is muted for now. If your input is a microphone and your output is "
-            "speakers, unmuting will cause feedback.\n\nUnmute now?",
+            self, tr('dialog.unmute_title'),
+            tr('dialog.unmute_body', patch=message),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -471,10 +501,10 @@ class MainWindow(QMainWindow):
 
     def _add_bus(self):
         count = len(self.engine.list_virtual_devices()) + 1
-        bus_id = self.engine.create_virtual_input(f"Bus {count}", channels=2)
+        bus_id = self.engine.create_virtual_input(tr('mixer.bus_name', number=count), channels=2)
 
         if bus_id is None:
-            self._error("Add bus", "Bus limit reached")
+            self._error(tr('dialog.add_bus_error'), tr('dialog.bus_limit'))
             return
 
         self._rebuild_from_engine()
@@ -493,7 +523,7 @@ class MainWindow(QMainWindow):
         success, message = self.engine.create_routing(source_id, dest_id, 1.0)
 
         if not success:
-            self._error("Cannot patch", message)
+            self._error(tr('dialog.patch_error'), message)
             return
 
         self._sync_cables()
@@ -585,7 +615,8 @@ class MainWindow(QMainWindow):
         self.hardware_bar.update_state(state, stats)
 
         self.engine_button.setText(
-            "Stop Engine" if state in ('running', 'degraded', 'idle') else "Start Engine"
+            tr('transport.stop_engine') if state in ('running', 'degraded', 'idle')
+            else tr('transport.start_engine')
         )
         self.engine_button.setObjectName(
             "Danger" if state in ('running', 'degraded', 'idle') else "Primary"
@@ -608,6 +639,91 @@ class MainWindow(QMainWindow):
         logger.warning(f"{title}: {message}")
         QMessageBox.warning(self, title, message)
 
+    # --- Language ---
+
+    def _change_language(self, code: str):
+        """
+        Switch the active locale and retranslate the whole window immediately.
+
+        No "restart to apply" here: everything text-bearing either gets set again below
+        or is rebuilt from scratch by `_rebuild_from_engine()`, which already reconstructs
+        every strip and graph node from the engine's device list on any refresh — reusing
+        that path means the strips and the patchbay pick up the new language exactly the
+        way they pick up a new device, with no separate retranslation logic to keep in
+        sync with `_add_strip`/`_place_nodes`.
+        """
+        if code == active_locale():
+            return
+
+        saved = set_active_locale(code)
+        if not saved:
+            logger.warning(f"Language changed to '{code}' for this session, but the choice "
+                           f"could not be written to settings")
+
+        from PySide6.QtWidgets import QApplication
+
+        from tonesphere.ui.app import apply_layout_direction
+        app = QApplication.instance()
+        if app is not None:
+            apply_layout_direction(app)
+
+        self._retranslate()
+
+        if not saved:
+            self._error(tr('dialog.language_error'),
+                       tr('dialog.language_not_saved', reason='could not write to the settings store'))
+
+    def _retranslate(self):
+        """Refresh every piece of static text this window owns for the active locale."""
+        self.setWindowTitle(tr('app.name'))
+
+        self.engine_button.setText(
+            tr('transport.stop_engine') if self.engine.is_running or self.engine.state == 'idle'
+            else tr('transport.start_engine')
+        )
+        self.backend_caption.setText(tr('transport.caption.backend'))
+        self.exclusive_button.setText(tr('transport.exclusive'))
+        self.exclusive_button.setToolTip(tr('transport.exclusive_tooltip'))
+        self.mode_caption.setText(tr('transport.caption.mode'))
+
+        current_buffer = self.buffer_combo.currentData()
+        self.buffer_combo.blockSignals(True)
+        self.buffer_combo.clear()
+        for size in (64, 128, 256, 512, 1024):
+            self.buffer_combo.addItem(tr('transport.buffer_frames', frames=size), size)
+        index = self.buffer_combo.findData(current_buffer)
+        if index >= 0:
+            self.buffer_combo.setCurrentIndex(index)
+        self.buffer_combo.blockSignals(False)
+        self.buffer_combo.setToolTip(tr('transport.buffer_tooltip'))
+        self.buffer_caption.setText(tr('transport.caption.buffer'))
+
+        self.monitor_button.setText(tr('transport.monitor'))
+        self.monitor_button.setToolTip(tr('transport.monitor_tooltip'))
+        self.rescan_button.setText(tr('transport.rescan'))
+        self.rescan_button.setToolTip(tr('transport.rescan_tooltip'))
+
+        self.patchbay_title.setText(tr('patchbay.title'))
+        self.patchbay_hint.setText(tr('patchbay.hint'))
+        for key, button in self.patchbay_buttons.items():
+            button.setText(tr(key))
+
+        self.mixer_title.setText(tr('mixer.title'))
+        self.add_bus_button.setText(tr('mixer.add_bus'))
+        self.add_bus_button.setToolTip(tr('mixer.add_bus_tooltip'))
+
+        self.hardware_bar.retranslate()
+        self.master_strip.retranslate()
+
+        self.menuBar().clear()
+        self._build_menu()
+
+        # Strips and graph nodes are reconstructed with the engine's current device list,
+        # which is also how they pick up the new language's tr() output — see
+        # _change_language's docstring for why this is reused rather than duplicated.
+        self._rebuild_from_engine()
+        self._update_stats()
+
     def _show_about(self):
         from tonesphere import __version__
 
@@ -617,32 +733,38 @@ class MainWindow(QMainWindow):
         measured = stats.get('measured_latency_ms')
         nominal = stats.get('nominal_latency_ms')
 
+        measured_text = (
+            tr('about.latency_measured', ms=f"{measured:.1f}") if measured
+            else tr('about.not_measured')
+        )
+        nominal_text = (
+            tr('about.latency_nominal', ms=f"{nominal:.1f}") if nominal else '--'
+        )
+
         lines = [
-            f"ToneSphere {__version__}",
+            tr('about.version', version=__version__),
             "",
-            f"PortAudio: {info.get('portaudio_version', 'unknown')}",
-            f"Backend:   {info.get('active_driver') or 'not selected'}",
-            f"Exclusive: {info.get('exclusive_mode')}",
-            f"Buffer:    {self.engine.buffer_size} frames @ {self.engine.sample_rate} Hz",
-            f"Latency:   {f'{measured:.1f} ms measured' if measured else 'not measured'}"
-            f" / {f'{nominal:.1f} ms nominal' if nominal else '--'}",
-            f"Dropouts:  {stats.get('xruns', 0)}",
+            tr('about.portaudio', version=info.get('portaudio_version', tr('about.unknown'))),
+            tr('about.backend', backend=info.get('active_driver') or tr('about.not_selected')),
+            tr('about.exclusive', exclusive=tr('about.on') if info.get('exclusive_mode') else tr('about.off')),
+            tr('about.buffer', frames=self.engine.buffer_size, rate=self.engine.sample_rate),
+            tr('about.latency', measured=measured_text, nominal=nominal_text),
+            tr('about.dropouts', xruns=stats.get('xruns', 0)),
             "",
         ]
 
         if not info.get('asio_available'):
-            lines.append(
-                "ASIO is not in this PortAudio build: the SDK is not redistributable.\n"
-                "WASAPI exclusive is the low-latency path here."
-            )
+            lines.append(tr('about.asio_note'))
             lines.append("")
 
-        lines.append(
-            "Mix buses are in-process only and cannot be selected from other\n"
-            "applications. That needs a signed kernel driver — see the Roadmap."
-        )
+        lines.append(tr('about.bus_note'))
 
-        QMessageBox.information(self, "About ToneSphere", "\n".join(lines))
+        current = locale_info()
+        if current.review_status != 'source':
+            lines.append("")
+            lines.append(tr('about.translation_note', language=current.native_name))
+
+        QMessageBox.information(self, tr('about.title'), "\n".join(lines))
 
     def closeEvent(self, event):
         self._meter_timer.stop()
