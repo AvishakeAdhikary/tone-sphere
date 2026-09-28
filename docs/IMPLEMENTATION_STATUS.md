@@ -74,8 +74,37 @@ no VST3 plugins installed, no C/C++ toolchain.
 | Meters (peak since reset, block RMS, clip latch) | VERIFIED | `test_meters_report_what_was_processed`, `test_clipping_latches_until_reset` |
 | Callback timing (min/mean/max, histogram p99, load = worst ÷ period) | IMPLEMENTED | `test_statistics_measure_real_callback_time`; `None` until a block runs |
 | Zero heap allocations on the audio thread | VERIFIED | `test_the_audio_thread_allocates_nothing` — 500 blocks with rings, buses, ramps, swaps: `rt_allocations == 0` (this DLL's allocations only; plugin modules are not counted) |
+| Channel strip: per-channel trim and polarity, fader, mute — persisted across plan swaps | VERIFIED (offline) | `tests/native/test_dsp.py::TestChannelStrip`, incl. `test_strip_settings_survive_a_plan_change` |
+| Parametric EQ (peaking, shelves, HP, LP — 8 bands) | VERIFIED (offline) | `test_matches_the_python_reference_sample_for_sample`: all five filter types equal the proven Python `Biquad` within 2e-6 on noise; filter memory survives a plan swap bit-exactly; NaN input cannot poison it |
+| Compressor (soft knee, per-sample detector) | VERIFIED (offline) | `TestCompressor`: -6 dBFS into -18 dB/4:1 settles at -15 dBFS with -9 dB reported; attack lags the transient |
+| Limiter (sample-accurate, instant attack, no lookahead) and per-sink safety limiter | VERIFIED (offline) | `TestLimiter`: a +6 dBFS tone never exceeds the threshold by one sample; below threshold is bit-exact. Fixes the legacy limiter's unreduced first block |
+| Delay with feedback | VERIFIED (offline) | `TestDelay`: echoes exactly at k·d with amplitude mix·feedback^(k-1), nothing between |
+| RoutingGraph → native plan compiler (device in/out split, solo, stable ids) | VERIFIED (offline) | `tests/native/test_plan_compiler.py`; the duplex in→out monitoring path is no longer refused as feedback (`graph.would_feedback`) |
+| Drift resampler for secondary devices | NOT IMPLEMENTED | moves to M4 with the devices that need it |
 | Device backends (WASAPI, ASIO) | NOT IMPLEMENTED | M4, M5 |
-| Built-in DSP ported to native (EQ, compressor, limiter, delay, resampler) | NOT IMPLEMENTED | M3 |
+
+## Measurements
+
+**Offline engine cost** — `benchmarks/bench_engine.py`, results in
+`benchmarks/results/m3_offline_i7-1165G7.json`. Measured 2026-09-29 on the development
+machine (i7-1165G7, Windows 11 25H2, MSVC 14.50 release build), benchmark thread registered
+with MMCSS "Pro Audio", 5 s of audio per configuration. Times are taken inside `run_block`;
+they are what ToneSphere's own processing costs, not a latency and not a device run.
+
+| Scenario, 48 kHz | Block | Period | Mean | p99 | Max | Worst load |
+|---|---|---|---|---|---|---|
+| Guitar chain (3-band EQ, compressor, bus, delay, safety limiter) | 32 | 667 µs | 4.1 µs | 8.0 µs | 152.8 µs | 22.9 % |
+| | 128 | 2667 µs | 13.9 µs | 19.0 µs | 148.9 µs | 5.6 % |
+| | 256 | 5333 µs | 23.9 µs | 32.0 µs | 39.7 µs | 0.7 % |
+| 16 stereo sources, EQ each, 2 buses, 2 limited outputs | 32 | 667 µs | 6.2 µs | 11.3 µs | 142.9 µs | 21.4 % |
+| | 128 | 2667 µs | 17.8 µs | 26.9 µs | 166.1 µs | 6.2 % |
+| | 256 | 5333 µs | 33.1 µs | 45.3 µs | 165.2 µs | 3.1 % |
+
+Zero audio-thread allocations in every configuration (30 of them, 44.1/48/96 kHz × 32–512
+frames). The worst single block is 140–230 µs in almost every configuration regardless of
+workload, while p99 tracks the workload — consistent with interrupt or DPC activity on this
+laptop pre-empting the thread, **not established**: it has not been traced. The tightest
+budget measured (32 frames at 96 kHz, 333 µs) peaked at 49 % of the period.
 
 ## Real-time safety of the existing path
 
@@ -121,7 +150,7 @@ These are fixed by the native engine (Windows) and, where the legacy host stays 
 | M0 | `AGENTS.md` contract, `CLAUDE.md` pointer | done |
 | M1 | This matrix, honesty fixes (reported vs measured latency, loopback claim, plugin and bus claims), dependency audit, shared test signals | done |
 | M2 | Native foundation: toolchain, C ABI, SPSC, snapshots, offline `process_block` | done — see *Native engine* below |
-| M3 | Native graph, mixer, DSP | not started |
+| M3 | Native graph, mixer, DSP | done — see *Native engine* and *Measurements* below |
 | M4 | Native WASAPI backend | not started |
 | M5 | Native ASIO host | not started |
 | M6 | Measured round-trip latency | not started |

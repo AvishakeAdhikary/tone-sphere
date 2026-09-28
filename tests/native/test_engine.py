@@ -407,6 +407,7 @@ class TestSafetyAndMeasurement:
         stats = engine.stats()
         assert stats['blocks'] == 50
         assert 0 < stats['callback_ns_min'] <= stats['callback_ns_mean'] <= stats['callback_ns_max']
+        assert stats['callback_ns_min'] <= stats['callback_ns_p99'] <= stats['callback_ns_max']
         assert stats['period_ns'] == BLOCK * 1_000_000_000 // RATE
         assert stats['processing_load'] == pytest.approx(stats['callback_ns_max'] / stats['period_ns'])
         assert sum(stats['histogram']) == 50

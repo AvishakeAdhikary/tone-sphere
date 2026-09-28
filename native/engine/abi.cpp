@@ -79,9 +79,9 @@ TS_API int32_t ts_engine_last_error(ts_engine* engine, char* buffer, int32_t cap
     return n;
 }
 
-TS_API ts_result ts_engine_apply_plan(ts_engine* engine, const ts_node_desc* nodes, uint32_t node_count,
-                                      const ts_route_desc* routes, uint32_t route_count) {
-    return guarded(engine, [&](Engine& e) { return e.apply_plan(nodes, node_count, routes, route_count); });
+TS_API ts_result ts_engine_apply_plan(ts_engine* engine, const ts_plan* plan) {
+    if (!plan) return TS_ERR_INVALID;
+    return guarded(engine, [&](Engine& e) { return e.apply_plan(*plan); });
 }
 
 TS_API ts_result ts_engine_set_route_gain(ts_engine* engine, uint32_t source, uint32_t dest, float gain) {
@@ -94,6 +94,46 @@ TS_API ts_result ts_engine_set_route_muted(ts_engine* engine, uint32_t source, u
 
 TS_API ts_result ts_engine_set_master_gain(ts_engine* engine, float gain) {
     return guarded(engine, [&](Engine& e) { return e.set_master_gain(gain); });
+}
+
+TS_API ts_result ts_engine_set_route_pan(ts_engine* engine, uint32_t source, uint32_t dest, float pan) {
+    return guarded(engine, [&](Engine& e) { return e.set_route_pan(source, dest, pan); });
+}
+
+TS_API ts_result ts_engine_set_node_gain(ts_engine* engine, uint32_t node_id, float gain) {
+    return guarded(engine, [&](Engine& e) { return e.set_node_gain(node_id, gain); });
+}
+
+TS_API ts_result ts_engine_set_node_muted(ts_engine* engine, uint32_t node_id, int32_t muted) {
+    return guarded(engine, [&](Engine& e) { return e.set_node_muted(node_id, muted != 0); });
+}
+
+TS_API ts_result ts_engine_set_channel_trim(ts_engine* engine, uint32_t node_id, uint32_t channel, float gain) {
+    return guarded(engine, [&](Engine& e) { return e.set_channel_trim(node_id, channel, gain); });
+}
+
+TS_API ts_result ts_engine_set_channel_inverted(ts_engine* engine, uint32_t node_id, uint32_t channel, int32_t inverted) {
+    return guarded(engine, [&](Engine& e) { return e.set_channel_inverted(node_id, channel, inverted != 0); });
+}
+
+TS_API ts_result ts_engine_set_insert_param(ts_engine* engine, uint32_t node_id, uint32_t slot, uint32_t param,
+                                            float value) {
+    return guarded(engine, [&](Engine& e) { return e.set_insert_param(node_id, slot, param, value); });
+}
+
+TS_API ts_result ts_engine_get_insert_param(ts_engine* engine, uint32_t node_id, uint32_t slot, uint32_t param,
+                                            float* value) {
+    if (!value) return TS_ERR_INVALID;
+    return guarded(engine, [&](Engine& e) { return e.get_insert_param(node_id, slot, param, *value); });
+}
+
+TS_API ts_result ts_engine_set_insert_bypassed(ts_engine* engine, uint32_t node_id, uint32_t slot, int32_t bypassed) {
+    return guarded(engine, [&](Engine& e) { return e.set_insert_bypassed(node_id, slot, bypassed != 0); });
+}
+
+TS_API ts_result ts_engine_get_insert_readout(ts_engine* engine, uint32_t node_id, uint32_t slot, float* value) {
+    if (!value) return TS_ERR_INVALID;
+    return guarded(engine, [&](Engine& e) { return e.get_insert_readout(node_id, slot, *value); });
 }
 
 TS_API ts_result ts_engine_process(ts_engine* engine, const ts_port_buffer* inputs, uint32_t input_count,

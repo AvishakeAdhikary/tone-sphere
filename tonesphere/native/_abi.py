@@ -8,7 +8,7 @@ against the DLL at load time so a stale DLL fails loudly instead of misreading m
 import ctypes
 from ctypes import POINTER, Structure, c_char_p, c_float, c_int32, c_uint32, c_uint64, c_void_p
 
-ABI_VERSION = 1
+ABI_VERSION = 3
 
 OK = 0
 ERR_INVALID = -1
@@ -23,12 +23,32 @@ NODE_SOURCE = 1
 NODE_BUS = 2
 NODE_SINK = 3
 NODE_FLAG_RING = 0x1
+NODE_FLAG_LIMITER = 0x2
 
 ROUTE_FLAG_MUTED = 0x1
 ROUTE_FLAG_INVERT = 0x2
 
+INSERT_EQ = 1
+INSERT_COMPRESSOR = 2
+INSERT_LIMITER = 3
+INSERT_DELAY = 4
+INSERT_FLAG_BYPASSED = 0x1
+
+EQ_OFF = 0
+EQ_PEAKING = 1
+EQ_LOW_SHELF = 2
+EQ_HIGH_SHELF = 3
+EQ_HIGHPASS = 4
+EQ_LOWPASS = 5
+
 MAX_CHANNELS = 64
+MAX_INSERTS = 16
 HISTOGRAM_BUCKETS = 64
+
+
+def bucket_edge_ns(i: int) -> float:
+    """Upper edge of histogram bucket i, as defined in the header."""
+    return 1000.0 * 2.0 ** ((i + 1) / 4.0)
 
 EVENT_RING_OVERRUN = 1
 EVENT_RING_UNDERRUN = 2
@@ -57,6 +77,26 @@ class RouteDesc(Structure):
     ]
 
 
+class InsertDesc(Structure):
+    _fields_ = [
+        ("node_id", c_uint32),
+        ("slot", c_uint32),
+        ("type", c_uint32),
+        ("flags", c_uint32),
+    ]
+
+
+class Plan(Structure):
+    _fields_ = [
+        ("nodes", POINTER(NodeDesc)),
+        ("node_count", c_uint32),
+        ("routes", POINTER(RouteDesc)),
+        ("route_count", c_uint32),
+        ("inserts", POINTER(InsertDesc)),
+        ("insert_count", c_uint32),
+    ]
+
+
 class Stats(Structure):
     _fields_ = [
         ("blocks", c_uint64),
@@ -69,7 +109,6 @@ class Stats(Structure):
         ("period_ns", c_uint64),
         ("plan_generation", c_uint64),
         ("rt_allocations", c_uint64),
-        ("bucket_ns", c_uint64),
         ("histogram", c_uint64 * HISTOGRAM_BUCKETS),
     ]
 
@@ -116,10 +155,19 @@ def bind(dll: ctypes.CDLL) -> ctypes.CDLL:
     proto("ts_engine_create", engine, c_uint32, c_uint32)
     proto("ts_engine_destroy", None, engine)
     proto("ts_engine_last_error", c_int32, engine, ctypes.c_char_p, c_int32)
-    proto("ts_engine_apply_plan", c_int32, engine, POINTER(NodeDesc), c_uint32, POINTER(RouteDesc), c_uint32)
+    proto("ts_engine_apply_plan", c_int32, engine, POINTER(Plan))
     proto("ts_engine_set_route_gain", c_int32, engine, c_uint32, c_uint32, c_float)
     proto("ts_engine_set_route_muted", c_int32, engine, c_uint32, c_uint32, c_int32)
+    proto("ts_engine_set_route_pan", c_int32, engine, c_uint32, c_uint32, c_float)
     proto("ts_engine_set_master_gain", c_int32, engine, c_float)
+    proto("ts_engine_set_node_gain", c_int32, engine, c_uint32, c_float)
+    proto("ts_engine_set_node_muted", c_int32, engine, c_uint32, c_int32)
+    proto("ts_engine_set_channel_trim", c_int32, engine, c_uint32, c_uint32, c_float)
+    proto("ts_engine_set_channel_inverted", c_int32, engine, c_uint32, c_uint32, c_int32)
+    proto("ts_engine_set_insert_param", c_int32, engine, c_uint32, c_uint32, c_uint32, c_float)
+    proto("ts_engine_get_insert_param", c_int32, engine, c_uint32, c_uint32, c_uint32, f_ptr)
+    proto("ts_engine_set_insert_bypassed", c_int32, engine, c_uint32, c_uint32, c_int32)
+    proto("ts_engine_get_insert_readout", c_int32, engine, c_uint32, c_uint32, f_ptr)
     proto("ts_engine_process", c_int32, engine, POINTER(PortBuffer), c_uint32, POINTER(PortBuffer), c_uint32, c_uint32)
     proto("ts_port_write", c_int32, engine, c_uint32, f_ptr, c_uint32)
     proto("ts_port_read", c_int32, engine, c_uint32, f_ptr, c_uint32)

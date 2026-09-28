@@ -217,6 +217,16 @@ class TestGraph:
     def test_direct_feedback_is_detected(self):
         assert RoutingGraph().would_feedback(bus_node('a'), bus_node('a')) is True
 
+    def test_a_device_routed_to_itself_is_monitoring_not_feedback(self):
+        """Interface input to the same interface's headphones: the guitar path."""
+        assert RoutingGraph().would_feedback(device_node('iface'), device_node('iface')) is False
+
+    def test_a_loop_through_a_device_is_not_a_graph_cycle(self):
+        graph = RoutingGraph(connections=(
+            Connection(bus_node('b'), device_node('iface')),
+        ))
+        assert graph.would_feedback(device_node('iface'), bus_node('b')) is False
+
     def test_indirect_feedback_is_detected(self):
         """a -> b -> c already exists; adding c -> a would howl."""
         graph = RoutingGraph(connections=(

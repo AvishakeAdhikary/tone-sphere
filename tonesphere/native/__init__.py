@@ -11,6 +11,7 @@ Python imitation of the engine — a missing native engine is reported, not pape
 """
 
 import ctypes
+import math
 import os
 import sys
 import threading
@@ -96,6 +97,7 @@ class Node:
     kind: int
     channels: int
     ring_frames: int = 0
+    limiter: bool = False
 
     @classmethod
     def source(cls, id: int, channels: int, ring_frames: int = 0) -> "Node":
@@ -106,8 +108,8 @@ class Node:
         return cls(id, _abi.NODE_BUS, channels)
 
     @classmethod
-    def sink(cls, id: int, channels: int, ring_frames: int = 0) -> "Node":
-        return cls(id, _abi.NODE_SINK, channels, ring_frames)
+    def sink(cls, id: int, channels: int, ring_frames: int = 0, limiter: bool = False) -> "Node":
+        return cls(id, _abi.NODE_SINK, channels, ring_frames, limiter)
 
 
 @dataclass(frozen=True)
@@ -118,6 +120,21 @@ class Route:
     pan: float = 0.0
     muted: bool = False
     invert: bool = False
+
+
+EQ = _abi.INSERT_EQ
+COMPRESSOR = _abi.INSERT_COMPRESSOR
+LIMITER = _abi.INSERT_LIMITER
+DELAY = _abi.INSERT_DELAY
+
+
+@dataclass(frozen=True)
+class Insert:
+    """A built-in processor on a node. `slot` is both its address and its processing order."""
+    node: int
+    slot: int
+    type: int
+    bypassed: bool = False
 
 
 def _float_ptr(array: np.ndarray):
@@ -170,17 +187,21 @@ class NativeEngine:
             raise NativeError(result, self._error())
         return result
 
-    def apply_plan(self, nodes: list[Node], routes: list[Route]):
+    def apply_plan(self, nodes: list[Node], routes: list[Route], inserts: list[Insert] = ()):
         node_array = (_abi.NodeDesc * max(1, len(nodes)))()
         for i, n in enumerate(nodes):
-            flags = _abi.NODE_FLAG_RING if n.ring_frames else 0
+            flags = (_abi.NODE_FLAG_RING if n.ring_frames else 0) | (_abi.NODE_FLAG_LIMITER if n.limiter else 0)
             node_array[i] = _abi.NodeDesc(n.id, n.kind, n.channels, flags, n.ring_frames)
         route_array = (_abi.RouteDesc * max(1, len(routes)))()
         for i, r in enumerate(routes):
             flags = (_abi.ROUTE_FLAG_MUTED if r.muted else 0) | (_abi.ROUTE_FLAG_INVERT if r.invert else 0)
             route_array[i] = _abi.RouteDesc(r.source, r.dest, r.gain, r.pan, flags)
+        insert_array = (_abi.InsertDesc * max(1, len(inserts)))()
+        for i, x in enumerate(inserts):
+            insert_array[i] = _abi.InsertDesc(x.node, x.slot, x.type, _abi.INSERT_FLAG_BYPASSED if x.bypassed else 0)
+        plan = _abi.Plan(node_array, len(nodes), route_array, len(routes), insert_array, len(inserts))
         with self._control:
-            self._check(self._dll.ts_engine_apply_plan(self._handle, node_array, len(nodes), route_array, len(routes)))
+            self._check(self._dll.ts_engine_apply_plan(self._handle, ctypes.byref(plan)))
             self._nodes = {n.id: n for n in nodes}
 
     def set_route_gain(self, source: int, dest: int, gain: float):
@@ -191,9 +212,50 @@ class NativeEngine:
         with self._control:
             self._check(self._dll.ts_engine_set_route_muted(self._handle, source, dest, int(muted)))
 
+    def set_route_pan(self, source: int, dest: int, pan: float):
+        with self._control:
+            self._check(self._dll.ts_engine_set_route_pan(self._handle, source, dest, pan))
+
     def set_master_gain(self, gain: float):
         with self._control:
             self._check(self._dll.ts_engine_set_master_gain(self._handle, gain))
+
+    def set_node_gain(self, node: int, gain: float):
+        with self._control:
+            self._check(self._dll.ts_engine_set_node_gain(self._handle, node, gain))
+
+    def set_node_muted(self, node: int, muted: bool):
+        with self._control:
+            self._check(self._dll.ts_engine_set_node_muted(self._handle, node, int(muted)))
+
+    def set_channel_trim(self, node: int, channel: int, gain: float):
+        with self._control:
+            self._check(self._dll.ts_engine_set_channel_trim(self._handle, node, channel, gain))
+
+    def set_channel_inverted(self, node: int, channel: int, inverted: bool):
+        with self._control:
+            self._check(self._dll.ts_engine_set_channel_inverted(self._handle, node, channel, int(inverted)))
+
+    def set_insert_param(self, node: int, slot: int, param: int, value: float):
+        with self._control:
+            self._check(self._dll.ts_engine_set_insert_param(self._handle, node, slot, param, value))
+
+    def insert_param(self, node: int, slot: int, param: int) -> float:
+        value = ctypes.c_float()
+        with self._control:
+            self._check(self._dll.ts_engine_get_insert_param(self._handle, node, slot, param, ctypes.byref(value)))
+        return value.value
+
+    def set_insert_bypassed(self, node: int, slot: int, bypassed: bool):
+        with self._control:
+            self._check(self._dll.ts_engine_set_insert_bypassed(self._handle, node, slot, int(bypassed)))
+
+    def insert_readout(self, node: int, slot: int) -> float | None:
+        """Gain reduction in dB the audio thread last applied; None for a processor that has none."""
+        value = ctypes.c_float()
+        with self._control:
+            self._check(self._dll.ts_engine_get_insert_readout(self._handle, node, slot, ctypes.byref(value)))
+        return None if math.isnan(value.value) else value.value
 
     def process(self, inputs: dict[int, np.ndarray], outputs: dict[int, int]) -> dict[int, np.ndarray]:
         """
@@ -264,13 +326,12 @@ class NativeEngine:
             'callback_ns_min': raw.callback_ns_min if measured else None,
             'callback_ns_max': raw.callback_ns_max if measured else None,
             'callback_ns_mean': raw.callback_ns_total / blocks if measured else None,
-            'callback_ns_p99': _percentile(histogram, raw.bucket_ns, 0.99) if measured else None,
+            'callback_ns_p99': min(_percentile(histogram, 0.99), raw.callback_ns_max) if measured else None,
             'period_ns': raw.period_ns if measured else None,
             'processing_load': raw.callback_ns_max / raw.period_ns if measured and raw.period_ns else None,
             'plan_generation': raw.plan_generation,
             'rt_allocations': raw.rt_allocations,
             'histogram': histogram,
-            'bucket_ns': raw.bucket_ns,
         }
 
     def reset_stats(self):
@@ -294,16 +355,19 @@ class NativeEngine:
         return [{'code': e.code, 'arg0': e.arg0, 'arg1': e.arg1, 'block': e.block} for e in buffer[:n]]
 
 
-def _percentile(histogram: list[int], bucket_ns: int, q: float) -> float:
-    """Upper edge of the bucket holding the q-th sample: conservative, never flattering."""
+def _percentile(histogram: list[int], q: float) -> float:
+    """
+    Upper edge of the bucket holding the q-th sample: conservative, never flattering. The
+    caller caps it at the observed maximum, since a bucket edge can exceed every sample in it.
+    """
     total = sum(histogram)
     threshold = q * total
     running = 0
     for i, count in enumerate(histogram):
         running += count
         if running >= threshold:
-            return float((i + 1) * bucket_ns)
-    return float(len(histogram) * bucket_ns)
+            return _abi.bucket_edge_ns(i)
+    return _abi.bucket_edge_ns(len(histogram) - 1)
 
 
 class NativeRing:

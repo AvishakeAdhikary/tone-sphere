@@ -250,11 +250,20 @@ class RoutingGraph:
 
         A cycle in an audio graph is not a subtle bug; it is a runaway howl through the
         user's headphones at whatever volume they had set. Refuse it before it happens.
+
+        Only a bus both receives and sends inside the graph. A device node is two separate
+        endpoints — routing into it means its output, routing from it means its input —
+        and nothing inside the graph carries its output back to its input. So a device's
+        input to its own output is the monitoring path (a guitar into the interface, out
+        of its headphones), not a loop; an earlier version refused it as one. (A network
+        node is the same: what is sent and what is received are separate streams.)
         """
+        if source.kind != 'bus' or dest.kind != 'bus':
+            return False
         if source == dest:
             return True
 
-        # Walk forward from dest: if we can reach source, adding the edge closes a loop.
+        # Walk forward from dest through buses: reaching source means the edge closes a loop.
         stack = [dest]
         seen = set()
 
@@ -267,7 +276,7 @@ class RoutingGraph:
             seen.add(node)
 
             for connection in self.connections:
-                if connection.source == node:
+                if connection.source == node and connection.dest.kind == 'bus':
                     stack.append(connection.dest)
 
         return False

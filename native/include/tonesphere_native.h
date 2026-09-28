@@ -39,7 +39,7 @@ extern "C" {
 #endif
 
 /* Bumped whenever a struct layout or a signature changes; Python refuses a mismatch. */
-#define TS_ABI_VERSION 1
+#define TS_ABI_VERSION 3
 
 typedef int32_t ts_result;
 #define TS_OK               0
@@ -63,6 +63,9 @@ typedef struct ts_engine ts_engine;
  * control plane writes or reads with ts_port_write / ts_port_read — network audio,
  * per-process capture, anything produced or consumed off the audio thread. */
 #define TS_NODE_FLAG_RING 0x1u
+/* SINK only: a sample-accurate safety limiter after master gain, so a routing mistake is
+ * a compressed mix rather than full-scale noise. Adds no latency (see engine/dsp.h). */
+#define TS_NODE_FLAG_LIMITER 0x2u
 
 typedef struct ts_node_desc {
     uint32_t id;           /* caller-chosen, unique within the plan */
@@ -83,12 +86,48 @@ typedef struct ts_route_desc {
     uint32_t flags;   /* TS_ROUTE_FLAG_* */
 } ts_route_desc;
 
+/* Built-in processors placed on a node, run in slot order after the node's input is
+ * mixed and its trim/polarity applied, and before its fader. */
+#define TS_INSERT_EQ         1  /* 8 bands x [type, frequency Hz, Q or shelf slope, gain dB]; type TS_EQ_* */
+#define TS_INSERT_COMPRESSOR 2  /* [threshold dB, ratio, attack ms, release ms, knee dB, makeup dB] */
+#define TS_INSERT_LIMITER    3  /* [threshold linear, release ms] */
+#define TS_INSERT_DELAY      4  /* [delay ms, feedback, mix] */
+
+#define TS_EQ_OFF        0
+#define TS_EQ_PEAKING    1
+#define TS_EQ_LOW_SHELF  2
+#define TS_EQ_HIGH_SHELF 3
+#define TS_EQ_HIGHPASS   4
+#define TS_EQ_LOWPASS    5
+
+#define TS_INSERT_FLAG_BYPASSED 0x1u
+
+typedef struct ts_insert_desc {
+    uint32_t node_id;
+    uint32_t slot;   /* 0..TS_MAX_INSERTS-1, unique per node; also the processing order */
+    uint32_t type;   /* TS_INSERT_* */
+    uint32_t flags;  /* TS_INSERT_FLAG_* */
+} ts_insert_desc;
+
+typedef struct ts_plan {
+    const ts_node_desc* nodes;
+    uint32_t node_count;
+    const ts_route_desc* routes;
+    uint32_t route_count;
+    const ts_insert_desc* inserts;
+    uint32_t insert_count;
+} ts_plan;
+
 #define TS_MAX_CHANNELS 64
 #define TS_MAX_NODES    1024
 #define TS_MAX_ROUTES   8192
+#define TS_MAX_INSERTS  16
 
 /* ---- Statistics, meters, events ----------------------------------------------------- */
 
+/* Callback duration histogram, log-scaled so a 3 µs block and a 3 ms block are both
+ * resolved: bucket i counts durations below 1000 * 2^((i + 1) / 4) ns (about 19% per
+ * bucket, 1.19 µs to 65 ms); the last bucket also takes everything longer. */
 #define TS_HISTOGRAM_BUCKETS 64
 
 typedef struct ts_stats {
@@ -102,8 +141,6 @@ typedef struct ts_stats {
     uint64_t period_ns;          /* the block period the last block was given (frames / rate) */
     uint64_t plan_generation;    /* generation of the plan the audio thread last ran */
     uint64_t rt_allocations;     /* heap allocations made by this DLL on the audio thread */
-    /* callback duration histogram: bucket i counts durations in [i, i+1) * bucket_ns */
-    uint64_t bucket_ns;
     uint64_t histogram[TS_HISTOGRAM_BUCKETS];
 } ts_stats;
 
@@ -149,16 +186,28 @@ TS_API void ts_engine_destroy(ts_engine* engine);
 TS_API int32_t ts_engine_last_error(ts_engine* engine, char* buffer, int32_t capacity);
 
 /* Validate, order and preallocate a plan, then publish it to the audio thread. On failure
- * the running plan is untouched. Routes present in both plans (same source and dest) keep
- * their smoothed gain, so a swap does not click. */
-TS_API ts_result ts_engine_apply_plan(ts_engine* engine,
-                                      const ts_node_desc* nodes, uint32_t node_count,
-                                      const ts_route_desc* routes, uint32_t route_count);
+ * the running plan is untouched. State that belongs to something the new plan still has —
+ * a route's smoothed gain, a node's fader/trim/polarity, an insert's parameters and filter
+ * memory, a ring's queued audio — carries over, so a swap neither clicks nor forgets. */
+TS_API ts_result ts_engine_apply_plan(ts_engine* engine, const ts_plan* plan);
 
 /* Continuous controls — atomic, take effect on the next block, ramped over one block. */
 TS_API ts_result ts_engine_set_route_gain(ts_engine* engine, uint32_t source, uint32_t dest, float gain);
 TS_API ts_result ts_engine_set_route_muted(ts_engine* engine, uint32_t source, uint32_t dest, int32_t muted);
+TS_API ts_result ts_engine_set_route_pan(ts_engine* engine, uint32_t source, uint32_t dest, float pan);
 TS_API ts_result ts_engine_set_master_gain(ts_engine* engine, float gain);
+TS_API ts_result ts_engine_set_node_gain(ts_engine* engine, uint32_t node_id, float gain);
+TS_API ts_result ts_engine_set_node_muted(ts_engine* engine, uint32_t node_id, int32_t muted);
+TS_API ts_result ts_engine_set_channel_trim(ts_engine* engine, uint32_t node_id, uint32_t channel, float gain);
+TS_API ts_result ts_engine_set_channel_inverted(ts_engine* engine, uint32_t node_id, uint32_t channel, int32_t inverted);
+
+TS_API ts_result ts_engine_set_insert_param(ts_engine* engine, uint32_t node_id, uint32_t slot,
+                                            uint32_t param, float value);
+TS_API ts_result ts_engine_get_insert_param(ts_engine* engine, uint32_t node_id, uint32_t slot,
+                                            uint32_t param, float* value);
+TS_API ts_result ts_engine_set_insert_bypassed(ts_engine* engine, uint32_t node_id, uint32_t slot, int32_t bypassed);
+/* Gain reduction in dB the audio thread last applied (compressor, limiter), or NaN. */
+TS_API ts_result ts_engine_get_insert_readout(ts_engine* engine, uint32_t node_id, uint32_t slot, float* value);
 
 /* Run one block on the calling thread with no device. Inputs feed SOURCE nodes that are
  * not rings; outputs receive SINK nodes that are not rings. A source with no buffer
