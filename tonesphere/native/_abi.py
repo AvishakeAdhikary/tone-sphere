@@ -21,7 +21,7 @@ from ctypes import (
     c_void_p,
 )
 
-ABI_VERSION = 5
+ABI_VERSION = 6
 
 OK = 0
 ERR_INVALID = -1

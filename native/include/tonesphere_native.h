@@ -39,7 +39,7 @@ extern "C" {
 #endif
 
 /* Bumped whenever a struct layout or a signature changes; Python refuses a mismatch. */
-#define TS_ABI_VERSION 5
+#define TS_ABI_VERSION 6
 
 typedef int32_t ts_result;
 #define TS_OK               0
@@ -354,6 +354,30 @@ TS_API ts_result ts_engine_start_wasapi(ts_engine* engine, const ts_stream_desc*
                                         uint32_t master_index);
 TS_API ts_result ts_engine_stop_backend(ts_engine* engine);
 TS_API int32_t ts_engine_stream_status(ts_engine* engine, ts_stream_status* out, int32_t capacity);
+
+/* ---- External device backends ------------------------------------------------------------
+ *
+ * A backend that lives in another DLL (the ASIO host, tonesphere_asio.dll, which is GPLv3
+ * and therefore kept out of this MIT library) attaches through these. It owns the audio
+ * thread while attached and calls ts_engine_run_block from it. The engine owns the ops
+ * once attached: ts_engine_stop_backend calls stop() then destroy(). */
+
+typedef struct ts_backend_ops {
+    void* context;
+    void (*stop)(void* context);
+    int32_t (*status)(void* context, ts_stream_status* out, int32_t capacity);
+    void (*destroy)(void* context);
+} ts_backend_ops;
+
+TS_API ts_result ts_engine_attach_backend(ts_engine* engine, const ts_backend_ops* ops);
+/* AUDIO THREAD ONLY, and only by an attached backend. Never blocks, allocates or throws. */
+TS_API void ts_engine_run_block(ts_engine* engine, const ts_port_buffer* inputs, uint32_t input_count,
+                                ts_port_buffer* outputs, uint32_t output_count, uint32_t frames);
+TS_API void ts_engine_set_backend_running(ts_engine* engine, int32_t running);
+/* Any thread. */
+TS_API void ts_engine_add_xruns(ts_engine* engine, uint32_t count);
+TS_API uint32_t ts_engine_sample_rate(ts_engine* engine);
+TS_API uint32_t ts_engine_max_block(ts_engine* engine);
 
 /* ---- Pieces of the device boundary, exposed so they can be tested without a device ----- */
 

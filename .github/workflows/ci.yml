@@ -91,9 +91,13 @@ jobs:
       - name: Build the native engine (Windows)
         # tests/native fails rather than skips on Windows without the DLL, so this has to
         # run first. The runner's Visual Studio is found through vswhere; CMake and Ninja
-        # come from the `native` dependency group.
+        # come from the `native` dependency group. The ASIO SDK is fetched (pinned by
+        # checksum, GPLv3 option verified) so the GPLv3 ASIO host is built and its boundary
+        # tested too; the runner has no ASIO driver, so nothing here drives one.
         if: runner.os == 'Windows'
-        run: uv run python scripts/build_native.py
+        run: |
+          uv run python scripts/fetch_sdks.py asio
+          uv run python scripts/build_native.py
 
       - name: Run tests
         # CI runners have no audio hardware, so hardware-marked tests are excluded.
@@ -232,7 +236,9 @@ jobs:
 
       - name: Build the native engine (Windows)
         if: runner.os == 'Windows'
-        run: uv run python scripts/build_native.py
+        run: |
+          uv run python scripts/fetch_sdks.py asio
+          uv run python scripts/build_native.py
 
       - name: Build with PyInstaller (one-file)
         run: uv run pyinstaller tonesphere.spec

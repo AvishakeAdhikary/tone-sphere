@@ -275,6 +275,52 @@ TS_API ts_result ts_engine_start_wasapi(ts_engine* engine, const ts_stream_desc*
 }
 #endif
 
+namespace {
+
+class ExternalBackend final : public ts::DeviceBackend {
+public:
+    explicit ExternalBackend(const ts_backend_ops& ops) : ops_(ops) {}
+    ~ExternalBackend() override {
+        stop();
+        if (ops_.destroy) ops_.destroy(ops_.context);
+    }
+    void stop() override {
+        if (!stopped_ && ops_.stop) ops_.stop(ops_.context);
+        stopped_ = true;
+    }
+    int32_t status(ts_stream_status* out, int32_t capacity) override {
+        return ops_.status ? ops_.status(ops_.context, out, capacity) : 0;
+    }
+
+private:
+    ts_backend_ops ops_;
+    bool stopped_ = false;
+};
+
+}  // namespace
+
+TS_API ts_result ts_engine_attach_backend(ts_engine* engine, const ts_backend_ops* ops) {
+    if (!ops) return TS_ERR_INVALID;
+    return guarded(engine, [&](Engine& e) { return e.attach_backend(std::make_unique<ExternalBackend>(*ops)); });
+}
+
+TS_API void ts_engine_run_block(ts_engine* engine, const ts_port_buffer* inputs, uint32_t input_count,
+                                ts_port_buffer* outputs, uint32_t output_count, uint32_t frames) {
+    if (!engine || frames == 0 || frames > engine->engine.max_block()) return;
+    engine->engine.run_block(inputs, input_count, outputs, output_count, frames);
+}
+
+TS_API void ts_engine_set_backend_running(ts_engine* engine, int32_t running) {
+    if (engine) engine->engine.set_backend_running(running != 0);
+}
+
+TS_API void ts_engine_add_xruns(ts_engine* engine, uint32_t count) {
+    if (engine) engine->engine.add_xruns(count);
+}
+
+TS_API uint32_t ts_engine_sample_rate(ts_engine* engine) { return engine ? engine->engine.sample_rate() : 0; }
+TS_API uint32_t ts_engine_max_block(ts_engine* engine) { return engine ? engine->engine.max_block() : 0; }
+
 TS_API ts_result ts_engine_stop_backend(ts_engine* engine) {
     return guarded(engine, [&](Engine& e) { return e.stop_backend(); });
 }
