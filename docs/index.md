@@ -20,23 +20,22 @@ panel from 2006. That is the whole idea.
 - Routes and mixes audio between the devices on your own machine, one stream per device,
   mixing inside the driver's callback. A device used in both directions gets a single duplex
   stream, so its input and output cannot drift apart.
-- Hosts the **VST3 and AU plugins you already own**, on any channel, and adds their latency
-  to the reported round trip instead of hiding it.
 - Gives you a mixer and a patchbay: constant-power pan, polarity, trim, mute, solo, smoothed
   gain, a limiter on every output, and cables you make by dragging a port onto a port.
 - Ships real effects: biquad EQ, a compressor with actual attack, release, knee and makeup,
   and a delay with feedback.
 - Captures **one application's audio on Windows** (Windows 10 build 20348 and later, no
-  driver and no virtual cable), and captures a whole output device system-wide.
+  driver and no virtual cable).
 - Creates **a Linux sink other applications can select**, and publishes a **CoreAudio
   loopback device on macOS** that is proven in continuous integration and unverified in
   day-to-day use — stated that way on purpose.
 - Saves presets as plain YAML keyed on device names, so they survive you plugging something
   in, and tells you what was missing when it loads one without your interface attached.
-- Reports **measured** latency next to the nominal buffer arithmetic. On one machine, at a
-  128-frame buffer on WASAPI exclusive: 5.7 ms measured round trip at roughly 5% DSP load.
-  Your hardware will give you different numbers, which is exactly why the number shown is
-  the one it measured.
+- Reports the latency your **driver reports** next to the nominal buffer arithmetic, and
+  labels each for what it is. On one machine, at a 128-frame buffer on WASAPI exclusive:
+  5.7 ms reported round trip at roughly 5% DSP load. Neither figure is a measurement of a
+  signal ToneSphere sent and heard back; that measurement is being built, and until it
+  exists it is shown as `--`.
 
 There is one rule in this project, and its test suite enforces it:
 
@@ -55,8 +54,8 @@ virtual device that deliberately is not attempted, and the reasoning behind that
 
 On Linux, install PortAudio from your distribution first (`libportaudio2` on Debian and
 Ubuntu, `portaudio` on Fedora, `portaudio` on Arch); the Linux Python wheel does not bundle
-it. Run `main.py test` before anything else — it opens a stream, plays a tone, measures the
-round trip and tells you PASS, WARN or FAIL per capability.
+it. Run `main.py test` before anything else — it opens a stream, plays a tone, reports the
+driver's latency and tells you PASS, WARN or FAIL per capability.
 
 ## Sponsor ToneSphere
 

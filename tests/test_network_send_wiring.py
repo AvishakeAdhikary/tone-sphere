@@ -21,7 +21,6 @@ No hardware anywhere: buses, ring buffers and UDP sockets only, so this runs on 
 platforms. Nothing calls `initialize()`, so PortAudio is never touched at all.
 """
 
-import math
 import time
 
 import numpy as np
@@ -35,27 +34,11 @@ from tonesphere.network.udp_transport import (
 )
 
 from tonesphere.core.engine import NETWORK_ID_BASE, AudioEngine  # isort: skip
+from tests.signals import dominant_frequency, rms, sine
 
 RATE = 48000
 BLOCK = 256
 PACKET_FRAMES = frames_per_packet(CODEC_PCM_FLOAT32, 2)
-
-
-def sine(frames: int, freq: float = 1000.0, rate: int = RATE,
-         amplitude: float = 0.5, channels: int = 2, phase: float = 0.0) -> np.ndarray:
-    t = (np.arange(frames, dtype=np.float64) + phase) / rate
-    wave = (amplitude * np.sin(2.0 * math.pi * freq * t)).astype(np.float32)
-    return np.repeat(wave.reshape(-1, 1), channels, axis=1)
-
-
-def dominant_frequency(block: np.ndarray, rate: int = RATE) -> float:
-    mono = block[:, 0] if block.ndim > 1 else block
-    spectrum = np.abs(np.fft.rfft(mono * np.hanning(len(mono))))
-    return float(np.fft.rfftfreq(len(mono), 1.0 / rate)[int(np.argmax(spectrum))])
-
-
-def rms(block: np.ndarray) -> float:
-    return float(np.sqrt(np.mean(np.square(block, dtype=np.float64))))
 
 
 @pytest.fixture

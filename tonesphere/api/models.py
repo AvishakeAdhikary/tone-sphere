@@ -62,5 +62,6 @@ class PerformanceStats(BaseModel):
     buffer_underruns: int
     nominal_latency_ms: float          # buffer_size / sample_rate — arithmetic, not measured
     cpu_usage: float | None = None
-    measured_latency_ms: float | None = None
+    reported_latency_ms: float | None = None      # what the driver reports, not timed
+    measured_round_trip_ms: float | None = None   # a real emitted-and-captured signal
     audio_path_active: bool = False

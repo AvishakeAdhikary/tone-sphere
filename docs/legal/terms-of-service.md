@@ -2,8 +2,8 @@
 title: Terms of Service
 layout: default
 permalink: /legal/terms-of-service/
-version: "1.0"
-effective_date: "2026-09-09"
+version: "1.1"
+effective_date: "2026-09-29"
 publisher: Neural Nexus Studios
 description: What the ToneSphere application provides and does not provide, how it is distributed, updated and supported, and the terms attaching to its optional network streaming feature.
 ---
@@ -12,8 +12,8 @@ description: What the ToneSphere application provides and does not provide, how 
 
 - **Application:** ToneSphere
 - **Publisher:** Neural Nexus Studios, an individual developer, Kolkata, West Bengal, India
-- **Document version:** 1.0
-- **Effective date:** 9 September 2026
+- **Document version:** 1.1
+- **Effective date:** 29 September 2026
 
 ## 1. What this document covers
 
@@ -43,17 +43,16 @@ own computer. Provided you have working audio hardware and drivers, it offers:
 - **Built-in effects** — biquad equalisation (peaking and shelving filters, high-pass and
   low-pass), a compressor with attack, release, knee and makeup gain, and a delay with
   feedback.
-- **Hosting of VST3 and AU plugins that you already own**, loaded onto a channel and
-  monitored through. Plugin latency is added to the reported round-trip figure rather than
-  hidden from it.
 - **A patchbay** in which routes are made by dragging a port to a port, and feedback loops
   are refused rather than created.
 - **Presets** saved as plain YAML and keyed on device names rather than device indices, so
   that they survive hardware being plugged in or removed. A preset saved with an interface
   attached will load without it and report what was missing.
-- **Latency reporting that distinguishes measured from nominal.** The application reports
-  the round-trip latency it actually measured next to the figure that is only buffer
-  arithmetic, and reports a measurement it did not take as unavailable rather than as zero.
+- **Latency reporting that says what each figure is.** The application shows the latency
+  the audio driver reports next to the figure that is only buffer arithmetic, labels each
+  for what it is, and shows a measurement it did not take as unavailable rather than as
+  zero. It does not yet measure the round trip with a signal of its own, and does not call
+  either figure a measurement.
 - **Multiple audio backends**, selected automatically or by you: WASAPI (shared and
   exclusive), WDM-KS, DirectSound and MME on Windows; ALSA and JACK on Linux; CoreAudio on
   macOS. Exclusive mode is attempted first and falls back to shared mode per device when it
@@ -88,6 +87,12 @@ This section exists so that you do not have to discover these by trying them.
   project does not attempt and does not claim. The
   [virtual audio driver notes](../VIRTUAL_AUDIO_DRIVER.md) set out exactly what that route
   would require.
+- **No plugin hosting you can use yet.** Code to load VST3 plugins exists, but nothing in
+  the application's interface, API or command line reaches it, and it has not been proven
+  with a real plugin. A native plugin host is being built; until it is proven, this
+  document does not offer plugin hosting.
+- **No whole-system capture.** Capturing everything a device plays is not implemented;
+  capturing one application's audio (below) is.
 - **No ASIO** in the builds we distribute. The redistributable PortAudio build does not
   include it, because Steinberg's SDK cannot be redistributed. ASIO appears automatically if
   you supply your own PortAudio built against that SDK.
@@ -113,7 +118,9 @@ it away:
 
 | Feature | Platform | Status |
 |---|---|---|
-| Audio routing, mixing, effects, plugin hosting | Windows, Linux, macOS | Working and covered by automated tests |
+| Audio routing and mixing between devices | Windows, Linux, macOS | Working and covered by automated tests |
+| Routing through an internal bus from one device to another | Windows, Linux, macOS | **Not working** — a known defect being fixed; audio routed into a bus from a device does not reach the bus's outputs |
+| Built-in effects | Windows, Linux, macOS | Covered by automated tests; not yet reachable from the interface |
 | Per-application capture | Windows 10 build 20348 and later | Working, proven by a test that captures a known tone and measures it |
 | Selectable virtual sink | Linux, with PulseAudio or PipeWire running | Working |
 | Selectable virtual device | Windows | Not provided — see section 3 |

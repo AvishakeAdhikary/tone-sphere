@@ -319,35 +319,6 @@ def process_loopback_supported() -> bool:
     return build >= _PROCESS_LOOPBACK_MIN_BUILD
 
 
-def system_loopback_devices() -> list[str]:
-    """
-    Loopback devices PortAudio can already capture from — whole-system output capture.
-
-    WASAPI exposes each render endpoint as a capture device for loopback, which records
-    everything playing rather than one application. That works today, unlike per-process
-    capture, so the two are reported separately instead of being conflated.
-    """
-    try:
-        import sounddevice as sd
-    except (ImportError, OSError):
-        return []
-
-    if platform.system() != "Windows":
-        return []
-
-    found = []
-    try:
-        host_apis = sd.query_hostapis()
-        for device in sd.query_devices():
-            api_name = host_apis[device['hostapi']]['name']
-            if 'WASAPI' in api_name and device['max_output_channels'] > 0:
-                found.append(str(device['name']))
-    except Exception as e:
-        logger.debug(f"Could not enumerate loopback devices: {e}")
-
-    return found
-
-
 def capture_status() -> dict:
     """
     What application capture can and cannot do here.
@@ -368,13 +339,16 @@ def capture_status() -> dict:
             for s in sessions
         ],
         'session_count': len(sessions),
-        'system_loopback_available': bool(system_loopback_devices()),
+        # Nothing opens a whole-system loopback stream: the PyPI PortAudio build lists
+        # no loopback devices and sounddevice exposes no WASAPI loopback flag. An earlier
+        # version reported this as available because render endpoints *existed*.
+        'system_loopback_implemented': False,
         'process_loopback_supported': supported,
         'process_loopback_implemented': supported,
         'note': (
             "Per-application capture uses ActivateAudioInterfaceAsync with "
             "VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK (Windows 10 build 20348+). "
-            "Whole-system loopback works through PortAudio on any Windows."
+            "Whole-system loopback is not implemented yet."
             if supported else
             "Per-application capture needs ActivateAudioInterfaceAsync with "
             "VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK, which exists only on Windows 10 "

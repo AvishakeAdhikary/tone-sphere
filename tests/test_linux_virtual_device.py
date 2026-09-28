@@ -23,29 +23,16 @@ Track 1:
   to prove the OS-level behaviour anywhere but there.
 """
 
-import math
 import subprocess
 import sys
 
 import numpy as np
 import pytest
 
+from tests.signals import dominant_frequency, sine
+
 RATE = 48000
 BLOCK = 256
-
-
-def sine(frames: int, freq: float = 1000.0, rate: int = RATE,
-         amplitude: float = 0.5, channels: int = 2, phase: float = 0.0) -> np.ndarray:
-    """Same tone helper as `tests/test_engine_audio.py` and `tests/test_process_capture.py`."""
-    t = (np.arange(frames, dtype=np.float64) + phase) / rate
-    wave = (amplitude * np.sin(2.0 * math.pi * freq * t)).astype(np.float32)
-    return np.repeat(wave.reshape(-1, 1), channels, axis=1)
-
-
-def dominant_frequency(block: np.ndarray, rate: int = RATE) -> float:
-    mono = block[:, 0] if block.ndim > 1 else block
-    spectrum = np.abs(np.fft.rfft(mono * np.hanning(len(mono))))
-    return float(np.fft.rfftfreq(len(mono), 1.0 / rate)[int(np.argmax(spectrum))])
 
 
 def _run(coroutine):

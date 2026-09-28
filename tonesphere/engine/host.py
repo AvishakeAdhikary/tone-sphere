@@ -154,11 +154,14 @@ class StreamConfig:
 @dataclass
 class HostStatistics:
     """
-    What the engine actually measured. Unmeasured values stay None.
+    What the engine knows about itself. Unknown values stay None.
 
-    `measured_latency_ms` comes from PortAudio's reported stream latency, which accounts
-    for the driver's own buffering — unlike blocksize/samplerate arithmetic, which only
-    describes our contribution and reads far lower than the truth.
+    `reported_latency_ms` is PortAudio's *reported* stream latency plus plugin latency. It
+    accounts for the driver's own buffering — unlike blocksize/samplerate arithmetic,
+    which only describes our contribution — but it is still what the driver says, not
+    something we timed. It excludes ring-buffer and resampler delay on cross-device
+    routes. `measured_round_trip_ms` is reserved for a real emitted-and-captured
+    measurement and stays None until one is taken.
     """
     running: bool = False
     samplerate: int | None = None
@@ -168,7 +171,8 @@ class HostStatistics:
 
     input_latency_ms: float | None = None
     output_latency_ms: float | None = None
-    measured_latency_ms: float | None = None
+    reported_latency_ms: float | None = None
+    measured_round_trip_ms: float | None = None
     nominal_latency_ms: float | None = None
 
     cpu_load: float | None = None
@@ -194,7 +198,8 @@ class HostStatistics:
             'exclusive': self.exclusive,
             'input_latency_ms': self.input_latency_ms,
             'output_latency_ms': self.output_latency_ms,
-            'measured_latency_ms': self.measured_latency_ms,
+            'reported_latency_ms': self.reported_latency_ms,
+            'measured_round_trip_ms': self.measured_round_trip_ms,
             'nominal_latency_ms': self.nominal_latency_ms,
             'cpu_usage': self.cpu_load,
             'xruns': self.xruns,
@@ -1434,9 +1439,10 @@ class AudioHost:
         stats.output_latency_ms = output_latency
 
         # Round trip is what a player feels: in, through us, and back out — including
-        # whatever the loaded plugins add, which can be several milliseconds.
+        # whatever the loaded plugins add, which can be several milliseconds. Every term
+        # here is reported, none is timed, so this is never labelled "measured".
         if input_latency is not None or output_latency is not None:
-            stats.measured_latency_ms = (
+            stats.reported_latency_ms = (
                 (input_latency or 0.0)
                 + (output_latency or 0.0)
                 + self.total_plugin_latency_ms()

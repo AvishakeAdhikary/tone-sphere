@@ -3,7 +3,7 @@ tagline: Low-latency audio routing and mixing for Windows, Linux and macOS
 description: >-
   ToneSphere is a local desktop audio router and mixer for Windows, Linux and macOS,
   published by Neural Nexus Studios. It routes and processes audio on your own machine,
-  hosts the VST3 and AU plugins you already own, and reports the latency it measured
+  and labels every latency figure for what it is — reported, nominal or measured —
   rather than the latency it hoped for. This site carries its Terms and Conditions,
   Terms of Service and Privacy Policy.
 author: Neural Nexus Studios

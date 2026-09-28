@@ -378,9 +378,10 @@ class AudioEngine:
         audio application picks a driver first, then its devices; `include_all_backends`
         is there for a settings screen that wants to offer the choice.
 
-        `latency_ms` is what the driver reports for the device. It is not
-        `measured_latency_ms` from the engine statistics — that is what the open stream
-        actually achieved, and the two differ substantially.
+        `latency_ms` is what the driver reports for the device before a stream is open.
+        It is not `reported_latency_ms` from the engine statistics — that is what the
+        open stream reports once running, plus plugin latency — and neither is a
+        measurement.
 
         `origin` says what actually put this endpoint here — `'hardware'`, an in-process
         `'in_process_bus'`, or an OS-level `'os_virtual_endpoint'` (a Linux sink from

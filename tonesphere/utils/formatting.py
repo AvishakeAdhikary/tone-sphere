@@ -26,13 +26,21 @@ def format_measurement(value: float | None, unit: str = "", decimals: int = 1) -
 def format_performance_summary(stats: Mapping[str, Any]) -> str:
     """One-line engine summary suitable for a status bar."""
     cpu = format_measurement(stats.get('cpu_usage'), "%")
-    latency = format_measurement(stats.get('measured_latency_ms'), " ms")
+    reported = stats.get('reported_latency_ms')
 
-    if stats.get('measured_latency_ms') is None:
+    if reported is None:
         nominal = format_measurement(stats.get('nominal_latency_ms'), " ms")
-        latency = f"{latency} (nominal {nominal})"
+        latency = f"{UNKNOWN} (nominal {nominal})"
+    else:
+        # "reported", because it is what the driver says; only a signal we emitted and
+        # captured back earns the word "measured", and that is shown separately.
+        latency = f"{format_measurement(reported, ' ms')} reported"
 
     summary = f"CPU: {cpu}  |  Latency: {latency}"
+
+    measured = stats.get('measured_round_trip_ms')
+    if measured is not None:
+        summary += f"  |  Measured round trip: {format_measurement(measured, ' ms')}"
 
     if not stats.get('audio_path_active', False):
         summary += "  |  NO AUDIO PATH"

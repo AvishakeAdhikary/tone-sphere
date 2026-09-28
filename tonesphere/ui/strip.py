@@ -296,9 +296,10 @@ class HardwareBar(QFrame):
     Every field here is either a real measurement or "--". The old UI's equivalent showed
     "CPU: 0% | Latency: 0ms" permanently, which was not a reading of anything.
 
-    Latency shows the measured round trip with the nominal figure beside it, because those
-    two numbers differ by a factor of four on shared-mode WASAPI and the difference is the
-    single most useful thing a latency-sensitive user can know.
+    Latency shows the driver-reported round trip with the nominal figure beside it, because
+    those two numbers differ by a factor of four on shared-mode WASAPI and the difference
+    is the single most useful thing a latency-sensitive user can know. Both are labelled
+    for what they are: neither is a measurement.
     """
 
     def __init__(self, parent: QWidget | None = None):
@@ -394,23 +395,23 @@ class HardwareBar(QFrame):
         self.xruns.set_label(tr('status.pill.xruns'))
 
     def _update_latency(self, stats: dict):
-        measured = stats.get('measured_latency_ms')
+        reported = stats.get('reported_latency_ms')
         nominal = stats.get('nominal_latency_ms')
 
-        if measured is None:
+        if reported is None:
             # Never show the nominal figure alone as if it were the real one.
             self.latency.set_value(
                 tr('status.latency_unmeasured', nominal=f"{nominal:.1f}") if nominal else None
             )
             return
 
-        tone = Colors.OK if measured < 15 else (
-            Colors.WARN if measured < 40 else Colors.ERROR
+        tone = Colors.OK if reported < 15 else (
+            Colors.WARN if reported < 40 else Colors.ERROR
         )
-        measured_text = tr('status.latency_ms', ms=f"{measured:.1f}")
+        reported_text = tr('status.latency_ms', ms=f"{reported:.1f}")
         text = (
-            tr('status.latency_with_nominal', measured=measured_text, nominal=f"{nominal:.1f}")
-            if nominal else measured_text
+            tr('status.latency_with_nominal', reported=reported_text, nominal=f"{nominal:.1f}")
+            if nominal else reported_text
         )
         self.latency.set_value(text, tone)
 

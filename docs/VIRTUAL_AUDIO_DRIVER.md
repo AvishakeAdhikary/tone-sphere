@@ -32,8 +32,8 @@ Before building a driver, note what does not need one:
 | Want | Needs a driver? |
 |---|---|
 | Guitar in → effects → headphones out | **No.** Works today. |
-| Guitar in → VST3 (Guitar Rig) → out | **No.** Works today via `pedalboard`. |
-| Record everything playing on the system | **No.** WASAPI loopback captures any render endpoint. |
+| Guitar in → VST3 (Guitar Rig) → out | **No.** Needs a plugin host, not a driver — being built natively; not usable yet. |
+| Record everything playing on the system | **No.** WASAPI loopback can capture any render endpoint — not implemented yet. |
 | Capture one specific application's audio | **No**, on Windows 10 build 20348+ — see below. |
 | Send ToneSphere's output *into* Discord as a microphone | **Yes.** |
 | Appear as an input device in a DAW | **Yes.** |
@@ -48,10 +48,9 @@ Windows 10 build 20348 and later can capture a single process's render stream th
 `VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK`. This replaces the most common reason people
 install VB-CABLE.
 
-PortAudio does not expose it, so it needs a small native extension calling that API
-directly and feeding frames into a bus. `engine/app_capture.py` already detects whether the
-platform supports it and reports `process_loopback_implemented: False` rather than
-pretending. This is the highest-value item remaining and it is much smaller than a driver.
+PortAudio does not expose it. `engine/process_capture.py` calls that API directly through
+ctypes and feeds the frames into a bus; `tests/test_process_capture.py` proves it by
+capturing ToneSphere's own process playing a known tone.
 
 ## The driver itself
 

@@ -14,7 +14,6 @@ where the platform cannot do process loopback at all.
 """
 
 import asyncio
-import math
 import os
 import subprocess
 import sys
@@ -23,6 +22,7 @@ import time
 import numpy as np
 import pytest
 
+from tests.signals import dominant_frequency, sine
 from tonesphere.engine.app_capture import process_loopback_supported
 
 RATE = 48000
@@ -32,20 +32,6 @@ pytestmark = pytest.mark.skipif(
     not process_loopback_supported(),
     reason="per-process loopback needs Windows 10 build 20348 or later",
 )
-
-
-def sine(frames: int, freq: float = 1000.0, rate: int = RATE,
-         amplitude: float = 0.5, channels: int = 2, phase: float = 0.0) -> np.ndarray:
-    """Same tone helper as `tests/test_engine_audio.py`, for the same reasons."""
-    t = (np.arange(frames, dtype=np.float64) + phase) / rate
-    wave = (amplitude * np.sin(2.0 * math.pi * freq * t)).astype(np.float32)
-    return np.repeat(wave.reshape(-1, 1), channels, axis=1)
-
-
-def dominant_frequency(block: np.ndarray, rate: int = RATE) -> float:
-    mono = block[:, 0] if block.ndim > 1 else block
-    spectrum = np.abs(np.fft.rfft(mono * np.hanning(len(mono))))
-    return float(np.fft.rfftfreq(len(mono), 1.0 / rate)[int(np.argmax(spectrum))])
 
 
 def dead_pid() -> int:

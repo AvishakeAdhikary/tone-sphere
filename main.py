@@ -95,8 +95,8 @@ def run_diagnostics() -> int:
             report("FAIL", f"Audio backend:    {driver_info['error']}")
 
         if not driver_info.get('asio_available'):
-            report("INFO", "ASIO:             not in this PortAudio build (SDK is not "
-                           "redistributable); WASAPI exclusive is the low-latency path")
+            report("INFO", "ASIO:             not available in this build; WASAPI exclusive "
+                           "is the low-latency path")
 
         devices = engine.get_devices()
         inputs = [d for d in devices if d['direction'] == 'input' and 'bus' not in d['host_api'].lower()]
@@ -162,8 +162,12 @@ def run_diagnostics() -> int:
                     else:
                         report("WARN", f"{stats['xruns']} xrun(s) — try a larger buffer")
 
+                    report("INFO", f"Reported latency: "
+                                   f"{format_measurement(stats.get('reported_latency_ms'), ' ms')} round trip "
+                                   f"(what the driver says, not timed)")
                     report("INFO", f"Measured latency: "
-                                   f"{format_measurement(stats.get('measured_latency_ms'), ' ms')} round trip")
+                                   f"{format_measurement(stats.get('measured_round_trip_ms'), ' ms')} "
+                                   f"(needs a loopback path; not taken by this test)")
                     report("INFO", f"Nominal latency:  "
                                    f"{format_measurement(stats.get('nominal_latency_ms'), ' ms')} "
                                    f"(buffer arithmetic only)")

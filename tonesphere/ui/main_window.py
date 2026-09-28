@@ -730,13 +730,15 @@ class MainWindow(QMainWindow):
         info = self.engine.get_driver_info()
         stats = self.engine.get_performance_stats()
 
-        measured = stats.get('measured_latency_ms')
+        reported = stats.get('reported_latency_ms')
+        measured = stats.get('measured_round_trip_ms')
         nominal = stats.get('nominal_latency_ms')
 
-        measured_text = (
-            tr('about.latency_measured', ms=f"{measured:.1f}") if measured
+        reported_text = (
+            tr('about.latency_reported', ms=f"{reported:.1f}") if reported
             else tr('about.not_measured')
         )
+        measured_text = f"{measured:.1f} ms" if measured is not None else '--'
         nominal_text = (
             tr('about.latency_nominal', ms=f"{nominal:.1f}") if nominal else '--'
         )
@@ -748,7 +750,7 @@ class MainWindow(QMainWindow):
             tr('about.backend', backend=info.get('active_driver') or tr('about.not_selected')),
             tr('about.exclusive', exclusive=tr('about.on') if info.get('exclusive_mode') else tr('about.off')),
             tr('about.buffer', frames=self.engine.buffer_size, rate=self.engine.sample_rate),
-            tr('about.latency', measured=measured_text, nominal=nominal_text),
+            tr('about.latency', reported=reported_text, nominal=nominal_text, measured=measured_text),
             tr('about.dropouts', xruns=stats.get('xruns', 0)),
             "",
         ]

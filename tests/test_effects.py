@@ -15,6 +15,7 @@ import math
 import numpy as np
 import pytest
 
+from tests.signals import sine
 from tonesphere.engine.effects import (
     Biquad,
     Compressor,
@@ -28,12 +29,6 @@ from tonesphere.engine.effects import (
 
 RATE = 48000
 BLOCK = 256
-
-
-def sine(frames, freq=1000.0, amplitude=0.5, channels=2, phase=0.0):
-    t = (np.arange(frames, dtype=np.float64) + phase) / RATE
-    wave = (amplitude * np.sin(2.0 * math.pi * freq * t)).astype(np.float32)
-    return np.repeat(wave.reshape(-1, 1), channels, axis=1)
 
 
 def run_blocks(processor, freq, blocks=8, amplitude=0.5, channels=2):

@@ -12,7 +12,6 @@ Everything binds `127.0.0.1` explicitly. Binding `0.0.0.0` raises a Windows fire
 prompt, which is not a thing a test run should do to somebody.
 """
 
-import math
 import socket
 import struct
 import time
@@ -20,6 +19,7 @@ import time
 import numpy as np
 import pytest
 
+from tests.signals import dominant_frequency, sine
 from tonesphere.network.audio_router import NetworkQuality
 from tonesphere.network.send_worker import PacketAccumulator
 from tonesphere.network.udp_transport import (
@@ -44,20 +44,6 @@ from tonesphere.network.udp_transport import (
 )
 
 RATE = 48000
-
-
-def sine(frames: int, freq: float = 1000.0, rate: int = RATE,
-         amplitude: float = 0.5, channels: int = 2, phase: float = 0.0) -> np.ndarray:
-    """The same test tone the rest of the suite uses, so results are comparable."""
-    t = (np.arange(frames, dtype=np.float64) + phase) / rate
-    wave = (amplitude * np.sin(2.0 * math.pi * freq * t)).astype(np.float32)
-    return np.repeat(wave.reshape(-1, 1), channels, axis=1)
-
-
-def dominant_frequency(block: np.ndarray, rate: int = RATE) -> float:
-    mono = block[:, 0] if block.ndim > 1 else block
-    spectrum = np.abs(np.fft.rfft(mono * np.hanning(len(mono))))
-    return float(np.fft.rfftfreq(len(mono), 1.0 / rate)[int(np.argmax(spectrum))])
 
 
 def receiver() -> socket.socket:

@@ -10,18 +10,13 @@ import math
 import numpy as np
 import pytest
 
+from tests.signals import sine
 from tonesphere.engine.devices import DeviceInfo, HostApi
 from tonesphere.engine.graph import Connection, RoutingGraph, bus_node
 from tonesphere.engine.host import AudioHost, StreamConfig, _DeviceStream
 
 BLOCK = 256
 RATE = 48000
-
-
-def sine(frames, freq=1000.0, amplitude=0.5, channels=2, phase=0.0):
-    t = (np.arange(frames, dtype=np.float64) + phase) / RATE
-    wave = (amplitude * np.sin(2.0 * math.pi * freq * t)).astype(np.float32)
-    return np.repeat(wave.reshape(-1, 1), channels, axis=1)
 
 
 def fake_device(name="test", inputs=0, outputs=2):
@@ -288,3 +283,42 @@ class TestDriftResamplingIsWiredUp:
         host._rebuild_routes()
 
         assert not host._routes.resamplers, "a single clock needs no drift correction"
+
+
+@pytest.mark.xfail(strict=True, reason="known defect: buses do not forward device input (IMPLEMENTATION_STATUS.md)")
+def test_device_to_bus_to_device_carries_the_signal():
+    """
+    Recorded as a strict xfail rather than left out: the defect is published in the Terms
+    of Service and the status matrix, and this is the evidence for it. When buses forward,
+    this starts passing, strict mode fails the suite, and whoever fixed it has to update
+    those documents too.
+    """
+    from tests.signals import dominant_frequency, rms
+    from tonesphere.engine.graph import device_node
+
+    host = AudioHost(samplerate=RATE, blocksize=BLOCK)
+    host.create_bus('B', channels=2)
+
+    mic = _DeviceStream(StreamConfig(
+        device=fake_device('mic', inputs=2, outputs=0),
+        samplerate=RATE, blocksize=BLOCK, input_channels=2,
+    ))
+    mic.node = device_node('mic')
+    speaker = sink_stream(2, node=device_node('spk'))
+
+    host.graph_holder.commit(RoutingGraph(connections=(
+        Connection(device_node('mic'), bus_node('B')),
+        Connection(bus_node('B'), device_node('spk')),
+    )))
+    host._rebuild_routes()
+
+    out = np.zeros((BLOCK, 2), dtype=np.float32)
+    captured = []
+    for i in range(20):
+        host._publish_capture(str(mic.node), sine(BLOCK, phase=i * BLOCK), mic)
+        host._mix_into(speaker, out, BLOCK)
+        captured.append(out.copy())
+    received = np.concatenate(captured[4:])
+
+    assert rms(received) > 0.3
+    assert dominant_frequency(received) == pytest.approx(1000.0, abs=20.0)

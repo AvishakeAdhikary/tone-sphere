@@ -28,7 +28,7 @@ class TestUnmeasuredValuesAreNotZero:
         summary = format_performance_summary({
             'cpu_usage': None,
             'nominal_latency_ms': 5.33,
-            'measured_latency_ms': None,
+            'reported_latency_ms': None,
             'audio_path_active': False,
         })
 
@@ -39,7 +39,7 @@ class TestUnmeasuredValuesAreNotZero:
         summary = format_performance_summary({
             'cpu_usage': None,
             'nominal_latency_ms': 5.33,
-            'measured_latency_ms': None,
+            'reported_latency_ms': None,
             'audio_path_active': False,
         })
 
@@ -55,22 +55,51 @@ class TestUnmeasuredValuesAreNotZero:
         summary = format_performance_summary({
             'cpu_usage': None,
             'nominal_latency_ms': 5.33,
-            'measured_latency_ms': None,
+            'reported_latency_ms': None,
             'audio_path_active': False,
         })
 
         assert "nominal" in summary.lower()
 
-    def test_measured_latency_is_shown_when_known(self):
+    def test_reported_latency_is_shown_when_known(self):
         summary = format_performance_summary({
             'cpu_usage': 2.5,
             'nominal_latency_ms': 5.33,
-            'measured_latency_ms': 8.33,
+            'reported_latency_ms': 8.33,
             'audio_path_active': True,
         })
 
         assert "8.3" in summary
         assert "NO AUDIO PATH" not in summary
+
+    def test_reported_latency_is_never_labelled_measured(self):
+        """
+        PortAudio's stream latency is what the driver says, not something we timed. This
+        project once printed it as "5.7 ms measured round trip"; only a signal emitted
+        and captured back may carry that word.
+        """
+        summary = format_performance_summary({
+            'cpu_usage': 2.5,
+            'nominal_latency_ms': 5.33,
+            'reported_latency_ms': 8.33,
+            'measured_round_trip_ms': None,
+            'audio_path_active': True,
+        })
+
+        assert "reported" in summary
+        assert "measured" not in summary.lower()
+
+    def test_a_real_round_trip_measurement_is_shown_separately(self):
+        summary = format_performance_summary({
+            'cpu_usage': 2.5,
+            'nominal_latency_ms': 5.33,
+            'reported_latency_ms': 8.33,
+            'measured_round_trip_ms': 11.25,
+            'audio_path_active': True,
+        })
+
+        assert "8.3 ms reported" in summary
+        assert "Measured round trip: 11.2 ms" in summary or "Measured round trip: 11.3 ms" in summary
 
 
 class TestEngineStatsAreHonest:
@@ -78,7 +107,8 @@ class TestEngineStatsAreHonest:
         stats = AudioEngine().get_performance_stats()
 
         assert stats['cpu_usage'] is None, "0.0 would render as a real 0% CPU reading"
-        assert stats['measured_latency_ms'] is None
+        assert stats['reported_latency_ms'] is None
+        assert stats['measured_round_trip_ms'] is None
 
     def test_audio_path_is_not_claimed_active_before_start(self):
         assert AudioEngine().get_performance_stats()['audio_path_active'] is False
@@ -87,7 +117,7 @@ class TestEngineStatsAreHonest:
         stats = AudioEngine(sample_rate=48000, buffer_size=256).get_performance_stats()
 
         assert stats['nominal_latency_ms'] == pytest.approx(5.333, abs=0.01)
-        assert 'measured_latency_ms' in stats
+        assert 'reported_latency_ms' in stats
 
     def test_meters_are_empty_rather_than_zero_when_stopped(self):
         """
@@ -228,6 +258,19 @@ class TestCaptureStatusMatchesWhatIsImplemented:
             assert status['process_loopback_supported'] is False
             assert status['process_loopback_implemented'] is False
 
+    def test_whole_system_loopback_is_not_claimed_until_something_opens_it(self):
+        """
+        This field used to read `system_loopback_available: True` on any Windows machine,
+        because WASAPI render endpoints existed. Nothing ever opened a loopback stream.
+        """
+        from tonesphere.engine.app_capture import capture_status
+
+        status = capture_status()
+
+        assert status['system_loopback_implemented'] is False
+        assert 'system_loopback_available' not in status
+        assert "loopback works" not in status['note']
+
     def test_process_capture_module_is_importable_where_it_is_claimed(self):
         """
         Claiming the feature while its module fails to import is the failure
@@ -341,7 +384,7 @@ class TestPartialFailureIsNotSuccess:
         """Averaging a broken stream in would make a broken setup look measured and fine."""
         host, _ = self.make_host_with_failed_stream()
 
-        assert host.statistics().measured_latency_ms is None
+        assert host.statistics().reported_latency_ms is None
 
     def test_dead_stream_is_not_counted_as_live(self):
         host, stream = self.make_host_with_failed_stream()

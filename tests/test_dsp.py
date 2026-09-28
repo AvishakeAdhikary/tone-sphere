@@ -11,6 +11,7 @@ import math
 import numpy as np
 import pytest
 
+from tests.signals import sine
 from tonesphere.engine.dsp import (
     PAN_LAW_LINEAR,
     PAN_LAW_MINUS_3DB,
@@ -25,12 +26,6 @@ from tonesphere.engine.dsp import (
 
 BLOCK = 256
 RATE = 48000
-
-
-def sine(frames, freq=1000.0, amplitude=0.5, channels=2, phase=0.0, rate=RATE):
-    t = (np.arange(frames, dtype=np.float64) + phase) / rate
-    wave = (amplitude * np.sin(2.0 * math.pi * freq * t)).astype(np.float32)
-    return np.repeat(wave.reshape(-1, 1), channels, axis=1)
 
 
 def max_step(signal):

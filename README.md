@@ -3,7 +3,9 @@
 ![Tone Sphere Banner](./assets/images/ToneSphereBanner.gif)
 
 Low-latency audio routing and mixing for Windows, Linux and macOS.
-**5.7 ms measured round trip** at a 128-frame buffer on WASAPI exclusive, ~5% DSP load.
+**5.7 ms driver-reported round trip** at a 128-frame buffer on WASAPI exclusive, ~5% DSP load —
+reported by the driver, not yet measured with a signal (see
+[Latency: reported, nominal, measured](#latency-reported-nominal-measured)).
 
 [![Latest release](https://img.shields.io/github/v/release/AvishakeAdhikary/tone-sphere?style=flat-square&label=latest%20release)](https://github.com/AvishakeAdhikary/tone-sphere/releases/latest)
 [![Licence: MIT](https://img.shields.io/badge/licence-MIT-blue?style=flat-square)](LICENSE)
@@ -60,25 +62,39 @@ and exits non-zero if anything is broken. On this machine:
 [PASS] Stream open on Speakers (Realtek(R) Audio)
 [PASS] No callback errors
 [PASS] No dropouts (xruns)
-[INFO] Measured latency: 5.7 ms round trip
+[INFO] Reported latency: 5.7 ms round trip (what the driver says, not timed)
+[INFO] Measured latency: -- (needs a loopback path; not taken by this test)
 [INFO] Nominal latency:  2.7 ms (buffer arithmetic only)
 [INFO] DSP load:         5.1%
 ```
+
+### Latency: reported, nominal, measured
+
+Three different numbers, never interchangeable. **Nominal** is buffer ÷ sample rate —
+arithmetic about ToneSphere's own contribution. **Reported** is what the driver (through
+PortAudio) says the open stream's input and output latency is, plus plugin latency; it
+includes the driver's buffering but is still the driver's claim. **Measured** means a
+signal was sent out, captured back and the delay timed. ToneSphere does not take that
+measurement yet, so it shows `--`. An earlier version of this README called the reported
+figure "measured"; it was not.
 
 ## What works
 
 **Audio path.** One PortAudio stream per device, mixing inside the driver's own callback.
 A device used in both directions gets a single duplex stream, so input and output share one
 clock and cannot drift — that is the guitar path, and the lowest-latency configuration
-available. Cross-device routes pass through lock-free ring buffers with drift correction.
+available. Cross-device routes pass through single-producer ring buffers with drift
+correction. The whole audio path is Python and NumPy running inside PortAudio's callback —
+fast enough to measure well on this machine, but not real-time safe in the strict sense
+(it allocates and holds the GIL); the native engine below replaces it on Windows.
 
 **Backends.** WASAPI (shared and exclusive), WDM-KS, DirectSound, MME on Windows; ALSA and
 JACK on Linux; CoreAudio on macOS. Exclusive mode is tried first and falls back to shared
 per device when refused, telling you which it got.
 
-Measured on one machine, same hardware, same test:
+Reported by each backend on one machine, same hardware, same test:
 
-| Backend | Round trip | vs. nominal |
+| Backend | Reported round trip | vs. nominal |
 |---|---|---|
 | WASAPI exclusive | **8.3 ms** | 5.3 ms |
 | WDM-KS | 17.0 ms | 5.3 ms |
@@ -86,9 +102,9 @@ Measured on one machine, same hardware, same test:
 | MME | 96.0 ms | 5.3 ms |
 | DirectSound | 120.0 ms | 5.3 ms |
 
-That table is why ToneSphere always shows measured latency next to the nominal figure.
+That table is why ToneSphere always shows the reported latency next to the nominal figure.
 Nominal is buffer ÷ sample rate — arithmetic about our own contribution, and off by up to
-20× from what you actually hear.
+20× from what the driver itself reports.
 
 **Mixing.** Constant-power pan, polarity invert, per-channel trim/mute/solo, channel swap,
 gain smoothing on everything so nothing clicks, and a limiter on each output so a routing
@@ -96,9 +112,6 @@ mistake sounds like a compressed mix rather than a burst of digital noise.
 
 **Effects.** Biquad EQ (peaking, shelves, high/low pass), a compressor with real attack,
 release, knee and makeup, and a delay with feedback.
-
-**VST3 / AU plugins.** Load Guitar Rig, Neural DSP or anything else you own directly onto a
-channel and monitor through it. Plugin latency is added to the reported round trip.
 
 **Patchbay.** Drag a port to a port to connect. Feedback loops are refused before they
 happen. Cables show their gain; muted and broken routes look different.
@@ -133,11 +146,23 @@ it plays a known 1 kHz tone and measuring the frequency and sample rate that com
 PortAudio through an ALSA `pulse` PCM, so routing into it is an ordinary output stream — no
 new IPC. Labelled honestly as an OS-visible endpoint, distinct from the in-process buses.
 
-**Also:** system-wide loopback capture, real audio-session detection (which applications
-are actually playing), a REST API with a WebSocket stats feed, and a CLI.
+**Also:** real audio-session detection (which applications are actually playing), a REST
+API with a WebSocket stats feed, and a CLI.
 
 ## What does not work yet
 
+- **VST3 / AU plugins.** Code that loads a plugin through `pedalboard` exists, but nothing in
+  the UI, API or CLI reaches it, no test has loaded a real plugin, and a stream restart
+  drops whatever was loaded. It is being replaced by a native VST3 host; until that is
+  proven with a real plugin, plugin hosting is not a feature.
+- **Routing from a device through a bus to another device.** Audio routed into a bus from a
+  device never reaches the bus's outputs — proved by a signal test recorded as a known
+  defect (`test_device_to_bus_to_device_carries_the_signal`). Buses fed from the network or
+  from per-application capture do work.
+- **Measured round-trip latency** — see above; shown as `--`.
+- **Whole-system loopback capture.** Nothing opens a loopback stream yet; per-application
+  capture (above) works.
+- **The strip pan knob** has no audible effect yet (the value is stored, not applied).
 - **Virtual devices other applications can select, on Windows.** The buses are in-process
   summing points; nothing outside ToneSphere can see them. On Windows that needs a signed
   kernel driver — [docs/VIRTUAL_AUDIO_DRIVER.md](docs/VIRTUAL_AUDIO_DRIVER.md) covers
@@ -151,9 +176,9 @@ are actually playing), a REST API with a WebSocket stats feed, and a CLI.
   Discord/OBS/a DAW, sleep/wake, Gatekeeper on a real user's own install method — is
   **unverified**, and the plug-in's C was written on a Windows machine by someone who
   could not compile or listen to it. Treat it as "proven in CI, unproven in life".
-- **ASIO.** Not in the PyPI PortAudio build — Steinberg's SDK cannot be redistributed. It
-  appears automatically if you supply a PortAudio built against it. WASAPI exclusive is
-  within a few ms anyway.
+- **ASIO.** Not in the PyPI PortAudio build. A native ASIO host is being built (Steinberg's
+  ASIO SDK is now available under GPLv3); until it has initialised a real driver and moved
+  audio, there is no ASIO support.
 - **Opus compression for network audio.** The UDP transport carries PCM — float32 or int16,
   optionally zlib'd — and reserves a codec id for Opus that both encode and decode refuse
   rather than quietly substituting PCM for. The blocker is packaging, not the codec: PyOgg
@@ -176,8 +201,10 @@ are actually playing), a REST API with a WebSocket stats feed, and a CLI.
 | 1 | Real audio I/O: PortAudio callback, lock-free graph, real enumeration | done |
 | 2 | Real mixer: pan law, polarity, limiter, drift resampling, metering | done |
 | 3 | Qt interface: mixer strips, dB faders, node-graph patchbay | done |
-| 4 | VST3 hosting, real DSP, honest app detection, presets | done |
+| 4 | Real DSP, honest app detection, presets (done); VST3 hosting (pedalboard code exists but is unreachable and unproven — being replaced) | partly done |
 | 5 | Packaging (CI-built and smoke-tested, releases on tag); per-process capture (Windows, done); virtual devices (Linux done; macOS proven in CI, unverified in daily use; Windows kernel driver deliberately not attempted — see [docs/VIRTUAL_AUDIO_DRIVER.md](docs/VIRTUAL_AUDIO_DRIVER.md)); Microsoft Store MSIX — manifest, logo generation and a local pack script exist and the manifest validates against the real `makeappx`, but nothing has been signed, installed from a package, or submitted, and the Store identity does not exist yet (see [docs/MICROSOFT_STORE.md](docs/MICROSOFT_STORE.md)) | mostly done |
+
+| 6 | Windows-native real-time engine: C++ audio path behind a C ABI, native WASAPI, ASIO and VST3 hosts, a Windows virtual audio driver — tracked step by step in [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) | in progress |
 
 ## A note on how this was rebuilt
 

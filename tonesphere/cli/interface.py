@@ -123,8 +123,9 @@ class AudioEngineCLI:
         print("\nPerformance Statistics:")
         print(f"CPU Usage: {format_measurement(stats.get('cpu_usage'), '%')}")
         print(f"Buffer Underruns: {stats['buffer_underruns']}")
-        print(f"Latency (measured): {format_measurement(stats.get('measured_latency_ms'), 'ms')}")
-        print(f"Latency (nominal):  {format_measurement(stats.get('nominal_latency_ms'), 'ms')}")
+        print(f"Latency (reported):   {format_measurement(stats.get('reported_latency_ms'), 'ms')}")
+        print(f"Latency (nominal):    {format_measurement(stats.get('nominal_latency_ms'), 'ms')}")
+        print(f"Round trip (measured): {format_measurement(stats.get('measured_round_trip_ms'), 'ms')}")
         if not stats.get('audio_path_active', False):
             print("Audio path: INACTIVE - no audio is being processed")
 
@@ -570,7 +571,7 @@ class AudioEngineCLI:
         print(f"\nPer-Application Capture ({status['platform']})")
         print(f"  Platform supports it: {status['process_loopback_supported']}")
         print(f"  Implemented here:     {status['process_loopback_implemented']}")
-        print(f"  Whole-system loopback available: {status['system_loopback_available']}")
+        print(f"  Whole-system loopback implemented: {status['system_loopback_implemented']}")
 
         if not status['process_loopback_implemented']:
             print(f"\n  {status['note']}")

@@ -15,6 +15,7 @@ import math
 import numpy as np
 import pytest
 
+from tests.signals import dominant_frequency, sine
 from tonesphere.engine.graph import (
     Connection,
     GraphHolder,
@@ -29,21 +30,6 @@ from tonesphere.engine.ringbuffer import AudioRingBuffer
 
 BLOCK = 256
 RATE = 48000
-
-
-def sine(frames: int, freq: float = 1000.0, rate: int = RATE,
-         amplitude: float = 0.5, channels: int = 2, phase: float = 0.0) -> np.ndarray:
-    """A test tone. 1 kHz because it sits mid-band where nothing rolls it off."""
-    t = (np.arange(frames, dtype=np.float64) + phase) / rate
-    wave = (amplitude * np.sin(2.0 * math.pi * freq * t)).astype(np.float32)
-    return np.repeat(wave.reshape(-1, 1), channels, axis=1)
-
-
-def dominant_frequency(block: np.ndarray, rate: int = RATE) -> float:
-    """Peak bin of the spectrum, used to prove the tone survived unshifted."""
-    mono = block[:, 0] if block.ndim > 1 else block
-    spectrum = np.abs(np.fft.rfft(mono * np.hanning(len(mono))))
-    return float(np.fft.rfftfreq(len(mono), 1.0 / rate)[int(np.argmax(spectrum))])
 
 
 class TestRingBuffer:
@@ -765,13 +751,14 @@ class TestHostStatistics:
 
         assert stats.running is False
         assert stats.cpu_load is None
-        assert stats.measured_latency_ms is None
+        assert stats.reported_latency_ms is None
 
     def test_nominal_latency_is_computed_and_labelled_separately(self):
         stats = AudioHost(samplerate=48000, blocksize=256).statistics()
 
         assert stats.nominal_latency_ms == pytest.approx(5.333, abs=0.01)
-        assert stats.measured_latency_ms is None, "must not pass arithmetic off as measured"
+        assert stats.reported_latency_ms is None, "must not pass arithmetic off as reported"
+        assert stats.measured_round_trip_ms is None
 
     def test_audio_path_active_tracks_running_state(self):
         assert AudioHost().statistics().as_dict()['audio_path_active'] is False
@@ -855,7 +842,10 @@ class TestRealHardware:
 
             assert stats.callback_count > 100, f"callback barely ran: {stats.callback_count}"
             assert stats.callback_errors == 0, f"callback raised: {host.last_callback_error}"
-            assert stats.measured_latency_ms is not None
+            assert stats.reported_latency_ms is not None
+            # PortAudio's figure is reported, never measured: nothing here emitted and
+            # captured a signal, so the measured slot must stay empty.
+            assert stats.measured_round_trip_ms is None
             assert stats.cpu_load is not None
             assert stats.xruns == 0, f"{stats.xruns} xruns"
         finally:
