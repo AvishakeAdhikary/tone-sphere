@@ -348,11 +348,64 @@ class NativeEngine:
         with self._control:
             self._check(self._dll.ts_engine_reset_meters(self._handle))
 
+    def start_wasapi(self, streams, master: int = 0):
+        """
+        Open device streams and let the master stream's device clock run the engine. See
+        `tonesphere.native.wasapi.StreamSpec`. From here until `stop_backend()` the engine
+        has an audio thread of its own, and `process()` is refused.
+        """
+        array = (_abi.StreamDesc * len(streams))()
+        for i, spec in enumerate(streams):
+            array[i] = spec.to_desc()
+        with self._control:
+            self._check(self._dll.ts_engine_start_wasapi(self._handle, array, len(streams), master))
+
+    def stop_backend(self):
+        with self._control:
+            self._check(self._dll.ts_engine_stop_backend(self._handle))
+
+    def stream_status(self) -> list[dict]:
+        buffer = (_abi.StreamStatus * 64)()
+        with self._control:
+            n = self._check(self._dll.ts_engine_stream_status(self._handle, buffer, len(buffer)))
+        return [_stream_status(s) for s in buffer[:n]]
+
     def events(self) -> list[dict]:
         buffer = (_abi.Event * 256)()
         with self._control:
             n = self._check(self._dll.ts_engine_poll_events(self._handle, buffer, len(buffer)))
         return [{'code': e.code, 'arg0': e.arg0, 'arg1': e.arg1, 'block': e.block} for e in buffer[:n]]
+
+
+_STREAM_STATES = {0: 'starting', 1: 'running', 2: 'failed', 3: 'stopped'}
+
+
+def _stream_status(s) -> dict:
+    """Latency here is what Windows reports for the stream; it is never a measurement."""
+    return {
+        'node_id': s.node_id,
+        'kind': s.kind,
+        'state': _STREAM_STATES.get(s.state, str(s.state)),
+        'is_master': bool(s.is_master),
+        'exclusive': s.share_mode == _abi.SHARE_EXCLUSIVE,
+        'hresult': s.hresult,
+        'sample_rate': s.sample_rate or None,
+        'channels': s.channels,
+        'bits': s.bits or None,
+        'valid_bits': s.valid_bits or None,
+        'is_float': bool(s.is_float),
+        'buffer_frames': s.buffer_frames or None,
+        'period_frames': s.period_frames or None,
+        'reported_latency_ms': s.stream_latency_hns / 10_000 if s.stream_latency_hns > 0 else None,
+        'frames': s.frames,
+        'glitches': s.glitches,
+        'underruns': s.underruns,
+        'overruns': s.overruns,
+        'drift_ratio': s.drift_ratio,
+        'ring_fill': s.ring_fill,
+        'raw': bool(s.raw),
+        'message': s.error.decode(errors='replace'),
+    }
 
 
 def _percentile(histogram: list[int], q: float) -> float:
@@ -368,6 +421,61 @@ def _percentile(histogram: list[int], q: float) -> float:
         if running >= threshold:
             return _abi.bucket_edge_ns(i)
     return _abi.bucket_edge_ns(len(histogram) - 1)
+
+
+def convert(fmt: int, samples: np.ndarray) -> bytes:
+    """float32 -> a device sample format, through the engine's own boundary conversion."""
+    samples = np.ascontiguousarray(samples, dtype=np.float32).ravel()
+    width = {_abi.FORMAT_FLOAT32: 4, _abi.FORMAT_FLOAT64: 8, _abi.FORMAT_INT16: 2,
+             _abi.FORMAT_INT24: 3, _abi.FORMAT_INT32: 4}[fmt]
+    out = ctypes.create_string_buffer(len(samples) * width)
+    if load().ts_convert_from_float(fmt, _float_ptr(samples), out, len(samples)) != _abi.OK:
+        raise NativeError(_abi.ERR_INVALID, "conversion refused")
+    return out.raw
+
+
+def unconvert(fmt: int, data: bytes, samples: int) -> np.ndarray:
+    """A device sample format -> float32."""
+    out = np.zeros(samples, dtype=np.float32)
+    if load().ts_convert_to_float(fmt, data, _float_ptr(out), samples) != _abi.OK:
+        raise NativeError(_abi.ERR_INVALID, "conversion refused")
+    return out
+
+
+class NativeResampler:
+    """A FrameRing read through the engine's DriftResampler: the clock-boundary crossing on its own."""
+
+    def __init__(self, channels: int, max_block: int, target_fill: int, ring_frames: int):
+        self._dll = load()
+        self._handle = self._dll.ts_resampler_create(channels, max_block, target_fill, ring_frames)
+        if not self._handle:
+            raise NativeError(_abi.ERR_INVALID, "could not create resampler")
+        self.channels = channels
+
+    def push(self, block: np.ndarray) -> int:
+        block = np.ascontiguousarray(block, dtype=np.float32).reshape(-1, self.channels)
+        return self._dll.ts_resampler_push(self._handle, _float_ptr(block), block.shape[0])
+
+    def pull(self, frames: int) -> tuple[np.ndarray, int]:
+        out = np.zeros((frames, self.channels), dtype=np.float32)
+        missing = self._dll.ts_resampler_pull(self._handle, _float_ptr(out), frames)
+        return out, missing
+
+    @property
+    def ratio(self) -> float:
+        return self._dll.ts_resampler_ratio(self._handle)
+
+    @property
+    def fill(self) -> int:
+        return self._dll.ts_resampler_fill(self._handle)
+
+    def __del__(self):
+        try:
+            if self._handle:
+                self._dll.ts_resampler_destroy(self._handle)
+                self._handle = None
+        except Exception:
+            pass
 
 
 class NativeRing:

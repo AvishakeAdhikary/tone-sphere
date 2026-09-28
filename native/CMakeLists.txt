@@ -23,8 +23,12 @@ add_library(tonesphere_native SHARED
     engine/abi.cpp
     engine/engine.cpp
     engine/rt_alloc.cpp
+    $<$<BOOL:${WIN32}>:windows_audio/wasapi.cpp>
 )
 target_include_directories(tonesphere_native PRIVATE include engine)
+if(WIN32)
+    target_link_libraries(tonesphere_native PRIVATE ole32 avrt mmdevapi propsys)
+endif()
 target_compile_definitions(tonesphere_native PRIVATE TONESPHERE_NATIVE_BUILD)
 if(MSVC)
     target_compile_options(tonesphere_native PRIVATE /WX)

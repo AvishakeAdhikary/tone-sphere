@@ -39,7 +39,7 @@ extern "C" {
 #endif
 
 /* Bumped whenever a struct layout or a signature changes; Python refuses a mismatch. */
-#define TS_ABI_VERSION 3
+#define TS_ABI_VERSION 5
 
 typedef int32_t ts_result;
 #define TS_OK               0
@@ -229,6 +229,152 @@ TS_API ts_result ts_engine_reset_stats(ts_engine* engine);
 TS_API ts_result ts_engine_get_meter(ts_engine* engine, uint32_t node_id, ts_meter* out);
 TS_API ts_result ts_engine_reset_meters(ts_engine* engine);
 TS_API int32_t ts_engine_poll_events(ts_engine* engine, ts_event* out, int32_t capacity);
+
+/* ---- Windows audio (WASAPI) ------------------------------------------------------------- */
+
+#define TS_DEVICE_ID_CHARS   256
+#define TS_DEVICE_NAME_CHARS 256
+
+#define TS_FLOW_RENDER  1
+#define TS_FLOW_CAPTURE 2
+
+#define TS_ROLE_CONSOLE        0x1u
+#define TS_ROLE_MULTIMEDIA     0x2u
+#define TS_ROLE_COMMUNICATIONS 0x4u
+
+/* Strings are UTF-16 (wchar_t on Windows), NUL-terminated. The id is the MMDevice endpoint
+ * ID: stable across reboots and re-enumeration, unlike a PortAudio index. */
+typedef struct ts_device_info {
+    uint16_t id[TS_DEVICE_ID_CHARS];
+    uint16_t name[TS_DEVICE_NAME_CHARS];
+    uint32_t flow;             /* TS_FLOW_* */
+    uint32_t state;            /* DEVICE_STATE_* as Windows reports it (1 = active) */
+    uint32_t default_roles;    /* TS_ROLE_* for which this is the default endpoint */
+    uint32_t mix_channels;     /* the shared-mode mix format */
+    uint32_t mix_sample_rate;
+    uint32_t mix_bits;
+    uint32_t mix_is_float;
+    int64_t default_period_hns;
+    int64_t min_period_hns;    /* the smallest exclusive-mode period */
+    /* IAudioClient3 shared-mode engine periods in frames; 0 where Windows does not offer them */
+    uint32_t shared_default_period_frames;
+    uint32_t shared_fundamental_period_frames;
+    uint32_t shared_min_period_frames;
+    uint32_t shared_max_period_frames;
+    uint32_t raw_supported;    /* the endpoint can bypass its enhancement effects (raw mode) */
+    uint32_t reserved;
+} ts_device_info;
+
+#define TS_DEVICE_EVENT_ADDED           1
+#define TS_DEVICE_EVENT_REMOVED         2
+#define TS_DEVICE_EVENT_STATE_CHANGED   3
+#define TS_DEVICE_EVENT_DEFAULT_CHANGED 4
+#define TS_DEVICE_EVENT_LOST            5  /* state = number of events dropped because the queue was full */
+
+typedef struct ts_device_event {
+    uint32_t kind;
+    uint32_t flow;   /* DEFAULT_CHANGED only */
+    uint32_t role;   /* DEFAULT_CHANGED only: TS_ROLE_* */
+    uint32_t state;  /* STATE_CHANGED: the new DEVICE_STATE_* */
+    uint16_t id[TS_DEVICE_ID_CHARS];
+} ts_device_event;
+
+#define TS_STREAM_RENDER           1  /* play into an endpoint */
+#define TS_STREAM_CAPTURE          2  /* record from an endpoint */
+#define TS_STREAM_LOOPBACK         3  /* record what a render endpoint is playing (whole system) */
+#define TS_STREAM_PROCESS_LOOPBACK 4  /* record what one process (and optionally its children) plays */
+
+#define TS_SHARE_SHARED    0
+#define TS_SHARE_EXCLUSIVE 1
+
+/* Exclusive refused -> open shared instead, and say so in ts_stream_status. Without this
+ * flag a refused exclusive request fails the stream. */
+#define TS_STREAM_FLAG_ALLOW_SHARED_FALLBACK 0x1u
+/* PROCESS_LOOPBACK: capture the process tree rather than exclude it. */
+#define TS_STREAM_FLAG_INCLUDE_TREE          0x2u
+/* Shared RENDER/CAPTURE: ask for raw stream processing, bypassing the driver's
+ * enhancement effects (loudness equalisation, noise suppression, AGC). Honoured only
+ * where the endpoint supports raw mode; ts_stream_status.raw says whether it does. */
+#define TS_STREAM_FLAG_RAW                   0x4u
+
+typedef struct ts_stream_desc {
+    uint16_t device_id[TS_DEVICE_ID_CHARS];  /* empty for PROCESS_LOOPBACK */
+    uint32_t node_id;      /* SOURCE node for capture kinds, SINK node for RENDER */
+    uint32_t kind;         /* TS_STREAM_* */
+    uint32_t share_mode;   /* TS_SHARE_* (RENDER and CAPTURE only) */
+    uint32_t flags;        /* TS_STREAM_FLAG_* */
+    uint32_t channels;     /* must equal the node's channel count */
+    uint32_t process_id;   /* PROCESS_LOOPBACK only */
+} ts_stream_desc;
+
+#define TS_STREAM_STATE_STARTING 0
+#define TS_STREAM_STATE_RUNNING  1
+#define TS_STREAM_STATE_FAILED   2
+#define TS_STREAM_STATE_STOPPED  3
+
+typedef struct ts_stream_status {
+    uint32_t node_id;
+    uint32_t kind;
+    uint32_t state;              /* TS_STREAM_STATE_* */
+    uint32_t is_master;          /* this stream's device clock drives the engine */
+    uint32_t share_mode;         /* what was actually obtained */
+    int32_t hresult;             /* the failing HRESULT, or 0 */
+    uint32_t sample_rate;        /* negotiated format */
+    uint32_t channels;
+    uint32_t bits;
+    uint32_t valid_bits;
+    uint32_t is_float;
+    uint32_t buffer_frames;      /* the endpoint buffer WASAPI allocated */
+    uint32_t period_frames;      /* the device period the stream wakes on */
+    int64_t stream_latency_hns;  /* IAudioClient::GetStreamLatency: reported by Windows, not measured */
+    uint64_t frames;             /* frames moved to or from the device */
+    uint64_t glitches;           /* render: buffer found empty; capture: data discontinuity */
+    uint64_t underruns;          /* frames invented as silence at the clock boundary */
+    uint64_t overruns;           /* frames dropped at the clock boundary */
+    double drift_ratio;          /* consumption ratio across the clock boundary; 1.0 for the master */
+    uint32_t ring_fill;
+    /* 1: raw processing requested and the endpoint reports raw support; 0: effects may be
+     * applied (not requested, refused, or the endpoint does not support raw); exclusive
+     * mode bypasses effects regardless. */
+    uint32_t raw;
+    char error[256];
+} ts_stream_status;
+
+TS_API int32_t ts_wasapi_enumerate(ts_device_info* out, int32_t capacity);
+/* The reason the last ts_wasapi_* call on this thread failed. */
+TS_API int32_t ts_wasapi_last_error(char* buffer, int32_t capacity);
+TS_API ts_result ts_wasapi_watch(int32_t enable);
+TS_API int32_t ts_wasapi_poll_events(ts_device_event* out, int32_t capacity);
+
+/* Open the streams and run the engine from the master stream's device thread. Streams
+ * other than the master cross a clock boundary through a ring with drift correction.
+ * Fails if the master cannot open; a satellite that cannot open is reported FAILED in
+ * ts_engine_stream_status and the rest run: partial success is visible, not hidden. */
+TS_API ts_result ts_engine_start_wasapi(ts_engine* engine, const ts_stream_desc* streams, uint32_t count,
+                                        uint32_t master_index);
+TS_API ts_result ts_engine_stop_backend(ts_engine* engine);
+TS_API int32_t ts_engine_stream_status(ts_engine* engine, ts_stream_status* out, int32_t capacity);
+
+/* ---- Pieces of the device boundary, exposed so they can be tested without a device ----- */
+
+#define TS_FORMAT_FLOAT32 1
+#define TS_FORMAT_FLOAT64 2
+#define TS_FORMAT_INT16   3
+#define TS_FORMAT_INT24   4  /* packed */
+#define TS_FORMAT_INT32   5
+
+TS_API ts_result ts_convert_to_float(uint32_t format, const void* src, float* dst, uint32_t samples);
+TS_API ts_result ts_convert_from_float(uint32_t format, const float* src, void* dst, uint32_t samples);
+
+typedef struct ts_resampler ts_resampler;
+TS_API ts_resampler* ts_resampler_create(uint32_t channels, uint32_t max_block, uint32_t target_fill,
+                                         uint32_t ring_frames);
+TS_API void ts_resampler_destroy(ts_resampler* resampler);
+TS_API uint32_t ts_resampler_push(ts_resampler* resampler, const float* data, uint32_t frames);
+/* Returns frames that had to be invented as silence. */
+TS_API uint32_t ts_resampler_pull(ts_resampler* resampler, float* out, uint32_t frames);
+TS_API double ts_resampler_ratio(ts_resampler* resampler);
+TS_API uint32_t ts_resampler_fill(ts_resampler* resampler);
 
 /* ---- Standalone SPSC ring, for tests of the ring itself ---------------------------------- */
 

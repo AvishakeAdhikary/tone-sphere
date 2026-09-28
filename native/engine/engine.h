@@ -123,6 +123,15 @@ struct Plan {
     std::unordered_map<uint64_t, uint32_t> route_index;
 };
 
+// A device backend (WASAPI, ASIO) owns the audio thread while it runs and calls
+// Engine::run_block from it.
+class DeviceBackend {
+public:
+    virtual ~DeviceBackend() = default;
+    virtual void stop() = 0;
+    virtual int32_t status(ts_stream_status* out, int32_t capacity) = 0;
+};
+
 inline uint64_t route_key(uint32_t source, uint32_t dest) {
     return (static_cast<uint64_t>(source) << 32) | dest;
 }
@@ -169,6 +178,14 @@ public:
     ts_result get_meter(uint32_t node_id, ts_meter& out);
     void reset_meters();
     int32_t poll_events(ts_event* out, int32_t capacity);
+
+    ts_result attach_backend(std::unique_ptr<DeviceBackend> backend);
+    ts_result stop_backend();
+    int32_t backend_status(ts_stream_status* out, int32_t capacity);
+    void set_backend_running(bool running) { backend_running_.store(running, std::memory_order_release); }
+    bool backend_running() const { return backend_running_.load(std::memory_order_acquire); }
+    // Any thread: xruns are reported by whichever device thread notices one.
+    void add_xruns(uint64_t n) noexcept { xruns_.fetch_add(n, std::memory_order_relaxed); }
 
     void fail(const std::string& message) { last_error_ = message; }
     const std::string& last_error() const { return last_error_; }
@@ -234,6 +251,7 @@ private:
     uint32_t events_lost_ = 0;  // audio-thread-owned
 
     std::atomic<bool> backend_running_{false};
+    std::unique_ptr<DeviceBackend> backend_;
 };
 
 }  // namespace ts

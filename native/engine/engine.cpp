@@ -54,6 +54,9 @@ Engine::Engine(uint32_t sample_rate, uint32_t max_block) : sample_rate_(sample_r
 }
 
 Engine::~Engine() {
+    // The backend's threads run blocks against this engine; they must be gone first.
+    if (backend_) backend_->stop();
+    backend_.reset();
     Plan* last = current_.exchange(nullptr);
     if (last) retired_.push_back(last);
     for (Plan* p : retired_) delete p;
@@ -291,6 +294,26 @@ ts_result Engine::apply_plan(const ts_plan& spec) {
     inserts_ = std::move(insert_states);
     collect();
     return TS_OK;
+}
+
+ts_result Engine::attach_backend(std::unique_ptr<DeviceBackend> backend) {
+    if (backend_) { fail("a backend is already running; stop it first"); return TS_ERR_STATE; }
+    backend_ = std::move(backend);
+    return TS_OK;
+}
+
+ts_result Engine::stop_backend() {
+    if (!backend_) { fail("no backend is running"); return TS_ERR_STATE; }
+    backend_->stop();
+    backend_.reset();
+    set_backend_running(false);
+    collect();
+    return TS_OK;
+}
+
+int32_t Engine::backend_status(ts_stream_status* out, int32_t capacity) {
+    if (!backend_) return 0;
+    return backend_->status(out, capacity);
 }
 
 void Engine::collect() {

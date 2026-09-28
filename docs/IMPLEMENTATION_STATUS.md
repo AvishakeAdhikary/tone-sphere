@@ -35,8 +35,8 @@ no VST3 plugins installed, no C/C++ toolchain.
 | Subsystem | Existing implementation | Target | Level | Evidence / notes |
 |---|---|---|---|---|
 | **Audio I/O (all platforms)** | One sounddevice/PortAudio stream per device, Python callbacks (`engine/host.py:895/916/972`) | Windows: native backend, no Python on the audio thread. Linux/macOS: keep, labelled not real-time safe | HARDWARE VERIFIED (output only) | `TestRealHardware::test_output_stream_runs_without_xruns` on Realtek WASAPI. Callback is Python under the GIL; see *Real-time safety* below. |
-| **WASAPI** | Via PortAudio: shared, and exclusive through `sd.WasapiSettings(exclusive=True)` (`host.py:607-625`); exclusive→shared fallback only at open, not at validate (`host.py:552-558`) | Native event-driven shared/exclusive, MMCSS, endpoint IDs, `IMMNotificationClient` | HARDWARE VERIFIED (via PortAudio) | Same test as above. No native WASAPI code. |
-| **Device enumeration** | PortAudio only; key `host_api::name` (`devices.py:89-92`); no endpoint IDs; refresh is manual and never re-initialises PortAudio | Native MMDevice enumeration, stable endpoint IDs, arrival/removal/default-change events | IMPLEMENTED (PortAudio) / device-change handling NOT IMPLEMENTED | `TestRealHardware::test_devices_are_enumerated`. |
+| **WASAPI** | Legacy: via PortAudio (`host.py:607-625`). **Native:** `native/windows_audio/wasapi.cpp` — event-driven shared (IAudioClient3 low-latency where possible) and exclusive with format negotiation, raw mode, MMCSS, master + satellite clocks with drift correction | Native, driving the engine | Native: **HARDWARE VERIFIED** (render, loopback, process loopback, exclusive, multi-clock) | `tests/hardware/test_wasapi.py`; bit-exact render→process loopback; details and limits in `docs/WINDOWS_AUDIO.md`. Not yet used by `AudioEngine` (M8) |
+| **Device enumeration** | Legacy: PortAudio, key `host_api::name`. **Native:** MMDevice enumeration with endpoint IDs, default roles, formats, periods, raw support; `IMMNotificationClient` events | Native | Native enumeration HARDWARE VERIFIED; notifications IMPLEMENTED; behaviour on removal while streaming NOT VERIFIED | `test_endpoints_have_stable_ids_names_and_formats`, `test_device_notifications_can_be_watched` |
 | **ASIO** | Enum value, preference order and messages only (`devices.py:31,52,110,312`); the PyPI PortAudio build has no ASIO | Native ASIO host, GPLv3 `native/asio/` | NOT IMPLEMENTED | No ASIO SDK code anywhere. No ASIO driver on this machine (`HKLM\SOFTWARE\ASIO` empty). |
 | **VST3** | `pedalboard.load_plugin` in `engine/effects.py:623-650`, processed in the Python callback (`effects.py:697-725`); top-level `*.vst3` glob only; no parameters, no state, no editor | Native host on the Steinberg VST3 SDK 3.8 (MIT) | UNVERIFIED | No UI, API or CLI caller reaches `AudioEngine.load_plugin` (`core/engine.py:1241`). No test loads a real VST3; `TestPluginHosting` uses pedalboard's built-in `Gain` and stand-in objects. Plugins are lost on any stream restart. pedalboard is GPLv3. |
 | **Mixer** | Python/NumPy in the callback (`host.py:986-1204`, `dsp.py`): -3 dB constant-power pan, per-block linear gain ramps, per-channel trim/mute/solo/polarity/swap, output limiter | Native mixer on atomic control targets | VERIFIED (offline) | `test_mixer_integration.py`, `TestBusMixing` drive the real `_mix_into` with synthetic signals. Known defects below. |
@@ -47,7 +47,7 @@ no VST3 plugins installed, no C/C++ toolchain.
 | **Latency reporting** | PortAudio-*reported* stream latency + plugin latency (`host.py:1414-1446`) | Nominal / reported / plugin / **measured** round trip, separately | IMPLEMENTED as *reported*; measured round trip NOT IMPLEMENTED | Until this branch it was labelled "measured"; it is now `reported_latency_ms`, and `measured_round_trip_ms` stays None (`tests/test_honesty.py::TestUnmeasuredValuesAreNotZero`). It excludes ring and resampler delay on cross-device routes. |
 | **Performance statistics** | `stream.cpu_load` from PortAudio; xruns = callbacks with any status flag | Callback min/mean/max/percentile from QPC, load = worst ÷ period | IMPLEMENTED (PortAudio's figures only) | No callback timing exists. |
 | **Process loopback (Windows)** | ctypes COM `ActivateAudioInterfaceAsync` (`process_capture.py`, `wasapi_com.py`), a Python capture thread writing into a bus | Native WASAPI capture into a native SPSC port | HARDWARE VERIFIED | `TestSelfCapture::test_captures_the_tone_this_process_plays` on this machine, 2026-09-29. |
-| **Whole-system loopback** | None. Previously *claimed* available because render endpoints existed | Native WASAPI loopback | NOT IMPLEMENTED | `test_whole_system_loopback_is_not_claimed_until_something_opens_it`. |
+| **Whole-system loopback** | Legacy: none (previously claimed). **Native:** `loopback` stream kind | Native WASAPI loopback | Native: HARDWARE VERIFIED; not yet reachable from `AudioEngine`, which is why `capture_status()` still reports it unimplemented | `test_raw_render_comes_back_whole_at_the_level_sent[loopback]` |
 | **Audio-session detection** | PowerShell `Add-Type` C# block querying the default render endpoint's sessions (`app_capture.py:51-211`) | Native or ctypes IAudioSessionManager2 | IMPLEMENTED | Volume and mute fields are hard-coded (`app_capture.py:207-208`). |
 | **Windows virtual device** | None | PortCls/WaveRT loopback-cable driver, OS-visible endpoints | NOT IMPLEMENTED | — |
 | **Linux virtual sink** | `pactl` null sink + ALSA `pulse` PCM | Kept as is | VERIFIED (CI) | `TestRealLinuxSink` in the Linux CI job. |
@@ -80,8 +80,10 @@ no VST3 plugins installed, no C/C++ toolchain.
 | Limiter (sample-accurate, instant attack, no lookahead) and per-sink safety limiter | VERIFIED (offline) | `TestLimiter`: a +6 dBFS tone never exceeds the threshold by one sample; below threshold is bit-exact. Fixes the legacy limiter's unreduced first block |
 | Delay with feedback | VERIFIED (offline) | `TestDelay`: echoes exactly at k·d with amplitude mix·feedback^(k-1), nothing between |
 | RoutingGraph → native plan compiler (device in/out split, solo, stable ids) | VERIFIED (offline) | `tests/native/test_plan_compiler.py`; the duplex in→out monitoring path is no longer refused as feedback (`graph.would_feedback`) |
-| Drift resampler for secondary devices | NOT IMPLEMENTED | moves to M4 with the devices that need it |
-| Device backends (WASAPI, ASIO) | NOT IMPLEMENTED | M4, M5 |
+| Drift resampler across device clocks | VERIFIED (offline) + HARDWARE VERIFIED | `tests/native/test_boundary.py`: ±100 and ±500 ppm absorbed with bounded fill, no underrun, no discontinuity (a click at ratio < 1 was found and fixed here); on hardware in the three-clock test |
+| Sample-format conversion at the device boundary | VERIFIED | `TestConversion`: int16/24/32, float32/64 round trips within half a step; over-range clips instead of wrapping |
+| WASAPI backend | HARDWARE VERIFIED | `docs/WINDOWS_AUDIO.md` |
+| ASIO backend | NOT IMPLEMENTED | M5 |
 
 ## Measurements
 
@@ -151,7 +153,7 @@ These are fixed by the native engine (Windows) and, where the legacy host stays 
 | M1 | This matrix, honesty fixes (reported vs measured latency, loopback claim, plugin and bus claims), dependency audit, shared test signals | done |
 | M2 | Native foundation: toolchain, C ABI, SPSC, snapshots, offline `process_block` | done — see *Native engine* below |
 | M3 | Native graph, mixer, DSP | done — see *Native engine* and *Measurements* below |
-| M4 | Native WASAPI backend | not started |
+| M4 | Native WASAPI backend | done — see `docs/WINDOWS_AUDIO.md`; switching `AudioEngine` onto it moves to M8, so the host interface is designed once, with ASIO and VST3 in view |
 | M5 | Native ASIO host | not started |
 | M6 | Measured round-trip latency | not started |
 | M7 | Native VST3 host | not started |
