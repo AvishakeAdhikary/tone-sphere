@@ -1,0 +1,344 @@
+"""
+Python side of the native real-time engine.
+
+Everything here is control plane: it builds plans, sets targets, reads meters and
+statistics, and moves audio in and out of ring ports from ordinary Python threads. None
+of it runs on the audio thread, and the audio thread never calls back into Python.
+
+The DLL is loaded lazily, so this package imports on every platform; `load()` raises
+`NativeUnavailable` with the reason when there is no usable DLL. Nothing falls back to a
+Python imitation of the engine — a missing native engine is reported, not papered over.
+"""
+
+import ctypes
+import os
+import sys
+import threading
+from dataclasses import dataclass
+from pathlib import Path
+
+import numpy as np
+
+from tonesphere.native import _abi
+
+DLL_NAME = "tonesphere_native.dll"
+
+
+class NativeUnavailable(RuntimeError):
+    """The native engine could not be loaded; the message says why."""
+
+
+class NativeError(RuntimeError):
+    def __init__(self, code: int, message: str):
+        super().__init__(f"{message} (ts_result {code})")
+        self.code = code
+
+
+def candidate_dirs() -> list[Path]:
+    dirs = []
+    if os.environ.get("TONESPHERE_NATIVE_DIR"):
+        dirs.append(Path(os.environ["TONESPHERE_NATIVE_DIR"]))
+    if getattr(sys, "_MEIPASS", None):
+        dirs.append(Path(sys._MEIPASS) / "tonesphere" / "native" / "_bin")
+    dirs.append(Path(__file__).resolve().parent / "_bin")
+    return dirs
+
+
+_lock = threading.Lock()
+_dll: ctypes.CDLL | None = None
+
+
+def load() -> ctypes.CDLL:
+    global _dll
+    with _lock:
+        if _dll is not None:
+            return _dll
+        if sys.platform != "win32":
+            raise NativeUnavailable("the native engine is built for Windows only")
+        tried = []
+        for directory in candidate_dirs():
+            path = directory / DLL_NAME
+            if not path.is_file():
+                tried.append(f"{path} (missing)")
+                continue
+            try:
+                dll = _abi.bind(ctypes.CDLL(str(path)))
+            except OSError as e:
+                tried.append(f"{path} ({e})")
+                continue
+            version = dll.ts_abi_version()
+            if version != _abi.ABI_VERSION:
+                raise NativeUnavailable(
+                    f"{path} speaks ABI {version}, this Python expects {_abi.ABI_VERSION}; rebuild with "
+                    f"`uv run python scripts/build_native.py`")
+            _dll = dll
+            return dll
+        raise NativeUnavailable(
+            "tonesphere_native.dll not found — build it with `uv run python scripts/build_native.py`. "
+            "Tried: " + "; ".join(tried))
+
+
+def available() -> bool:
+    try:
+        load()
+        return True
+    except NativeUnavailable:
+        return False
+
+
+def build_info() -> str:
+    return load().ts_build_info().decode()
+
+
+@dataclass(frozen=True)
+class Node:
+    id: int
+    kind: int
+    channels: int
+    ring_frames: int = 0
+
+    @classmethod
+    def source(cls, id: int, channels: int, ring_frames: int = 0) -> "Node":
+        return cls(id, _abi.NODE_SOURCE, channels, ring_frames)
+
+    @classmethod
+    def bus(cls, id: int, channels: int) -> "Node":
+        return cls(id, _abi.NODE_BUS, channels)
+
+    @classmethod
+    def sink(cls, id: int, channels: int, ring_frames: int = 0) -> "Node":
+        return cls(id, _abi.NODE_SINK, channels, ring_frames)
+
+
+@dataclass(frozen=True)
+class Route:
+    source: int
+    dest: int
+    gain: float = 1.0
+    pan: float = 0.0
+    muted: bool = False
+    invert: bool = False
+
+
+def _float_ptr(array: np.ndarray):
+    return array.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
+
+
+class NativeEngine:
+    """
+    One engine instance. Control calls are serialised by an internal lock, which is the
+    threading contract the C ABI asks for. `process()` is the audio-thread role and is
+    deliberately *not* under that lock: the engine is designed for control calls to run
+    concurrently with processing, and a test that did not exercise that would prove less.
+    """
+
+    def __init__(self, sample_rate: int = 48000, max_block: int = 256):
+        self._dll = load()
+        self._handle = self._dll.ts_engine_create(sample_rate, max_block)
+        if not self._handle:
+            raise NativeError(_abi.ERR_INVALID, f"could not create an engine at {sample_rate} Hz / {max_block} frames")
+        self.sample_rate = sample_rate
+        self.max_block = max_block
+        self._control = threading.Lock()
+        self._nodes: dict[int, Node] = {}
+
+    def close(self):
+        with self._control:
+            if self._handle:
+                self._dll.ts_engine_destroy(self._handle)
+                self._handle = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            pass
+
+    def _error(self) -> str:
+        buffer = ctypes.create_string_buffer(1024)
+        self._dll.ts_engine_last_error(self._handle, buffer, len(buffer))
+        return buffer.value.decode(errors="replace")
+
+    def _check(self, result: int) -> int:
+        if result < 0:
+            raise NativeError(result, self._error())
+        return result
+
+    def apply_plan(self, nodes: list[Node], routes: list[Route]):
+        node_array = (_abi.NodeDesc * max(1, len(nodes)))()
+        for i, n in enumerate(nodes):
+            flags = _abi.NODE_FLAG_RING if n.ring_frames else 0
+            node_array[i] = _abi.NodeDesc(n.id, n.kind, n.channels, flags, n.ring_frames)
+        route_array = (_abi.RouteDesc * max(1, len(routes)))()
+        for i, r in enumerate(routes):
+            flags = (_abi.ROUTE_FLAG_MUTED if r.muted else 0) | (_abi.ROUTE_FLAG_INVERT if r.invert else 0)
+            route_array[i] = _abi.RouteDesc(r.source, r.dest, r.gain, r.pan, flags)
+        with self._control:
+            self._check(self._dll.ts_engine_apply_plan(self._handle, node_array, len(nodes), route_array, len(routes)))
+            self._nodes = {n.id: n for n in nodes}
+
+    def set_route_gain(self, source: int, dest: int, gain: float):
+        with self._control:
+            self._check(self._dll.ts_engine_set_route_gain(self._handle, source, dest, gain))
+
+    def set_route_muted(self, source: int, dest: int, muted: bool):
+        with self._control:
+            self._check(self._dll.ts_engine_set_route_muted(self._handle, source, dest, int(muted)))
+
+    def set_master_gain(self, gain: float):
+        with self._control:
+            self._check(self._dll.ts_engine_set_master_gain(self._handle, gain))
+
+    def process(self, inputs: dict[int, np.ndarray], outputs: dict[int, int]) -> dict[int, np.ndarray]:
+        """
+        Run one block with no device. `inputs` maps source node id to a (frames, channels)
+        float32 block; `outputs` maps sink node id to the channel count wanted back.
+        """
+        frames = None
+        keep = []
+        in_ports = (_abi.PortBuffer * max(1, len(inputs)))()
+        for i, (node_id, block) in enumerate(inputs.items()):
+            block = np.ascontiguousarray(block, dtype=np.float32)
+            if block.ndim == 1:
+                block = block.reshape(-1, 1)
+            if frames is None:
+                frames = block.shape[0]
+            elif block.shape[0] != frames:
+                raise ValueError("every input block must have the same number of frames")
+            keep.append(block)
+            in_ports[i] = _abi.PortBuffer(node_id, block.shape[1], _float_ptr(block))
+        if frames is None:
+            raise ValueError("process() needs at least one input to know the block size; pass zeros for silence")
+
+        results = {}
+        out_ports = (_abi.PortBuffer * max(1, len(outputs)))()
+        for i, (node_id, channels) in enumerate(outputs.items()):
+            out = np.full((frames, channels), np.nan, dtype=np.float32)
+            results[node_id] = out
+            out_ports[i] = _abi.PortBuffer(node_id, channels, _float_ptr(out))
+
+        self._check(self._dll.ts_engine_process(self._handle, in_ports, len(inputs), out_ports, len(outputs), frames))
+        return results
+
+    def port_write(self, node_id: int, block: np.ndarray) -> int:
+        block = np.ascontiguousarray(block, dtype=np.float32)
+        if block.ndim == 1:
+            block = block.reshape(-1, 1)
+        with self._control:
+            return self._check(self._dll.ts_port_write(self._handle, node_id, _float_ptr(block), block.shape[0]))
+
+    def port_read(self, node_id: int, frames: int) -> np.ndarray:
+        channels = self._nodes[node_id].channels
+        out = np.zeros((frames, channels), dtype=np.float32)
+        with self._control:
+            got = self._check(self._dll.ts_port_read(self._handle, node_id, _float_ptr(out), frames))
+        return out[:got]
+
+    def port_available(self, node_id: int) -> int:
+        with self._control:
+            return self._check(self._dll.ts_port_available(self._handle, node_id))
+
+    def stats(self) -> dict:
+        """
+        Callback timing as measured on the audio thread. Every duration is None until a
+        block has run; `processing_load` is the worst block against its period, because a
+        real-time budget is broken by its worst case, not its average.
+        """
+        raw = _abi.Stats()
+        with self._control:
+            self._check(self._dll.ts_engine_get_stats(self._handle, ctypes.byref(raw)))
+        blocks = raw.blocks
+        histogram = list(raw.histogram)
+        measured = blocks > 0
+        return {
+            'blocks': blocks,
+            'xruns': raw.xruns,
+            'ring_overruns': raw.ring_overruns,
+            'ring_underruns': raw.ring_underruns,
+            'callback_ns_min': raw.callback_ns_min if measured else None,
+            'callback_ns_max': raw.callback_ns_max if measured else None,
+            'callback_ns_mean': raw.callback_ns_total / blocks if measured else None,
+            'callback_ns_p99': _percentile(histogram, raw.bucket_ns, 0.99) if measured else None,
+            'period_ns': raw.period_ns if measured else None,
+            'processing_load': raw.callback_ns_max / raw.period_ns if measured and raw.period_ns else None,
+            'plan_generation': raw.plan_generation,
+            'rt_allocations': raw.rt_allocations,
+            'histogram': histogram,
+            'bucket_ns': raw.bucket_ns,
+        }
+
+    def reset_stats(self):
+        with self._control:
+            self._check(self._dll.ts_engine_reset_stats(self._handle))
+
+    def meter(self, node_id: int) -> dict:
+        raw = _abi.Meter()
+        with self._control:
+            self._check(self._dll.ts_engine_get_meter(self._handle, node_id, ctypes.byref(raw)))
+        return {'peak': raw.peak, 'rms': raw.rms, 'clipped': bool(raw.clipped), 'channels': raw.channels}
+
+    def reset_meters(self):
+        with self._control:
+            self._check(self._dll.ts_engine_reset_meters(self._handle))
+
+    def events(self) -> list[dict]:
+        buffer = (_abi.Event * 256)()
+        with self._control:
+            n = self._check(self._dll.ts_engine_poll_events(self._handle, buffer, len(buffer)))
+        return [{'code': e.code, 'arg0': e.arg0, 'arg1': e.arg1, 'block': e.block} for e in buffer[:n]]
+
+
+def _percentile(histogram: list[int], bucket_ns: int, q: float) -> float:
+    """Upper edge of the bucket holding the q-th sample: conservative, never flattering."""
+    total = sum(histogram)
+    threshold = q * total
+    running = 0
+    for i, count in enumerate(histogram):
+        running += count
+        if running >= threshold:
+            return float((i + 1) * bucket_ns)
+    return float(len(histogram) * bucket_ns)
+
+
+class NativeRing:
+    """The engine's SPSC ring on its own, so its guarantees can be tested directly."""
+
+    def __init__(self, capacity_frames: int, channels: int):
+        self._dll = load()
+        self._handle = self._dll.ts_ring_create(capacity_frames, channels)
+        if not self._handle:
+            raise NativeError(_abi.ERR_INVALID, "could not create ring")
+        self.channels = channels
+
+    @property
+    def capacity(self) -> int:
+        return self._dll.ts_ring_capacity(self._handle)
+
+    def write(self, block: np.ndarray) -> int:
+        block = np.ascontiguousarray(block, dtype=np.float32).reshape(-1, self.channels)
+        return self._dll.ts_ring_write(self._handle, _float_ptr(block), block.shape[0])
+
+    def read(self, frames: int) -> np.ndarray:
+        out = np.zeros((frames, self.channels), dtype=np.float32)
+        got = self._dll.ts_ring_read(self._handle, _float_ptr(out), frames)
+        return out[:got]
+
+    def available(self) -> int:
+        return self._dll.ts_ring_available(self._handle)
+
+    def close(self):
+        if self._handle:
+            self._dll.ts_ring_destroy(self._handle)
+            self._handle = None
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            pass

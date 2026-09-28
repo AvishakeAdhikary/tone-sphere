@@ -49,6 +49,14 @@ try:
 except Exception:
     pass
 
+# The native engine (scripts/build_native.py). tonesphere/native looks for it under
+# sys._MEIPASS/tonesphere/native/_bin. Collected when present rather than required, so the
+# Linux/macOS builds — which have no native engine yet — still freeze; on Windows the CI
+# builds it first, and a frozen app without it reports the engine as unavailable.
+native_bin = project_root / 'tonesphere' / 'native' / '_bin'
+if native_bin.is_dir():
+    binaries += [(str(dll), 'tonesphere/native/_bin') for dll in native_bin.glob('*.dll')]
+
 datas = [
     (str(project_root / 'config'), 'config'),
     (str(project_root / 'assets' / 'images'), 'assets/images'),

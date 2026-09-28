@@ -88,6 +88,13 @@ jobs:
           echo "--- aplay -L (ALSA's own view) ---"
           aplay -L || true
 
+      - name: Build the native engine (Windows)
+        # tests/native fails rather than skips on Windows without the DLL, so this has to
+        # run first. The runner's Visual Studio is found through vswhere; CMake and Ninja
+        # come from the `native` dependency group.
+        if: runner.os == 'Windows'
+        run: uv run python scripts/build_native.py
+
       - name: Run tests
         # CI runners have no audio hardware, so hardware-marked tests are excluded.
         # `linux_virtual_sink`-marked tests are deliberately NOT excluded here: on Linux
@@ -222,6 +229,10 @@ jobs:
           sudo apt-get install -y libegl1 libxkbcommon-x11-0 libxcb-cursor0 \
             libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libgl1 \
             libportaudio2
+
+      - name: Build the native engine (Windows)
+        if: runner.os == 'Windows'
+        run: uv run python scripts/build_native.py
 
       - name: Build with PyInstaller (one-file)
         run: uv run pyinstaller tonesphere.spec

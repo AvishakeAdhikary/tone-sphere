@@ -14,3 +14,13 @@ wheels/
 # MSIX logo set: every file is derived from assets/images/ToneSphere.png by
 # packaging/msix/generate_assets.py, which build_msix.ps1 runs before every pack.
 packaging/msix/assets/
+
+# Third-party SDKs are fetched by scripts/fetch_sdks.py and never committed (sdks/README.md).
+sdks/*
+!sdks/README.md
+
+# Native build output.
+native/build/
+
+# Built native DLLs (scripts/build_native.py).
+tonesphere/native/_bin/

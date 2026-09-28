@@ -59,6 +59,24 @@ no VST3 plugins installed, no C/C++ toolchain.
 | **Diagnostics (`main.py test`)** | Plays a 440 Hz tone to the default output, checks callback count/errors/xruns, prints reported latency and PortAudio CPU load | Real signal verification and measured round trip | IMPLEMENTED | It never captures its own output, and writes the tone ~3× faster than it is consumed, so the tone it plays is choppy by construction. |
 | **Packaging** | PyInstaller one-file (Releases) and one-folder (MSIX); MSIX manifest and pack script | Plus native DLLs; driver has its own installer | IMPLEMENTED | CI `package` job smoke-tests the frozen GUI. MSIX never signed, installed or submitted. |
 
+## Native engine (`native/`, `tonesphere/native/`)
+
+| Capability | Level | Evidence |
+|---|---|---|
+| Toolchain: EWDK (MSVC 14.50, SDK 10.0.28000) + CMake/Ninja from PyPI; `/W4 /WX` clean | IMPLEMENTED | `scripts/build_native.py`; `docs/BUILDING_WINDOWS.md` |
+| C ABI (`native/include/tonesphere_native.h`), ctypes bindings, ABI version check | IMPLEMENTED | `tests/native/*` load and drive it |
+| SPSC frame ring (wait-free with one producer and one consumer) | VERIFIED | `tests/native/test_ring.py` — wraparound, full, empty, 8-channel framing, two real threads moving 200 000 frames of sine+noise sample-exact |
+| Plan validation, topological ordering, cycle rejection | VERIFIED | `TestPlanValidation`; a refused plan leaves the running plan intact |
+| Plan swap by atomic exchange + hazard pointer, no audio-thread blocking | VERIFIED | `test_plans_swap_while_another_thread_processes` — 300 swaps under a concurrently running audio thread, every block finite and bounded |
+| Mixing: routes, gain ramps, mute, invert, master, buses **with forwarding**, fan-out, channel mapping, constant-power pan, continuous stereo balance | VERIFIED (offline) | `TestAudioMovesThroughTheGraph`, `TestGainMuteInvert`, `TestChannelMapping` — known signals in, exact samples out |
+| Ring ports (Python producer/consumer ↔ audio thread) with overrun/underrun counts and events | VERIFIED | `TestRingPorts` |
+| Non-finite guard at sinks | VERIFIED | `test_a_nan_never_reaches_an_output` |
+| Meters (peak since reset, block RMS, clip latch) | VERIFIED | `test_meters_report_what_was_processed`, `test_clipping_latches_until_reset` |
+| Callback timing (min/mean/max, histogram p99, load = worst ÷ period) | IMPLEMENTED | `test_statistics_measure_real_callback_time`; `None` until a block runs |
+| Zero heap allocations on the audio thread | VERIFIED | `test_the_audio_thread_allocates_nothing` — 500 blocks with rings, buses, ramps, swaps: `rt_allocations == 0` (this DLL's allocations only; plugin modules are not counted) |
+| Device backends (WASAPI, ASIO) | NOT IMPLEMENTED | M4, M5 |
+| Built-in DSP ported to native (EQ, compressor, limiter, delay, resampler) | NOT IMPLEMENTED | M3 |
+
 ## Real-time safety of the existing path
 
 The existing callback is Python under the GIL, so none of the `AGENTS.md` real-time
@@ -102,7 +120,7 @@ These are fixed by the native engine (Windows) and, where the legacy host stays 
 |---|---|---|
 | M0 | `AGENTS.md` contract, `CLAUDE.md` pointer | done |
 | M1 | This matrix, honesty fixes (reported vs measured latency, loopback claim, plugin and bus claims), dependency audit, shared test signals | done |
-| M2 | Native foundation: toolchain, C ABI, SPSC, snapshots, offline `process_block` | not started |
+| M2 | Native foundation: toolchain, C ABI, SPSC, snapshots, offline `process_block` | done — see *Native engine* below |
 | M3 | Native graph, mixer, DSP | not started |
 | M4 | Native WASAPI backend | not started |
 | M5 | Native ASIO host | not started |
