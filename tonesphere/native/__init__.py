@@ -334,7 +334,11 @@ class NativeEngine:
             'callback_ns_mean': raw.callback_ns_total / blocks if measured else None,
             'callback_ns_p99': min(_percentile(histogram, 0.99), raw.callback_ns_max) if measured else None,
             'period_ns': raw.period_ns if measured else None,
-            'processing_load': raw.callback_ns_max / raw.period_ns if measured and raw.period_ns else None,
+            # The worst block against its own period, and total time against total audio
+            # time: neither is thrown by blocks of different sizes.
+            'processing_load': raw.load_max_ppm / 1e6 if measured else None,
+            'mean_load': (raw.callback_ns_total / (raw.frames_total * 1e9 / self.sample_rate)
+                          if measured and raw.frames_total else None),
             'plan_generation': raw.plan_generation,
             'rt_allocations': raw.rt_allocations,
             'histogram': histogram,
@@ -365,6 +369,11 @@ class NativeEngine:
             array[i] = spec.to_desc()
         with self._control:
             self._check(self._dll.ts_engine_start_wasapi(self._handle, array, len(streams), master))
+
+    def start_clock(self, block_frames: int = 0):
+        """Run blocks from a timer instead of a device: for a plan that routes no device."""
+        with self._control:
+            self._check(self._dll.ts_engine_start_clock(self._handle, block_frames))
 
     def stop_backend(self):
         with self._control:

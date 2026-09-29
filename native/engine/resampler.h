@@ -38,8 +38,14 @@ public:
                 std::fill(out, out + static_cast<size_t>(frames) * channels_, 0.0f);
                 return 0;
             }
+            // Start from exactly the target cushion. Audio arrives in packets, so the fill
+            // that first reaches the target overshoots it by up to one packet; keeping that
+            // excess would add it to the latency of this run, and a different amount to the
+            // next.
+            const uint32_t excess = fill - static_cast<uint32_t>(target_);
+            if (excess) ring.skip(excess);
             primed_ = true;
-            smoothed_fill_ = fill;
+            smoothed_fill_ = target_;
         }
 
         // The fill level jitters by a whole device period as the two threads interleave,

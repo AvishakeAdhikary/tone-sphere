@@ -591,8 +591,8 @@ HRESULT Backend::initialize_exclusive(Stream& s, IMMDevice* device) {
 
     REFERENCE_TIME default_period = 0, min_period = 0;
     s.client->GetDevicePeriod(&default_period, &min_period);
-    REFERENCE_TIME period = static_cast<REFERENCE_TIME>(
-        (10'000'000.0 * engine_.max_block()) / rate + 0.5);
+    const uint32_t wanted_frames = s.desc.period_frames ? s.desc.period_frames : engine_.max_block();
+    REFERENCE_TIME period = static_cast<REFERENCE_TIME>((10'000'000.0 * wanted_frames) / rate + 0.5);
     period = std::max(period, min_period);
 
     HRESULT hr = s.client->Initialize(AUDCLNT_SHAREMODE_EXCLUSIVE, AUDCLNT_STREAMFLAGS_EVENTCALLBACK, period, period,
@@ -662,8 +662,9 @@ HRESULT Backend::initialize_shared(Stream& s, bool loopback) {
             mix->nChannels == s.channels && is_float_format(mix) && mix->wBitsPerSample == 32) {
             UINT32 def = 0, fundamental = 0, min_p = 0, max_p = 0;
             if (SUCCEEDED(client3->GetSharedModeEnginePeriod(mix, &def, &fundamental, &min_p, &max_p)) && fundamental) {
-                const UINT32 wanted = std::clamp<UINT32>(
-                    ((engine_.max_block() + fundamental - 1) / fundamental) * fundamental, min_p, max_p);
+                const UINT32 target = s.desc.period_frames ? s.desc.period_frames : engine_.max_block();
+                const UINT32 wanted = std::clamp<UINT32>(((target + fundamental - 1) / fundamental) * fundamental,
+                                                         min_p, max_p);
                 hr = client3->InitializeSharedAudioStream(AUDCLNT_STREAMFLAGS_EVENTCALLBACK, wanted, mix, nullptr);
                 if (SUCCEEDED(hr)) {
                     low_latency = true;

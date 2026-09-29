@@ -39,7 +39,7 @@ extern "C" {
 #endif
 
 /* Bumped whenever a struct layout or a signature changes; Python refuses a mismatch. */
-#define TS_ABI_VERSION 7
+#define TS_ABI_VERSION 10
 
 typedef int32_t ts_result;
 #define TS_OK               0
@@ -140,7 +140,9 @@ typedef struct ts_stats {
     uint64_t callback_ns_min;    /* UINT64_MAX when blocks == 0 */
     uint64_t callback_ns_max;
     uint64_t callback_ns_total;  /* mean = total / blocks */
-    uint64_t period_ns;          /* the block period the last block was given (frames / rate) */
+    uint64_t period_ns;          /* the period of the most recent block (its frames / rate) */
+    uint64_t frames_total;       /* audio frames processed since the last reset */
+    uint64_t load_max_ppm;       /* worst single block: its duration over its own period, parts per million */
     uint64_t plan_generation;    /* generation of the plan the audio thread last ran */
     uint64_t rt_allocations;     /* heap allocations made by this DLL on the audio thread */
     uint64_t histogram[TS_HISTOGRAM_BUCKETS];
@@ -285,6 +287,7 @@ typedef struct ts_device_event {
 #define TS_STREAM_CAPTURE          2  /* record from an endpoint */
 #define TS_STREAM_LOOPBACK         3  /* record what a render endpoint is playing (whole system) */
 #define TS_STREAM_PROCESS_LOOPBACK 4  /* record what one process (and optionally its children) plays */
+#define TS_STREAM_CLOCK            5  /* not a device: the timer that paces a plan routing no device */
 
 #define TS_SHARE_SHARED    0
 #define TS_SHARE_EXCLUSIVE 1
@@ -307,6 +310,10 @@ typedef struct ts_stream_desc {
     uint32_t flags;        /* TS_STREAM_FLAG_* */
     uint32_t channels;     /* must equal the node's channel count */
     uint32_t process_id;   /* PROCESS_LOOPBACK only */
+    /* The device period to ask for, in frames: the latency setting. 0 = the engine's
+     * max_block. The engine's max_block is only a capacity; each device callback runs the
+     * engine once with however many frames the device asked for. */
+    uint32_t period_frames;
 } ts_stream_desc;
 
 #define TS_STREAM_STATE_STARTING 0
@@ -355,6 +362,9 @@ TS_API int32_t ts_wasapi_poll_events(ts_device_event* out, int32_t capacity);
 TS_API ts_result ts_engine_start_wasapi(ts_engine* engine, const ts_stream_desc* streams, uint32_t count,
                                         uint32_t master_index);
 TS_API ts_result ts_engine_stop_backend(ts_engine* engine);
+/* Run the engine from a real-time-paced timer thread instead of a device, for a plan that
+ * routes no device at all (a bus feeding a network stream). */
+TS_API ts_result ts_engine_start_clock(ts_engine* engine, uint32_t block_frames);
 TS_API int32_t ts_engine_stream_status(ts_engine* engine, ts_stream_status* out, int32_t capacity);
 
 /* ---- VST3 plugins -------------------------------------------------------------------------

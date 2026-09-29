@@ -5,6 +5,7 @@
 #include <new>
 #include <string>
 
+#include "clock.h"
 #include "convert.h"
 #include "engine.h"
 #include "resampler.h"
@@ -320,6 +321,18 @@ TS_API void ts_engine_add_xruns(ts_engine* engine, uint32_t count) {
 
 TS_API uint32_t ts_engine_sample_rate(ts_engine* engine) { return engine ? engine->engine.sample_rate() : 0; }
 TS_API uint32_t ts_engine_max_block(ts_engine* engine) { return engine ? engine->engine.max_block() : 0; }
+
+#ifdef _WIN32
+TS_API ts_result ts_engine_start_clock(ts_engine* engine, uint32_t block_frames) {
+    return guarded(engine, [&](Engine& e) -> ts_result {
+        if (e.backend_running()) {
+            e.fail("a backend is already running; stop it first");
+            return TS_ERR_STATE;
+        }
+        return e.attach_backend(ts::start_clock(e, block_frames));
+    });
+}
+#endif
 
 TS_API ts_result ts_engine_stop_backend(ts_engine* engine) {
     return guarded(engine, [&](Engine& e) { return e.stop_backend(); });

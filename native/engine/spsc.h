@@ -51,6 +51,16 @@ public:
         return n;
     }
 
+    // Consumer. Drops up to `frames` of the oldest queued frames; returns how many.
+    uint32_t skip(uint32_t frames) {
+        const uint64_t r = read_.load(std::memory_order_relaxed);
+        const uint64_t w = write_.load(std::memory_order_acquire);
+        const uint32_t avail = static_cast<uint32_t>(w - r);
+        const uint32_t n = frames < avail ? frames : avail;
+        read_.store(r + n, std::memory_order_release);
+        return n;
+    }
+
     // Consumer. Reads up to `frames`; returns how many were available.
     uint32_t read(float* dst, uint32_t frames) {
         const uint64_t r = read_.load(std::memory_order_relaxed);

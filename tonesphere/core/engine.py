@@ -29,7 +29,6 @@ from tonesphere.core.models import DeviceType
 from tonesphere.core.routing import AudioRoutingMatrix
 from tonesphere.engine import (
     AudioBackendUnavailable,
-    AudioHost,
     Connection,
     DeviceInfo,
     HostApi,
@@ -42,6 +41,8 @@ from tonesphere.engine import (
     network_node,
     preferred_host_api,
 )
+from tonesphere.engine.native_host import make_host
+from tonesphere.native import NativeError
 from tonesphere.network.audio_router import NetworkAudioRouter, NetworkQuality
 from tonesphere.network.jitter_buffer import JitterBuffer
 from tonesphere.network.send_worker import NetworkSendWorker
@@ -74,18 +75,16 @@ class AudioEngine:
         max_virtual_inputs: int = 10,
         max_virtual_outputs: int = 10,
         exclusive: bool = True,
+        host_backend: str | None = None,
     ):
         self.sample_rate = sample_rate
         self.buffer_size = buffer_size
         self.max_virtual_inputs = max_virtual_inputs
         self.max_virtual_outputs = max_virtual_outputs
 
-        self.host = AudioHost(
-            samplerate=sample_rate,
-            blocksize=buffer_size,
-            host_api=preferred_driver,
-            exclusive=exclusive,
-        )
+        # The native engine on Windows (no Python on the audio thread), the PortAudio host
+        # elsewhere; `get_performance_stats()['backend']` says which.
+        self.host = make_host(sample_rate, buffer_size, preferred_driver, exclusive, host_backend)
 
         # Kept from the previous implementation: these state models were always sound,
         # they were simply never connected to any audio.
@@ -145,9 +144,9 @@ class AudioEngine:
         """Enumerate hardware and pick a backend. Does not open any stream."""
         with self._lock:
             try:
-                self._devices = enumerate_devices()
+                self._devices = self._enumerate()
                 self._backend_error = None
-            except AudioBackendUnavailable as e:
+            except (AudioBackendUnavailable, NativeError) as e:
                 # A missing PortAudio is a real, reportable condition, not something to
                 # paper over with an empty device list that looks like "no hardware".
                 self._backend_error = str(e)
@@ -198,7 +197,7 @@ class AudioEngine:
 
             graph = self._build_graph()
 
-            if not any(node.kind == 'device' for node in graph.nodes()):
+            if not self._needs_host(graph):
                 self._problems = []
                 logger.info("Engine started with no hardware routes — nothing to open")
                 return
@@ -324,6 +323,12 @@ class AudioEngine:
             self._node_to_id[node_key] = device_id
             self._device_by_id[device_id] = device
 
+    def _enumerate(self) -> list[DeviceInfo]:
+        """The host's own device list: MMDevice/ASIO for the native host, PortAudio otherwise."""
+        if hasattr(self.host, 'enumerate'):
+            return self.host.enumerate()
+        return enumerate_devices()
+
     def _node_for(self, device_id: int):
         return self._id_to_node.get(device_id)
 
@@ -341,8 +346,8 @@ class AudioEngine:
         """
         with self._lock:
             try:
-                self._devices = enumerate_devices()
-            except AudioBackendUnavailable as e:
+                self._devices = self._enumerate()
+            except (AudioBackendUnavailable, NativeError) as e:
                 self._backend_error = str(e)
                 return False
 
@@ -1055,6 +1060,17 @@ class AudioEngine:
 
             return True, message
 
+    def _needs_host(self, graph: RoutingGraph) -> bool:
+        """
+        Whether this routing needs the host running. The PortAudio host moves bus and
+        network audio without any stream, because Python writes straight into its rings;
+        only a device needs one. The native engine runs nothing unless something clocks
+        it, so any route at all needs it running (from a device, or from its own timer).
+        """
+        if getattr(self.host, 'backend', 'portaudio') == 'native':
+            return bool(graph.connections)
+        return any(node.kind == 'device' for node in graph.nodes())
+
     def _route_is_dead(self, source, dest) -> bool:
         """Whether either end of a route failed to open a stream."""
         if not self.host.is_running:
@@ -1122,9 +1138,7 @@ class AudioEngine:
         # and network sinks is a complete, working configuration — it moves audio through
         # ring buffers and a socket — and trying to open streams for it would report
         # "route something to a device first" about a route that already exists.
-        needs_streams = self._started and any(
-            node.kind == 'device' for node in graph.nodes()
-        )
+        needs_streams = self._started and self._needs_host(graph)
         must_reconfigure = bool(problems) and self.host.is_running
 
         if needs_streams and (must_reconfigure or not self.host.is_running):
@@ -1241,6 +1255,81 @@ class AudioEngine:
 
     # --- Route parameters ---
 
+    # --- Plugins (VST3; the native engine only) ---
+
+    def _plugin_side(self, device_id: int) -> tuple[str | None, str]:
+        node = self._node_for(device_id)
+        if node is None or node.kind != 'device':
+            return None, f"Unknown device {device_id}"
+        if not hasattr(self.host, 'add_plugin'):
+            return None, "Plugin hosting needs the native engine (Windows)"
+        return node.ref, ""
+
+    def scan_plugins(self, paths: list[str] | None = None) -> list:
+        """
+        Scan VST3 folders (the standard ones by default), each module in a subprocess, with
+        results cached by file size and time. Returns `plugins.scan.ScanResult`s, broken
+        and incompatible modules included, each with its reason.
+        """
+        from tonesphere.plugins import scan
+        from tonesphere.utils.paths import app_data_dir
+
+        cache = scan.ScanCache(app_data_dir() / 'plugin_cache.json')
+        return scan.scan(paths, cache)
+
+    def add_plugin(self, device_id: int, info, is_input: bool = True) -> tuple[bool, str]:
+        """Open a scanned plugin (`plugins.PluginInfo`) on one side of a device, after any already there."""
+        from tonesphere.plugins import PluginError
+
+        key, problem = self._plugin_side(device_id)
+        if key is None:
+            return False, problem
+        with self._lock:
+            try:
+                index = self.host.add_plugin(key, is_input, info)
+            except (PluginError, ValueError, NativeError) as e:
+                return False, str(e)
+        instance = self.host.plugins_for(key, is_input)[index]
+        latency = instance.latency_samples
+        note = f" (+{latency} samples latency, reported by the plugin)" if latency else ""
+        return True, f"Loaded {info.name}{note}"
+
+    def remove_plugin(self, device_id: int, index: int, is_input: bool = True) -> bool:
+        key, _ = self._plugin_side(device_id)
+        if key is None:
+            return False
+        with self._lock:
+            return self.host.remove_plugin(key, is_input, index)
+
+    def plugin_instances(self, device_id: int, is_input: bool = True) -> list:
+        key, _ = self._plugin_side(device_id)
+        return self.host.plugins_for(key, is_input) if key else []
+
+    def list_plugins(self, device_id: int, is_input: bool = True) -> list[dict[str, Any]]:
+        out = []
+        for index, instance in enumerate(self.plugin_instances(device_id, is_input)):
+            status = instance.status()
+            out.append({
+                'index': index,
+                'name': instance.info.name,
+                'vendor': instance.info.vendor,
+                'version': instance.info.version,
+                'path': instance.info.path,
+                'latency_samples': status.latency_samples,
+                'crashed': status.crashed,
+                'fault': status.fault,
+                'has_editor': instance.has_editor(),
+            })
+        return out
+
+    def set_plugin_parameter(self, device_id: int, index: int, param_id: int, normalized: float,
+                             is_input: bool = True) -> bool:
+        instances = self.plugin_instances(device_id, is_input)
+        if not 0 <= index < len(instances):
+            return False
+        instances[index].set_parameter(param_id, normalized)
+        return True
+
     def set_routing_pan(self, source_id: int, destination_id: int, pan: float):
         """
         Pan one route. Per route, not per source: the same guitar can sit centre in the
@@ -1329,7 +1418,7 @@ class AudioEngine:
     def get_driver_info(self) -> dict[str, Any]:
         from tonesphere.engine.devices import describe_backend
 
-        info = describe_backend()
+        info = self.host.describe() if hasattr(self.host, 'describe') else describe_backend()
         info['active_driver'] = self.host.host_api.value if self.host.host_api else None
         info['exclusive_mode'] = self.host.exclusive
         info['platform'] = __import__('platform').system()
@@ -1338,12 +1427,7 @@ class AudioEngine:
         return info
 
     def get_available_drivers(self) -> list[str]:
-        from tonesphere.engine.devices import available_host_apis
-
-        try:
-            return [api.value for api in available_host_apis()]
-        except AudioBackendUnavailable:
-            return []
+        return [api.value for api in self.get_available_drivers_enum()]
 
     def switch_driver(self, driver_type: str) -> bool:
         """
@@ -1383,6 +1467,8 @@ class AudioEngine:
     def get_available_drivers_enum(self) -> list[HostApi]:
         from tonesphere.engine.devices import available_host_apis
 
+        if hasattr(self.host, 'available_host_apis'):
+            return self.host.available_host_apis()
         try:
             return available_host_apis()
         except AudioBackendUnavailable:

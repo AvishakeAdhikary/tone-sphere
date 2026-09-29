@@ -43,14 +43,14 @@ PACKET_FRAMES = frames_per_packet(CODEC_PCM_FLOAT32, 2)
 
 @pytest.fixture
 def engine():
-    e = AudioEngine(sample_rate=RATE, buffer_size=BLOCK)
+    e = AudioEngine(sample_rate=RATE, buffer_size=BLOCK, host_backend='portaudio')
     yield e
     e.cleanup()
 
 
 @pytest.fixture
 def sender():
-    e = AudioEngine(sample_rate=RATE, buffer_size=BLOCK)
+    e = AudioEngine(sample_rate=RATE, buffer_size=BLOCK, host_backend='portaudio')
     yield e
     e.cleanup()
 
@@ -63,7 +63,11 @@ def receiver():
     # loop drains it -- confirmed by `overflow_count` on a loaded CI runner at the default
     # 256-frame size (~21ms of headroom). Nothing about the wire protocol or packet framing
     # depends on this value; it only widens the one ring actually racing anything.
-    e = AudioEngine(sample_rate=RATE, buffer_size=4096)
+    # The PortAudio host, explicitly: these tests drive the send worker by hand and read
+    # routes through the host's per-route rings, which is what makes them deterministic.
+    # They prove the network transport's wiring, which is the same whichever host carries
+    # the audio; the native host's bus-to-network path is proven in tests/native.
+    e = AudioEngine(sample_rate=RATE, buffer_size=4096, host_backend='portaudio')
     yield e
     e.cleanup()
 

@@ -87,7 +87,11 @@ def run_diagnostics() -> int:
 
     try:
         driver_info = engine.get_driver_info()
-        report("INFO", f"PortAudio:        {driver_info.get('portaudio_version', 'unknown')}")
+        if driver_info.get('backend') == 'native':
+            report("INFO", f"Engine:           native ({driver_info.get('engine')}); no Python on the audio thread")
+        else:
+            report("INFO", f"PortAudio:        {driver_info.get('portaudio_version', 'unknown')} "
+                           f"(Python audio callback: not real-time safe)")
         report("INFO", f"Active backend:   {driver_info.get('active_driver') or 'none'}")
         report("INFO", f"Available:        {', '.join(engine.get_available_drivers()) or 'none'}")
 
@@ -95,8 +99,8 @@ def run_diagnostics() -> int:
             report("FAIL", f"Audio backend:    {driver_info['error']}")
 
         if not driver_info.get('asio_available'):
-            report("INFO", "ASIO:             not available in this build; WASAPI exclusive "
-                           "is the low-latency path")
+            report("INFO", "ASIO:             no ASIO driver or no ASIO host in this build; WASAPI "
+                           "exclusive is the low-latency path")
 
         devices = engine.get_devices()
         inputs = [d for d in devices if d['direction'] == 'input' and 'bus' not in d['host_api'].lower()]
@@ -171,7 +175,20 @@ def run_diagnostics() -> int:
                     report("INFO", f"Nominal latency:  "
                                    f"{format_measurement(stats.get('nominal_latency_ms'), ' ms')} "
                                    f"(buffer arithmetic only)")
-                    report("INFO", f"DSP load:         {format_measurement(stats.get('cpu_usage'), '%')}")
+                    report("INFO", f"DSP load:         {format_measurement(stats.get('cpu_usage'), '%')} mean")
+                    if stats.get('backend') == 'native':
+                        worst = stats.get('processing_load')
+                        report("INFO", f"Callback time:    mean "
+                                       f"{format_measurement(stats.get('callback_mean_ms'), ' ms', 3)}, p99 "
+                                       f"{format_measurement(stats.get('callback_p99_ms'), ' ms', 3)}, worst "
+                                       f"{format_measurement(stats.get('callback_max_ms'), ' ms', 3)} "
+                                       f"(timed on the audio thread)")
+                        report("INFO", f"Worst-case load:  "
+                                       f"{format_measurement(worst * 100 if worst is not None else None, '%')} "
+                                       f"of the buffer period")
+                        allocations = stats.get('audio_thread_allocations')
+                        report("PASS" if allocations == 0 else "WARN",
+                               f"Audio-thread heap allocations: {allocations}")
                     report("INFO", f"Buffer / rate:    {engine.buffer_size} frames @ "
                                    f"{engine.sample_rate} Hz, "
                                    f"exclusive={driver_info.get('exclusive_mode')}")

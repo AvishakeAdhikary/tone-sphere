@@ -21,7 +21,7 @@ from ctypes import (
     c_void_p,
 )
 
-ABI_VERSION = 7
+ABI_VERSION = 10
 
 OK = 0
 ERR_INVALID = -1
@@ -82,6 +82,7 @@ STREAM_RENDER = 1
 STREAM_CAPTURE = 2
 STREAM_LOOPBACK = 3
 STREAM_PROCESS_LOOPBACK = 4
+STREAM_CLOCK = 5
 SHARE_SHARED = 0
 SHARE_EXCLUSIVE = 1
 STREAM_FLAG_ALLOW_SHARED_FALLBACK = 0x1
@@ -197,6 +198,8 @@ class Stats(Structure):
         ("callback_ns_max", c_uint64),
         ("callback_ns_total", c_uint64),
         ("period_ns", c_uint64),
+        ("frames_total", c_uint64),
+        ("load_max_ppm", c_uint64),
         ("plan_generation", c_uint64),
         ("rt_allocations", c_uint64),
         ("histogram", c_uint64 * HISTOGRAM_BUCKETS),
@@ -262,6 +265,7 @@ class StreamDesc(Structure):
         ("flags", c_uint32),
         ("channels", c_uint32),
         ("process_id", c_uint32),
+        ("period_frames", c_uint32),
     ]
 
 
@@ -378,6 +382,7 @@ def bind(dll: ctypes.CDLL) -> ctypes.CDLL:
     proto("ts_wasapi_poll_events", c_int32, POINTER(DeviceEvent), c_int32)
     proto("ts_engine_start_wasapi", c_int32, engine, POINTER(StreamDesc), c_uint32, c_uint32)
     proto("ts_engine_stop_backend", c_int32, engine)
+    proto("ts_engine_start_clock", c_int32, engine, c_uint32)
     proto("ts_engine_stream_status", c_int32, engine, POINTER(StreamStatus), c_int32)
     proto("ts_convert_to_float", c_int32, c_uint32, c_void_p, f_ptr, c_uint32)
     proto("ts_convert_from_float", c_int32, c_uint32, f_ptr, c_void_p, c_uint32)

@@ -85,6 +85,27 @@ no VST3 plugins installed, no C/C++ toolchain.
 | WASAPI backend | HARDWARE VERIFIED | `docs/WINDOWS_AUDIO.md` |
 | ASIO backend (separate GPLv3 DLL, attached through the external-backend C ABI) | HARDWARE VERIFIED against FlexASIO; hardware interface NOT AVAILABLE | `docs/ASIO.md` |
 
+## Engine on the native host (Windows)
+
+`tonesphere/engine/native_host.py` gives `AudioEngine` the host interface it always used,
+backed by the native engine, so the UI, API, CLI and `main.py test` run on it unchanged.
+`get_performance_stats()['backend']` says which host is in use; the PortAudio host remains
+for Linux/macOS, and on Windows only if the native DLL is missing (logged as a warning) or
+asked for (`host_backend='portaudio'`).
+
+| Capability | Level | Evidence |
+|---|---|---|
+| Device enumeration from MMDevice (or ASIO drivers) with stable endpoint-ID keys; old name-based preset keys still resolve | IMPLEMENTED | `native_devices`, `DeviceInfo.key`/`name_key`, `PresetManager._map_devices` |
+| Routing compiled to native plans and swapped live; streams restarted only when the set of devices changes | VERIFIED | the 822-test suite passes on it |
+| Device → bus → device carries audio (the PortAudio host's defect) | VERIFIED (offline) | `tests/native/test_engine.py::test_device_to_bus_to_device_carries_the_tone`; the legacy defect stays pinned by its strict xfail against the PortAudio host |
+| Bus-only / network-only routing run by the native clock, sample-exact | VERIFIED | `tests/native/test_engine_native_host.py` |
+| AudioEngine → native host → VST3 → WASAPI, level exact; fader and plugin survive a restart; preset restores the plugin and its state | HARDWARE VERIFIED | `tests/hardware/test_engine_native_host.py`: 0.07071 RMS heard for 0.07071 expected; after restart at half fader, again exact |
+| Per-block load judged against each block's own period; one engine run per device callback | VERIFIED | `test_load_is_judged_per_block_not_against_the_last_block`; `main.py test` on the development machine: exclusive 128 frames, worst callback 0.025 ms = 0.8 % of the period, mean 0.2 %, 0 xruns, 0 allocations |
+| Satellite cushion trimmed to its target on priming | VERIFIED (hardware) | digital round trip 61.35–65.35 ms over six starts (within one 480-frame period), fixed within a run |
+| Strip channel pan and channel swap on the native host | NOT IMPLEMENTED | recorded by the strip, not applied (pan lives on routes natively); the PortAudio host's strip pan never worked either |
+| Per-process capture on the native host | IMPLEMENTED (Python capture thread into a bus feed) | `tests/test_process_capture.py` hardware tests pass on the native host; the native `process_loopback` stream kind is not yet used by `AudioEngine` |
+| Device removal while running | NOT VERIFIED | notifications are registered; `AudioEngine` does not yet react to them automatically |
+
 ## Measurements
 
 **Offline engine cost** — `benchmarks/bench_engine.py`, results in
@@ -157,7 +178,7 @@ These are fixed by the native engine (Windows) and, where the legacy host stays 
 | M5 | Native ASIO host | done — HARDWARE VERIFIED against FlexASIO (software ASIO driver); hardware-interface ASIO not available on this machine — see `docs/ASIO.md` |
 | M6 | Measured round-trip latency | done — `tonesphere/native/roundtrip.py`; digital path measured, acoustic path unavailable on this machine |
 | M7 | Native VST3 host | done — see `docs/VST3.md`; not yet reachable from the UI/API (M8, M10) |
-| M8 | Engine migration, persistence | not started |
+| M8 | Engine migration, persistence | done — `AudioEngine` runs on `NativeHost` on Windows; see *Engine on the native host* below |
 | M9 | Windows virtual audio driver | not started |
 | M10 | UI | not started |
 | M11 | Validation, benchmarks, documentation | not started |

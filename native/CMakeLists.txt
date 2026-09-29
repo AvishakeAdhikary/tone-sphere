@@ -46,6 +46,7 @@ add_library(tonesphere_native SHARED
     engine/engine.cpp
     engine/rt_alloc.cpp
     $<$<BOOL:${WIN32}>:windows_audio/wasapi.cpp>
+    $<$<BOOL:${WIN32}>:engine/clock.cpp>
 )
 target_include_directories(tonesphere_native PRIVATE include engine)
 if(WIN32)

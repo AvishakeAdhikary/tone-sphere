@@ -316,10 +316,22 @@ class TestNoResurrectedFakes:
         with pytest.raises(ImportError):
             importlib.import_module('tonesphere.devices.native_virtual')
 
-    def test_engine_runs_on_the_real_audio_host(self):
-        from tonesphere.engine import AudioHost
+    def test_engine_runs_on_a_real_audio_host(self):
+        """
+        Either the PortAudio host or the native one — and on Windows with the native engine
+        built, the native one: falling back to the Python callback path silently would be
+        the kind of quiet downgrade this suite exists to catch.
+        """
+        import sys
 
-        assert isinstance(AudioEngine().host, AudioHost)
+        from tonesphere import native
+        from tonesphere.engine import AudioHost
+        from tonesphere.engine.native_host import NativeHost
+
+        host = AudioEngine().host
+        assert isinstance(host, (AudioHost, NativeHost))
+        if sys.platform == 'win32' and native.available():
+            assert isinstance(host, NativeHost)
 
     def test_engine_has_exactly_one_device_registry(self):
         engine = AudioEngine()

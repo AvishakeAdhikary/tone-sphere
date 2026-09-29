@@ -131,6 +131,7 @@ class StreamSpec:
     process_id: int = 0
     include_process_tree: bool = True
     raw: bool = True
+    period_frames: int = 0  # the device period to ask for; 0 = the engine's block
 
     def to_desc(self) -> _abi.StreamDesc:
         kinds = {'render': _abi.STREAM_RENDER, 'capture': _abi.STREAM_CAPTURE,
@@ -146,4 +147,5 @@ class StreamSpec:
             flags,
             self.channels,
             self.process_id,
+            self.period_frames,
         )

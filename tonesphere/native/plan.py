@@ -59,11 +59,14 @@ class PlanCompiler:
         return self._ids[key]
 
     def compile(self, graph: RoutingGraph, endpoints: dict[NodeId, Endpoint],
-                inserts: dict[tuple[NodeId, str], list[tuple[int, int, bool]]] | None = None) -> CompiledPlan:
+                inserts: dict[tuple[NodeId, str], list[tuple]] | None = None,
+                always: tuple[NodeId, ...] = ()) -> CompiledPlan:
         """
-        `inserts` maps (graph node, role) to its built-in processors as (slot, type,
-        bypassed). A route touching an endpoint the caller did not describe is an error
-        here, not a silently dropped cable.
+        `inserts` maps (graph node, role) to its processors as (slot, type, bypassed) or
+        (slot, type, bypassed, plugin handle). `always` lists buses that belong in the plan
+        even with no routes, so something writing into them has a node to write to. A route
+        touching an endpoint the caller did not describe is an error here, not a silently
+        dropped cable.
         """
         nodes: dict[int, Node] = {}
         routes: list[Route] = []
@@ -93,6 +96,9 @@ class PlanCompiler:
             native_ids[(node, role)] = native
             return native
 
+        for node in always:
+            side(node, OUTPUT)
+
         for connection in graph.connections:
             # Solo is a property of the graph, not the route: with anything soloed, every
             # route out of a non-soloed source is silent. Muting it here, rather than
@@ -112,8 +118,8 @@ class PlanCompiler:
             native = native_ids.get((graph_node, role))
             if native is None:
                 continue  # an endpoint with no routes is not in the plan, so neither are its inserts
-            for slot, kind, bypassed in processors:
-                compiled_inserts.append(Insert(native, slot, kind, bypassed))
+            for slot, kind, bypassed, *plugin in processors:
+                compiled_inserts.append(Insert(native, slot, kind, bypassed, plugin[0] if plugin else 0))
 
         return CompiledPlan(
             nodes=list(nodes.values()),

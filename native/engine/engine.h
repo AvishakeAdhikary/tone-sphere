@@ -242,6 +242,8 @@ private:
     std::atomic<uint64_t> ns_max_{0};
     std::atomic<uint64_t> ns_total_{0};
     std::atomic<uint64_t> period_ns_{0};
+    std::atomic<uint64_t> frames_total_{0};
+    std::atomic<uint64_t> load_max_ppm_{0};
     std::atomic<uint64_t> plan_generation_{0};
     std::atomic<uint64_t> rt_allocations_{0};
     std::atomic<uint64_t> histogram_[TS_HISTOGRAM_BUCKETS] = {};

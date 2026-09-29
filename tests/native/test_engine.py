@@ -394,6 +394,19 @@ class TestSafetyAndMeasurement:
         meter = engine.meter(OUT)
         assert meter['clipped'] is False and meter['peak'] == pytest.approx(0.1, abs=1e-6)
 
+    def test_load_is_judged_per_block_not_against_the_last_block(self, engine):
+        """
+        A full block then a short remainder, as a device loop produces: the load must not
+        divide the full block's time by the remainder's tiny period.
+        """
+        engine.apply_plan([Node.source(SRC, 2), Node.sink(OUT, 2)], [Route(SRC, OUT)])
+        for _ in range(20):
+            engine.process({SRC: sine(BLOCK)}, {OUT: 2})
+            engine.process({SRC: sine(8)}, {OUT: 2})
+        stats = engine.stats()
+        assert stats['period_ns'] == 8 * 1_000_000_000 // RATE
+        assert stats['processing_load'] < stats['callback_ns_max'] / stats['period_ns']
+
     def test_statistics_are_unknown_until_a_block_runs(self, engine):
         stats = engine.stats()
         assert stats['blocks'] == 0
@@ -409,7 +422,10 @@ class TestSafetyAndMeasurement:
         assert 0 < stats['callback_ns_min'] <= stats['callback_ns_mean'] <= stats['callback_ns_max']
         assert stats['callback_ns_min'] <= stats['callback_ns_p99'] <= stats['callback_ns_max']
         assert stats['period_ns'] == BLOCK * 1_000_000_000 // RATE
-        assert stats['processing_load'] == pytest.approx(stats['callback_ns_max'] / stats['period_ns'])
+        # Every block here is the same size, so the worst per-block load is exactly the
+        # worst time over the one period, and the mean load is the mean time over it.
+        assert stats['processing_load'] == pytest.approx(stats['callback_ns_max'] / stats['period_ns'], rel=1e-3)
+        assert stats['mean_load'] == pytest.approx(stats['callback_ns_mean'] / stats['period_ns'], rel=1e-3)
         assert sum(stats['histogram']) == 50
         engine.reset_stats()
         run(engine, 3, {SRC: sine(BLOCK * 3)}, {OUT: 2})

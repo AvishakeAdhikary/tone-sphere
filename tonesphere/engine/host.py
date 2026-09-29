@@ -176,6 +176,14 @@ class HostStatistics:
     nominal_latency_ms: float | None = None
 
     cpu_load: float | None = None
+    # Timed on the audio thread by the native engine; None from the PortAudio host, which
+    # has no such timing.
+    processing_load: float | None = None
+    callback_mean_ms: float | None = None
+    callback_max_ms: float | None = None
+    callback_p99_ms: float | None = None
+    audio_thread_allocations: int | None = None
+    backend: str = 'portaudio'
     xruns: int = 0
     callback_count: int = 0
     callback_errors: int = 0
@@ -202,6 +210,12 @@ class HostStatistics:
             'measured_round_trip_ms': self.measured_round_trip_ms,
             'nominal_latency_ms': self.nominal_latency_ms,
             'cpu_usage': self.cpu_load,
+            'processing_load': self.processing_load,
+            'callback_mean_ms': self.callback_mean_ms,
+            'callback_max_ms': self.callback_max_ms,
+            'callback_p99_ms': self.callback_p99_ms,
+            'audio_thread_allocations': self.audio_thread_allocations,
+            'backend': self.backend,
             'xruns': self.xruns,
             'callback_count': self.callback_count,
             'callback_errors': self.callback_errors,

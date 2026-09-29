@@ -514,6 +514,8 @@ void Engine::run_block(const ts_port_buffer* inputs, uint32_t input_count,
         ns_min_.store(UINT64_MAX, std::memory_order_relaxed);
         ns_max_.store(0, std::memory_order_relaxed);
         ns_total_.store(0, std::memory_order_relaxed);
+        frames_total_.store(0, std::memory_order_relaxed);
+        load_max_ppm_.store(0, std::memory_order_relaxed);
         for (auto& bucket : histogram_) bucket.store(0, std::memory_order_relaxed);
         rt_allocations_baseline_ = g_rt_allocations.load(std::memory_order_relaxed);
     }
@@ -537,7 +539,13 @@ void Engine::run_block(const ts_port_buffer* inputs, uint32_t input_count,
     // Binary search over a fixed table: six comparisons, no log() on the audio thread.
     const uint64_t* edge = std::upper_bound(bucket_edges_, bucket_edges_ + TS_HISTOGRAM_BUCKETS - 1, elapsed);
     relaxed_add(histogram_[edge - bucket_edges_], 1);
-    period_ns_.store(static_cast<uint64_t>(frames) * 1'000'000'000ull / sample_rate_, std::memory_order_relaxed);
+    // Load is judged per block against that block's own period: a device loop that splits
+    // one buffer into a full block and a short remainder must not have the remainder's
+    // tiny period set the budget for the full block's time.
+    const uint64_t period = static_cast<uint64_t>(frames) * 1'000'000'000ull / sample_rate_;
+    period_ns_.store(period, std::memory_order_relaxed);
+    relaxed_add(frames_total_, frames);
+    if (period) relaxed_max(load_max_ppm_, elapsed * 1'000'000ull / period);
     rt_allocations_.store(g_rt_allocations.load(std::memory_order_relaxed) - rt_allocations_baseline_,
                           std::memory_order_relaxed);
 }
@@ -849,6 +857,8 @@ void Engine::get_stats(ts_stats& out) const {
     out.callback_ns_max = ns_max_.load(std::memory_order_relaxed);
     out.callback_ns_total = ns_total_.load(std::memory_order_relaxed);
     out.period_ns = period_ns_.load(std::memory_order_relaxed);
+    out.frames_total = frames_total_.load(std::memory_order_relaxed);
+    out.load_max_ppm = load_max_ppm_.load(std::memory_order_relaxed);
     out.plan_generation = plan_generation_.load(std::memory_order_relaxed);
     out.rt_allocations = rt_allocations_.load(std::memory_order_relaxed);
     for (int i = 0; i < TS_HISTOGRAM_BUCKETS; ++i) out.histogram[i] = histogram_[i].load(std::memory_order_relaxed);
