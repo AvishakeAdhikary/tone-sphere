@@ -49,7 +49,7 @@ no VST3 plugins installed, no C/C++ toolchain.
 | **Process loopback (Windows)** | ctypes COM `ActivateAudioInterfaceAsync` (`process_capture.py`, `wasapi_com.py`), a Python capture thread writing into a bus | Native WASAPI capture into a native SPSC port | HARDWARE VERIFIED | `TestSelfCapture::test_captures_the_tone_this_process_plays` on this machine, 2026-09-29. |
 | **Whole-system loopback** | Legacy: none (previously claimed). **Native:** `loopback` stream kind | Native WASAPI loopback | Native: HARDWARE VERIFIED; not yet reachable from `AudioEngine`, which is why `capture_status()` still reports it unimplemented | `test_raw_render_comes_back_whole_at_the_level_sent[loopback]` |
 | **Audio-session detection** | PowerShell `Add-Type` C# block querying the default render endpoint's sessions (`app_capture.py:51-211`) | Native or ctypes IAudioSessionManager2 | IMPLEMENTED | Volume and mute fields are hard-coded (`app_capture.py:207-208`). |
-| **Windows virtual device** | None | PortCls/WaveRT loopback-cable driver, OS-visible endpoints | NOT IMPLEMENTED | — |
+| **Windows virtual device** | `driver/windows_virtual_audio/` — SimpleAudioSample (MS-PL) + a render→capture cable; endpoints "ToneSphere Cable Input/Output", 48 kHz 32-bit stereo | PortCls/WaveRT loopback-cable driver, OS-visible endpoints | IMPLEMENTED (builds, test-signed, `InfVerif /w` clean); **install, enumeration and audio NOT YET VERIFIED**; production signing NOT AVAILABLE | `scripts/build_driver.py`; `tests/hardware/test_virtual_driver.py` skips without the driver; VM run pending |
 | **Linux virtual sink** | `pactl` null sink + ALSA `pulse` PCM | Kept as is | VERIFIED (CI) | `TestRealLinuxSink` in the Linux CI job. |
 | **macOS virtual device** | AudioServerPlugIn in `native/coreaudio-plugin/` | Kept as is | VERIFIED (CI only) | `build-macos-plugin` job round-trips a 1 kHz sine. Day-to-day use UNVERIFIED. |
 | **Built-in DSP** | Python: RBJ biquad EQ with a per-sample Python loop (`effects.py:174`), soft-knee compressor, delay, limiter without lookahead | Native ports of the same formulas | VERIFIED (offline) | `test_effects.py`, `test_dsp.py` signal tests. Reachable only through `AudioEngine.enable_*`; no UI/API/CLI caller. |
@@ -179,6 +179,6 @@ These are fixed by the native engine (Windows) and, where the legacy host stays 
 | M6 | Measured round-trip latency | done — `tonesphere/native/roundtrip.py`; digital path measured, acoustic path unavailable on this machine |
 | M7 | Native VST3 host | done — see `docs/VST3.md`; not yet reachable from the UI/API (M8, M10) |
 | M8 | Engine migration, persistence | done — `AudioEngine` runs on `NativeHost` on Windows; see *Engine on the native host* below |
-| M9 | Windows virtual audio driver | not started |
+| M9 | Windows virtual audio driver | built and statically validated; install/enumeration/audio **not yet verified** (test VM pending) — `docs/VIRTUAL_AUDIO_DRIVER.md` |
 | M10 | UI | not started |
 | M11 | Validation, benchmarks, documentation | not started |

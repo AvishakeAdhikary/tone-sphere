@@ -24,3 +24,7 @@ native/build/
 
 # Built native DLLs (scripts/build_native.py).
 tonesphere/native/_bin/
+
+# Driver build output (scripts/build_driver.py).
+driver/windows_virtual_audio/**/x64/
+driver/windows_virtual_audio/x64/
