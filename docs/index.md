@@ -47,8 +47,9 @@ There is one rule in this project, and its test suite enforces it:
 
 The repository's [README](https://github.com/AvishakeAdhikary/tone-sphere#readme) is the
 authoritative list of what works, what does not work yet, and why — including the Windows
-virtual device, whose driver is built but not yet verified or signed, and exactly where it
-stands in the [virtual audio driver notes](VIRTUAL_AUDIO_DRIVER.md).
+virtual device, whose driver carries audio between applications in a test VM but is not yet
+signed for anyone else's machine, and exactly where it stands in the
+[virtual audio driver notes](VIRTUAL_AUDIO_DRIVER.md).
 
 ## Download
 
@@ -60,13 +61,35 @@ Ubuntu, `portaudio` on Fedora, `portaudio` on Arch); the Linux Python wheel does
 it. Run `main.py test` before anything else — it opens a stream, plays a tone, reports the
 engine's timing and the driver's latency, and tells you PASS, WARN or FAIL per capability.
 
-The Windows executable includes ASIO support built from Steinberg's ASIO SDK under the GNU
-GPL version 3, and is distributed under that licence; each release carries its complete
-source, SDKs included. The Linux and macOS executables are MIT-licensed.
+The Windows executable on GitHub includes ASIO support built from Steinberg's ASIO SDK
+under the GNU GPL version 3, and is distributed under that licence; each release carries
+its complete source, SDKs included. The Microsoft Store package leaves ASIO out, and it and
+the Linux and macOS executables are MIT-licensed.
+
+## Engineering documentation
+
+How ToneSphere is built, and the evidence for every claim above. Each capability carries one
+evidence level, from NOT IMPLEMENTED to HARDWARE VERIFIED, and a figure nobody measured is
+shown as `--`.
+
+- [Engineering report](ENGINEERING_REPORT.md) — what the Windows-native rebuild delivered,
+  with every figure's source.
+- [Implementation status](IMPLEMENTATION_STATUS.md) — the record of what is done, capability
+  by capability.
+- [Architecture](ARCHITECTURE.md) — the Python control plane, the native real-time engine,
+  and the C ABI between them.
+- [Real-time rules](REALTIME.md) — what the audio thread may and may not do, and the
+  measured callback timings.
+- [Windows audio](WINDOWS_AUDIO.md), [ASIO](ASIO.md), [VST3](VST3.md) and the
+  [virtual audio driver](VIRTUAL_AUDIO_DRIVER.md) — each backend, and exactly what has been
+  verified against what.
+- [Testing](TESTING.md) — how "it works" is established, with real signals.
+- [Building on Windows](BUILDING_WINDOWS.md) and [dependencies](DEPENDENCIES.md) — the
+  toolchain, and why each dependency is there.
 
 ## Sponsor ToneSphere
 
-ToneSphere is free, and every feature in it is available without paying anything. Nothing is
+ToneSphere is free today, and every feature in it is available without paying anything. Nothing is
 time-limited, nothing nags, and no function waits behind a donation prompt — that experience
 is the reason this project exists at all.
 

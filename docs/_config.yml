@@ -31,7 +31,8 @@ exclude:
 # Without this, minima's nav lists every page that has a title, which would put the landing
 # page into its own navigation bar next to the site title that already links there.
 header_pages:
+  - ENGINEERING_REPORT.md
+  - IMPLEMENTATION_STATUS.md
   - legal/terms-and-conditions.md
   - legal/terms-of-service.md
   - legal/privacy-policy.md
-  - VIRTUAL_AUDIO_DRIVER.md
