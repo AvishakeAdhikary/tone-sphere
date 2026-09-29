@@ -17,7 +17,8 @@ binds it.
 | ASIO host implementation | **IMPLEMENTED** — driver discovery, loading, initialisation, channel/format/rate/buffer negotiation, `createBuffers`, a native buffer switch driving the engine, `asioMessage` handling, stop/dispose/release |
 | Boundary tests without a driver | **VERIFIED** — `tests/native/test_asio.py`: every Windows ASIO sample type round-trips, aligned types put the sample in the low bits, over-range clips, big-endian types are refused, a missing driver fails with the reason |
 | Against a real ASIO driver: **FlexASIO 1.10b** (software ASIO driver) | **HARDWARE VERIFIED** on the development machine, 2026-09-29 — see below |
-| Against a hardware audio interface's own ASIO driver | **NOT AVAILABLE ON THIS MACHINE** — no interface attached. Until one is tested, ToneSphere's ASIO support is proven with a software driver only |
+| Through FlexASIO to a USB audio interface, **Audio Array AI-04**, WASAPI exclusive | **HARDWARE VERIFIED** 2026-09-30: the interface's clock drives the buffer switch at 144 frames, and its input delivers a real signal — see below |
+| Against an audio interface manufacturer's own ASIO driver | **NOT AVAILABLE** — the AI-04 has none: Audio Array sells it as driver-free, a USB Audio Class device on Windows' in-box driver. Until an interface with its own ASIO driver is tested, ToneSphere's ASIO support is proven through a software ASIO driver only |
 
 A driver name in the registry is not ASIO support. Only a driver initialised by this host,
 with audio moving through its buffer switch, is — and that has now happened with FlexASIO.
@@ -43,6 +44,37 @@ through Windows audio APIs from inside the host process. `tests/hardware/test_as
 
 What this does not establish: behaviour with a hardware interface's driver (different
 threading, sample types, buffer behaviour, reset requests), and anything acoustic.
+
+## Verified through FlexASIO on the AI-04
+
+The Audio Array AI-04 (2 in / 2 out, USB, C-Media VID 0D8C PID 0269, Windows' class driver;
+a guitar on input 1, earphones on the output) with FlexASIO configured for WASAPI exclusive
+on `Line (AI-04)` and `Speakers (AI-04)` and 144-frame buffers (`%USERPROFILE%\FlexASIO.toml`,
+removed afterwards). `tests/hardware/test_asio.py`, 2026-09-30:
+
+- **Query:** 2 in / 2 out, all Int24 LSB (in shared mode FlexASIO reports float32; in
+  exclusive mode the device format passes through); rates 44.1–192 kHz; buffer 144 fixed;
+  reported latency 576 / 720 frames at query, 42.7 / 48.7 ms once running (FlexASIO's
+  report, not a measurement).
+- **Buffer switch:** 499 buffer switches of 144 frames in 1.5 s — 1.497 s of audio, none
+  missed — callback mean 7.9 µs, max 18.2 µs, 0.6 % of the 3 ms period, 0 xruns, 0
+  audio-thread allocations.
+- **Input content:** input 1 carried the guitar's pickup hum at 50.10 Hz, −19.5 dBFS rms
+  (Kolkata mains is 50 Hz); input 2, with nothing plugged in, its noise floor at −63.1 dBFS.
+  A real signal from a physical source crossed the interface's ADC, the class driver,
+  FlexASIO and ToneSphere's buffer switch. Recorded, not asserted.
+- **Output content:** not checked. FlexASIO holds the device exclusively, so its output
+  bypasses the Windows mixer and no loopback can hear it; the output test skips with that
+  reason. Checking it needs a cable from the output to the input (`test_roundtrip.py`'s
+  cable test).
+
+With FlexASIO left at its defaults (shared mode, 882-frame buffers) on the AI-04, the output
+test does run: the 1 kHz tone came back through process loopback at exactly the level sent
+(rms 0.03536 against 0.03536), and the inputs again carried the guitar's hum. The +9.2 dB
+measured with the Realtek above was that driver's enhancement; the AI-04 applies none.
+
+This is the ASIO host driving real interface hardware, through a software ASIO driver. It
+is not a test of any manufacturer's ASIO driver.
 
 ## Licence
 
@@ -116,7 +148,9 @@ one driver at a time. A second `start` while one runs is refused.
 
 The stream status's `reported_latency_ms` is what the driver's `getLatencies` reports for
 the negotiated buffer — the driver's claim, not a measurement. A measured round trip needs
-a loopback path (M6).
+a loopback path: `tonesphere/native/roundtrip.py` measures WASAPI paths; with the AI-04 and
+no cable from its output to its input it reports `--` (confidence 1.0 against a threshold of
+4).
 
 ## Verifying on a machine with a driver
 

@@ -79,7 +79,8 @@ def measure(output_id: str, input_id: str, *, input_kind: str = 'capture', sampl
     microphone or line input, 'loopback' to listen to the output endpoint itself — a digital
     path, useful to check the method). The output stream is the master clock; the input
     stream crosses into it through the engine's drift-corrected ring, and that cushion is
-    part of what is measured.
+    part of what is measured. `exclusive` opens both device streams exclusively (a loopback
+    input cannot be).
     """
     by_id = {e.id: e for e in endpoints()}
     out_ep, in_ep = by_id.get(output_id), by_id.get(input_id)
@@ -108,7 +109,8 @@ def measure(output_id: str, input_id: str, *, input_kind: str = 'capture', sampl
         engine.port_write(STIMULUS, stereo)
         engine.start_wasapi([
             StreamSpec(OUTPUT, 'render', out_ep.mix_channels, output_id, exclusive=exclusive),
-            StreamSpec(INPUT, input_kind, in_channels, input_id if input_kind == 'capture' else output_id),
+            StreamSpec(INPUT, input_kind, in_channels, input_id if input_kind == 'capture' else output_id,
+                       exclusive=exclusive and input_kind == 'capture'),
         ], master=0)
         monitor, captured = [], []
         deadline = time.time() + frames / sample_rate + 0.5

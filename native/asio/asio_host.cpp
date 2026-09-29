@@ -365,8 +365,13 @@ struct AsioStream {
             for (uint32_t i = 0; i < frames; ++i) in_interleaved[static_cast<size_t>(i) * nin + c] = planar[i];
         }
 
+        // Equal pieces, not full blocks plus a short remainder: the engine judges load per
+        // block against that block's own period, and a remainder's tiny period would make
+        // a block's fixed cost look like an overload.
+        const uint32_t pieces = (frames + max_block - 1) / max_block;
+        const uint32_t block = (frames + pieces - 1) / pieces;
         for (uint32_t done = 0; done < frames;) {
-            const uint32_t n = frames - done < max_block ? frames - done : max_block;
+            const uint32_t n = frames - done < block ? frames - done : block;
             in_port.data = in_interleaved.get() + static_cast<size_t>(done) * nin;
             out_port.data = out_interleaved.get() + static_cast<size_t>(done) * nout;
             ts_engine_run_block(engine, nin ? &in_port : nullptr, nin ? 1 : 0, nout ? &out_port : nullptr, nout ? 1 : 0, n);

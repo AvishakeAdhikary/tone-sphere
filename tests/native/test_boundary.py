@@ -81,12 +81,13 @@ class TestDriftResampler:
         assert dominant_frequency(settled) == pytest.approx(1000.0, abs=5.0)
         assert rms(settled) == pytest.approx(0.5 / np.sqrt(2), rel=2e-3)
 
-    @pytest.mark.parametrize("ppm", [-500, -100, 100, 500])
+    @pytest.mark.parametrize("ppm", [-3000, -500, -100, 100, 500, 3000])
     def test_a_drifting_clock_is_absorbed_without_dropouts(self, ppm):
         """
         Two crystals disagree by tens to hundreds of ppm. Uncorrected, 500 ppm fills or
         drains a 512-frame cushion in about 20 seconds; corrected, the fill level must stay
-        bounded and the tone must come through whole, with no gap and no jump.
+        bounded and the tone must come through whole, with no gap and no jump. 3000 ppm is
+        beyond the worst device measured (a USB interface 0.26 % slow at 44.1 kHz).
         """
         out, fills, missing, ratio = self.run(self.BLOCK * (1 + ppm * 1e-6), blocks=6000)
         assert missing == 0, "the consumer ran dry"

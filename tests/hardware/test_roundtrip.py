@@ -7,6 +7,8 @@ confidence, and repeat to the frame. An acoustic or cable path is measured only 
 exists; where none does, the tool must say so and return nothing.
 """
 
+import os
+
 import pytest
 
 from tonesphere.native import available
@@ -77,3 +79,27 @@ def test_the_engine_keeps_a_loopback_measurement_apart_from_the_round_trip():
             engine.measure_round_trip(speaker)
     finally:
         engine.cleanup()
+
+
+def test_an_interface_cable_round_trip():
+    """
+    A cable from an interface's output to its own input (TONESPHERE_TEST_INTERFACE, default
+    "AI-04"): the physical round trip, DAC and ADC included, in exclusive mode. Without the
+    cable the tool must refuse, and the test skips with its reason instead of passing.
+    """
+    name = os.environ.get('TONESPHERE_TEST_INTERFACE', 'AI-04')
+    found = {e.flow: e for e in endpoints() if name in e.name}
+    if 'render' not in found or 'capture' not in found:
+        pytest.skip(f"no interface named '{name}' is connected")
+    period = round(found['render'].min_period_ms * 48) if found['render'].min_period_ms else 144
+    first = measure(found['render'].id, found['capture'].id, exclusive=True, block=period, level_db=-18.0)
+    if first.measured_ms is None:
+        assert first.note
+        pytest.skip(f"MEASURED ROUND TRIP: -- ({name}: {first.note})")
+    second = measure(found['render'].id, found['capture'].id, exclusive=True, block=period, level_db=-18.0)
+    assert first.confidence > CONFIDENCE_THRESHOLD and second.measured_ms is not None, second.note
+    assert first.nominal_ms < first.measured_ms < 200
+    assert abs(first.measured_frames - second.measured_frames) <= period, "a restart moved the delay by over a period"
+    print(f"\n{name} out -> cable -> in, exclusive, {period}-frame period: {first.measured_ms:.2f} / "
+          f"{second.measured_ms:.2f} ms ({first.measured_frames} / {second.measured_frames} frames), confidence "
+          f"{first.confidence:.1f}, nominal {first.nominal_ms:.1f} ms, reported {first.reported_ms}")

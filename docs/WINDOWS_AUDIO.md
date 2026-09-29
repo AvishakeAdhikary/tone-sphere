@@ -31,11 +31,21 @@ threads and are queued there, never on the audio thread.
 
 `NativeEngine.start_wasapi([StreamSpec, ...], master=i)` opens every stream on its own
 thread (MTA, MMCSS "Pro Audio"). The **master** stream's device clock drives the engine:
-on each device event its thread runs exactly as many frames as the device wants, in
-blocks of at most the engine's block size. Every other stream is a **satellite** on its
-own clock: it meets the master through a wait-free ring, read through the native drift
-resampler on the consuming side, which holds the ring's fill level at two device periods
-by consuming within ±0.1 % of real time.
+on each device event its thread runs exactly as many frames as the device wants, cut into
+**equal** blocks of at most the engine's block size — a 144-frame exclusive period with a
+128-frame engine becomes 2 × 72, never 128 + 16, because load is judged per block against
+that block's own period and a 16-frame remainder's 0.33 ms budget made fixed per-block
+costs read as a 152 % overload that never happened. Every other stream is a **satellite**
+on its own clock: it meets the master through a wait-free ring, read through the native
+drift resampler on the consuming side.
+
+**The drift resampler** primes the ring to two device periods, then spends 64 blocks at
+ratio 1 learning the fill this pair of streams actually settles at (sampled before each
+read, a packet-fed ring averages below its primed level; steering at the primed level
+corrects a drift that is not there, and on the AI-04 that warped the first seconds of
+every stream). After that a proportional-integral loop steers the fill back to that
+setpoint within ±0.5 % of real time, with a ±5 % dead band so two streams on one clock
+run at a ratio of exactly 1 (`native/engine/resampler.h`).
 
 Stream kinds: `render`, `capture`, `loopback` (everything a render endpoint plays) and
 `process_loopback` (one process's audio, Windows 10 build 20348+).
@@ -79,6 +89,43 @@ Sound Technology microphone array. All figures are from `tests/hardware/test_was
 | Device notifications registered and polled | IMPLEMENTED | `test_device_notifications_can_be_watched` |
 | Device removal/arrival while streaming | **NOT VERIFIED** | no device was unplugged during a test; a stream whose device disappears is designed to fail with `AUDCLNT_E_DEVICE_INVALIDATED` in its status, but that has not been exercised |
 | Capture of a real microphone signal's content | NOT VERIFIED | the capture master test proves the microphone *clock* drives the engine; nothing asserted what the microphone heard |
+
+## On a USB interface: Audio Array AI-04
+
+2026-09-30, the same machine with an Audio Array AI-04 attached (USB, C-Media VID 0D8C
+PID 0269, Windows' class driver — the maker publishes no driver) and made the default
+device: a guitar on input 1, earphones on the output. `tests/hardware/test_interface.py`
+(set `TONESPHERE_TEST_INTERFACE` for another interface), 20 s per run:
+
+| Mode | Device period | Callback mean / p99 / max | Worst load | Dropouts |
+|---|---|---|---|---|
+| Exclusive 48 kHz, 24-bit | 144 frames (3.0 ms reported) | 5.8 / 16.0 / 209.4 µs | 14.0 % of a 72-frame (1.5 ms) block | 0 glitches, 0 xruns, 0 underruns |
+| Exclusive 44.1 kHz, 24-bit | 132 frames (3.0 ms reported) | 4.7 / 16.0 / 152.7 µs | 10.2 % of a 66-frame block | 0 xruns; **input underruns 0–65 frames per run, at start** (below) |
+| Shared 48 kHz, float32 | 480 frames (10 ms) | 25.1 / 45.3 / 107.5 µs | 1.1 % | 0 xruns; 1 capture discontinuity flag at stream start (WASAPI's own) |
+
+In every mode, 0 audio-thread allocations. What the input delivered is a real signal from
+a physical source: input 1, the guitar, carried its pickup's mains hum at 50.0 Hz
+(Kolkata mains is 50 Hz), −19.9 dBFS rms; input 2, empty, its noise floor at −63.5 dBFS.
+**Monitoring** input → gain bus → output at −40 dB gave the output exactly the input × 0.01,
+sample for sample (`test_the_monitoring_path_carries_the_input_at_the_gain_set`). The
+**render → loopback** digital path measures 33.35 or 43.35 ms (1601 or 2081 frames — one
+480-frame period apart, the phase of each start), identical within a run, confidence 34.3.
+The AI-04's endpoint applies no processing of its own: loopback came back at +0.00 dB in
+every band, raw or not (the Realtek applies a high shelf).
+
+**Its 44.1 kHz input clock.** At 44.1 kHz the AI-04's input delivers 0.2–0.3 % fewer frames
+than its output consumes (792 frames short in 308,748 at the first measurement), and the
+shortfall wanders by ±0.15 % over seconds; at 48 kHz the two sides agree exactly. With the
+first drift resampler (a ±0.1 % limit) that was 355 frames lost every 20 s. Now the
+resampler follows it: no ongoing loss, but a run can lose a few frames (0–65 measured)
+while it converges, and the ratio follows the input's wander — a pitch change of at most
+±2.6 cents, over seconds. That case is recorded as a known failure in the test, not hidden.
+Use 48 kHz on this interface.
+
+**Not established here:** that sound left the output jack (nothing listened to it), and a
+measured round trip through the interface — that needs a cable from its output to its
+input (`test_roundtrip.py::test_an_interface_cable_round_trip` measures it as soon as there
+is one; without one it reads `--`).
 
 ## Latency figures and what they mean
 

@@ -323,6 +323,16 @@ struct Stream {
 
 void add(std::atomic<uint64_t>& a, uint64_t n) { a.fetch_add(n, std::memory_order_relaxed); }
 
+// The engine block to cut a device buffer into: equal pieces, never full blocks plus a
+// short remainder. Load is judged per block against that block's own period, and a
+// 144-frame exclusive period cut 128 + 16 would give the 16-frame piece a 0.33 ms budget
+// that the fixed cost of a block alone can exceed, reporting an overload that never
+// happened (measured on the AI-04: 152 % for a period that finished in 2 % of its time).
+uint32_t even_block(uint32_t frames, uint32_t max_block) {
+    const uint32_t pieces = (frames + max_block - 1) / max_block;
+    return pieces ? (frames + pieces - 1) / pieces : 0;
+}
+
 }  // namespace
 
 class Backend final : public DeviceBackend {
@@ -773,8 +783,9 @@ void Backend::master_render(Stream& s) {
         BYTE* data = nullptr;
         HRESULT hr = s.render_client->GetBuffer(available, &data);
         if (FAILED(hr)) { s.fail("getting the render buffer", hr); break; }
+        const uint32_t block = even_block(available, max_block);
         for (UINT32 done = 0; done < available;) {
-            const uint32_t n = std::min<uint32_t>(max_block, available - done);
+            const uint32_t n = std::min<uint32_t>(block, available - done);
             run_engine(n, nullptr, staging);
             from_float(s.format, staging, data + done * s.block_align, static_cast<size_t>(n) * s.channels);
             done += n;
@@ -804,8 +815,9 @@ void Backend::master_capture(Stream& s) {
                 add(s.glitches, 1);
                 engine_.add_xruns(1);
             }
+            const uint32_t block = even_block(frames, max_block);
             for (UINT32 done = 0; done < frames;) {
-                const uint32_t n = std::min<uint32_t>(max_block, frames - done);
+                const uint32_t n = std::min<uint32_t>(block, frames - done);
                 if (flags & AUDCLNT_BUFFERFLAGS_SILENT)
                     std::fill(staging, staging + static_cast<size_t>(n) * s.channels, 0.0f);
                 else

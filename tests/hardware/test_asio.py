@@ -19,7 +19,7 @@ import numpy as np
 import pytest
 
 from tests.signals import dominant_frequency, rms, sine
-from tonesphere.native import NativeEngine, Node, Route, asio
+from tonesphere.native import NativeEngine, NativeError, Node, Route, asio
 from tonesphere.native import available as native_available
 from tonesphere.native.wasapi import StreamSpec, default_endpoint
 
@@ -99,6 +99,14 @@ def test_the_buffer_switch_runs_the_engine(driver):
           f"callback mean {stats['callback_ns_mean'] / 1000:.1f} us max {stats['callback_ns_max'] / 1000:.1f} us, "
           f"load {stats['processing_load']:.1%}, xruns {stats['xruns']}, reported latency "
           f"{[s['reported_latency_ms'] for s in status]} ms, {status[0]['message']}")
+    if ins:
+        # What the inputs heard, for the record: an instrument's noise floor or a microphone's
+        # room, never asserted, since neither is ToneSphere's to guarantee.
+        body = captured[len(captured) // 3:].astype(np.float64)
+        for c in range(body.shape[1]):
+            level = rms(body[:, c])
+            print(f"  input {c + 1}: {20 * np.log10(max(level, 1e-12)):.1f} dBFS rms, dominant "
+                  f"{dominant_frequency(body[:, c], rate):.2f} Hz")
 
 
 def test_output_content_where_the_driver_renders_through_wasapi(driver):
@@ -120,8 +128,16 @@ def test_output_content_where_the_driver_renders_through_wasapi(driver):
         listener.apply_plan([Node.sink(CLOCK, 2), Node.source(LOOP, 2), Node.sink(BACK, 2, ring_frames=rate * 6)],
                             [Route(LOOP, BACK)])
         asio.start(player, driver, output_node=ASIO_OUT, outputs=(0, 1), buffer_frames=info.preferred_buffer)
-        listener.start_wasapi([StreamSpec(CLOCK, 'render', 2, clock.id),
-                               StreamSpec(LOOP, 'process_loopback', 2, process_id=os.getpid())])
+        try:
+            listener.start_wasapi([StreamSpec(CLOCK, 'render', 2, clock.id),
+                                   StreamSpec(LOOP, 'process_loopback', 2, process_id=os.getpid())])
+        except NativeError as e:
+            player.stop_backend()
+            if 'exclusive mode' not in str(e):
+                raise
+            # A driver holding the device exclusively plays past the Windows mixer, where no
+            # loopback can hear it.
+            pytest.skip(f"{driver} holds the default output exclusively; its output needs a loopback cable")
         time.sleep(2.0)
         back = listener.port_read(BACK, rate * 6)
         listener.stop_backend()

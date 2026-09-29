@@ -1,9 +1,10 @@
-// Drift correction between two device clocks: the native form of the legacy
-// `DriftResampler` (tonesphere/engine/dsp.py). The consumer of a ring between two devices
-// reads through this. It holds the ring's fill level near a target by consuming slightly
-// faster or slower than it produces output — a ratio within ±0.1 %, far below anything
-// audible as pitch — using linear interpolation with a carried fractional position so
-// block boundaries are seamless.
+// Drift correction between two device clocks, grown from the legacy `DriftResampler`
+// (tonesphere/engine/dsp.py) — this one adds a calibration phase, a dead band and an
+// integral term, all found necessary on real hardware. The consumer of a ring between two
+// devices reads through this. It holds the ring's fill level near a setpoint by consuming
+// slightly faster or slower than it produces output — a ratio within ±0.5 %, which only a device
+// that far off its own nominal rate ever needs — using linear interpolation with a carried
+// fractional position so block boundaries are seamless.
 //
 // Allocation-free after construction; process() is called on the consumer's thread only.
 #pragma once
@@ -31,7 +32,7 @@ public:
     // Fill `out` (interleaved, `frames` frames) from `ring`. Returns frames it had to
     // invent as silence because the ring ran dry (0 in steady state).
     uint32_t process(FrameRing& ring, float* out, uint32_t frames) noexcept {
-        const uint32_t fill = ring.available();
+        uint32_t fill = ring.available();
         if (!primed_) {
             // Wait for a cushion before consuming, or the first blocks all underrun.
             if (fill < target_) {
@@ -44,15 +45,47 @@ public:
             // next.
             const uint32_t excess = fill - static_cast<uint32_t>(target_);
             if (excess) ring.skip(excess);
+            fill -= excess;
             primed_ = true;
-            smoothed_fill_ = target_;
+            calibrating_ = kCalibrationBlocks;
+            fill_sum_ = 0.0;
         }
 
-        // The fill level jitters by a whole device period as the two threads interleave,
-        // so steer on a slow average of it, not on each reading.
-        smoothed_fill_ += (fill - smoothed_fill_) * 0.01;
-        const double error = (smoothed_fill_ - target_) / target_;
-        ratio_ = 1.0 + std::clamp(error * 0.002, -0.001, 0.001);
+        if (calibrating_ > 0) {
+            // Priming leaves exactly the target in the ring, but the fill is read just before
+            // each consumption, while the producer delivers in packets: its average over a
+            // packet cycle sits below that by up to half a packet (on the AI-04's loopback,
+            // 31 % of the target). Steering towards the target would then correct a drift that
+            // does not exist, time-warping the first seconds of every stream (and failing
+            // round-trip measurements). So the first blocks run at ratio 1 and learn the fill
+            // this stream actually settles at; only a departure from that is drift.
+            fill_sum_ += fill;
+            ratio_ = 1.0;
+            if (--calibrating_ == 0) {
+                setpoint_ = std::max(1.0, fill_sum_ / kCalibrationBlocks);
+                smoothed_fill_ = setpoint_;
+            }
+        } else {
+            // The fill level jitters by a whole device period as the two threads interleave,
+            // so steer on a slow average of it, not on each reading.
+            smoothed_fill_ += (fill - smoothed_fill_) * 0.01;
+            double error = (smoothed_fill_ - setpoint_) / setpoint_;
+            // Inside the dead band the ratio stays where it is: what is left of the packet
+            // jitter after smoothing is not drift, and steering on it wobbles the ratio by
+            // ~10^-4, enough to smear a 12 kHz sweep (the round-trip measurement) across a
+            // fraction of a sample. Two streams on one clock therefore run at exactly 1.
+            error = error > kDeadBand ? error - kDeadBand : error < -kDeadBand ? error + kDeadBand : 0.0;
+            // Proportional-integral: the integral learns a constant drift, so the fill returns
+            // to the setpoint instead of sagging by drift / gain, which on a small cushion is
+            // the margin against running dry. Two crystals disagree by tens to hundreds of ppm,
+            // but a USB device can be far worse: the Audio Array AI-04 captures "44.1 kHz"
+            // about 0.26 % slow against its own playback clock (tests/hardware/
+            // test_interface.py); the limit covers that with room to spare. The gains are
+            // overdamped (zeta about 1.8-2.5) for block/cushion ratios from 1/4 to 1/2, so
+            // the ratio settles without overshoot.
+            integral_ = std::clamp(integral_ + error * kIntegralGain, -kLimit, kLimit);
+            ratio_ = 1.0 + std::clamp(error * kProportionalGain + integral_, -kLimit, kLimit);
+        }
 
         // Output j samples the input at u = position_ + j * ratio_, where u = 0 is the
         // newest frame already consumed (x[-1]) and u = 1 the first new one (x[0]). Read
@@ -103,8 +136,17 @@ private:
     std::unique_ptr<float[]> staging_;
     std::unique_ptr<float[]> history_;  // x[-2] then x[-1], interleaved by channel
     double position_ = 0.0;
+    static constexpr uint32_t kCalibrationBlocks = 64;
+    static constexpr double kDeadBand = 0.05;
+    static constexpr double kProportionalGain = 0.01;
+    static constexpr double kIntegralGain = 2e-6;
+    static constexpr double kLimit = 0.005;
     double ratio_ = 1.0;
     double smoothed_fill_ = 0.0;
+    double setpoint_ = 1.0;
+    double fill_sum_ = 0.0;
+    double integral_ = 0.0;
+    uint32_t calibrating_ = 0;
     bool primed_ = false;
 };
 
