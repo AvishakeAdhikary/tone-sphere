@@ -32,8 +32,12 @@ def main() -> int:
     if ewdk is None:
         sys.exit("The driver needs the WDK: mount the EWDK (see docs/BUILDING_WINDOWS.md).")
     env = capture_env(str(ewdk / "BuildEnv" / "SetupBuildEnv.cmd"), "amd64")
+    # stampinf dates DriverVer in local time and inf2cat checks it against UTC unless told
+    # otherwise, so east of UTC, between local midnight and UTC midnight, the package fails
+    # as "postdated".
     subprocess.run(["msbuild", str(DRIVER / "SimpleAudioSample.sln"), "/p:Configuration=Release",
-                    "/p:Platform=x64", "/m", "/v:minimal", "/nologo"], env=env, check=True, shell=True)
+                    "/p:Platform=x64", "/p:Inf2CatUseLocalTime=true", "/m", "/v:minimal", "/nologo"],
+                   env=env, check=True, shell=True)
 
     package = OUT / "package"
     sys_file = package / "ToneSphereVirtualAudio.sys"
@@ -42,6 +46,8 @@ def main() -> int:
 
     kit = OUT / "vm_kit"
     if kit.exists():
+        for f in kit.iterdir():
+            f.chmod(0o666)
         shutil.rmtree(kit)
     kit.mkdir(parents=True)
     for f in package.iterdir():
@@ -61,7 +67,9 @@ def main() -> int:
     devcon = sorted(tools.glob("*/x64/devcon.exe"))
     if not devcon:
         sys.exit("devcon.exe not found in the EWDK tools")
-    shutil.copy2(devcon[-1], kit / "devcon.exe")
+    # copyfile, not copy2: the EWDK's files are read-only, and a read-only copy in the kit
+    # stops the next build from replacing the kit.
+    shutil.copyfile(devcon[-1], kit / "devcon.exe")
     for script in ("driver_install.ps1", "driver_uninstall.ps1"):
         shutil.copy2(ROOT / "scripts" / script, kit / script)
 

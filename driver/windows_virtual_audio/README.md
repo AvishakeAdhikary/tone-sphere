@@ -2,15 +2,23 @@
 
 A kernel-mode audio driver that publishes a virtual audio cable Windows itself enumerates:
 
-- **ToneSphere Cable Input**: a render endpoint. Applications play into it.
-- **ToneSphere Cable Output**: a capture endpoint. Applications record from it, and hear
-  what was played into the input.
+- **Speakers (ToneSphere Virtual Audio Cable)**: a render endpoint. Applications play into
+  it.
+- **Microphone Array (ToneSphere Virtual Audio Cable)**: a capture endpoint. Applications
+  record from it, and hear what was played into the render endpoint.
+
+Those are the names Windows gives them: the pin category's generic name, then the device's.
+The INF's "ToneSphere Cable Input/Output" pin names do not reach the endpoint name: that
+takes a `MediaCategories` registration, which the Windows Driver INF rules forbid (InfVerif
+error 1321, registry writes outside HKR), or a `KSPROPERTY_PIN_NAME` handler in the
+driver. Custom endpoint names are **not implemented**.
 
 Both endpoints run one fixed format, 48 kHz, 32-bit PCM, stereo, so the cable copies bytes
 and never converts. ToneSphere uses the endpoints through its ordinary WASAPI backend,
 with no private kernel/user channel. In the most common setup, ToneSphere renders its mix
-into Cable Input and Discord or OBS records Cable Output as a microphone. In the other
-direction, an application plays into Cable Input and ToneSphere captures Cable Output.
+into the cable's render endpoint and Discord or OBS records its capture endpoint as a
+microphone. In the other direction, an application plays into the cable and ToneSphere
+captures the other end.
 
 ## Where it comes from, and its licence
 
@@ -22,11 +30,11 @@ is a separate binary. Modifications are marked `ToneSphere:` in the source. All 
 
 | File | Change |
 |---|---|
-| `Source/Main/cable.cpp`, `cable.h` | **New.** The cable: a nonpaged ring (100 ms bound, oldest audio dropped first) between the render stream and the capture stream, under a spin lock |
-| `Source/Main/minwavertstream.cpp` | Render: the data-file writer is replaced by `CableWrite`. Capture: the test-tone generator is replaced by `CableRead` |
+| `Source/Main/cable.cpp`, `cable.h` | **New.** The cable: a nonpaged ring (100 ms bound, oldest audio dropped first) between the render stream and the capture stream, under a spin lock; `CableFlush` empties it |
+| `Source/Main/minwavertstream.cpp` | Render: the data-file writer is replaced by `CableWrite`, called on every position update (the sample only called its writer when data files were enabled, which left the cable empty). Capture: the test-tone generator is replaced by `CableRead`, and a capture stream entering RUN empties the cable, so a new recording never starts with audio played before it |
 | `Source/Main/adapter.cpp` | The cable is allocated in `DriverEntry` and freed in `DriverUnload`. The `DoNotCreateDataFiles` registry override is removed, so the driver never writes render audio to disk |
 | `Source/Filters/speakerwavtable.h` | The render endpoint moves from 16-bit to 32-bit PCM, matching the capture endpoint |
-| `Source/Main/SimpleAudioSample.inx` | Names: provider and manufacturer "Neural Nexus Studios", device "ToneSphere Virtual Audio Cable", endpoints "ToneSphere Cable Input/Output", hardware ID `ROOT\ToneSphereVirtualAudio`, service `ToneSphereVirtualAudio` |
+| `Source/Main/SimpleAudioSample.inx` | Names: provider and manufacturer "Neural Nexus Studios", device "ToneSphere Virtual Audio Cable", pin names "ToneSphere Cable Input/Output" (which Windows does not show; see above), hardware ID `ROOT\ToneSphereVirtualAudio`, service `ToneSphereVirtualAudio` |
 | `Source/Main/Main.vcxproj` | Binary name `ToneSphereVirtualAudio.sys`; `cable.cpp` added |
 
 Everything else is Microsoft's code unchanged: the topology and WaveRT miniports, the
@@ -46,6 +54,10 @@ install/uninstall scripts. `InfVerif /w` (Windows Driver requirements) passes on
 built INF.
 
 ## Install: in a test VM only
+
+`scripts/vm/new_driver_vm.ps1` builds that VM from a Windows 11 ISO, and
+`scripts/vm/run_driver_tests.ps1` runs a whole install/test/uninstall pass in it
+(`docs/VIRTUAL_AUDIO_DRIVER.md`, "Testing it"). By hand:
 
 1. Use a Hyper-V Generation 2 VM running Windows 11, with Secure Boot **off** in the VM's
    settings.

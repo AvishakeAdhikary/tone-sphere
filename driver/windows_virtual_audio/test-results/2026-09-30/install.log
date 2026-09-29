@@ -1,0 +1,20 @@
+﻿Trusted the test certificate (Root and TrustedPublisher).
+Device node created. Install is complete when drivers are installed...
+Updating drivers for ROOT\ToneSphereVirtualAudio from C:\ts\driver\windows_virtual_audio\x64\Release\vm_kit\SimpleAudioSample.inf.
+Drivers installed successfully.
+
+Device:
+
+Status FriendlyName                   InstanceId     
+------ ------------                   ----------     
+OK     ToneSphere Virtual Audio Cable ROOT\MEDIA\0000
+
+
+Endpoints:
+
+Status FriendlyName                                     
+------ ------------                                     
+OK     Speakers (ToneSphere Virtual Audio Cable)        
+OK     Microphone Array (ToneSphere Virtual Audio Cable)
+
+

@@ -29,7 +29,10 @@ foreach ($inf in $published) {
 
 $cer = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2 (Join-Path $kit 'ToneSphereTestSigning.cer')
 foreach ($store in 'Root', 'TrustedPublisher') {
-    Get-ChildItem "Cert:\LocalMachine\$store" | Where-Object { $_.Thumbprint -eq $cer.Thumbprint } | Remove-Item
+    if (Get-ChildItem "Cert:\LocalMachine\$store" | Where-Object { $_.Thumbprint -eq $cer.Thumbprint }) {
+        certutil -delstore $store $cer.Thumbprint | Out-Null
+        if ($LASTEXITCODE) { throw "could not remove the test certificate from LocalMachine\$store ($LASTEXITCODE)" }
+    }
 }
 
 Start-Sleep -Seconds 3

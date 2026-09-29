@@ -19,9 +19,13 @@ if ($boot -notmatch 'testsigning\s+Yes') {
     throw 'Test-signing is off. This driver is test-signed and is installed only in a test VM with test-signing on.'
 }
 
+# certutil, not Import-Certificate: over PowerShell Direct or remoting, Import-Certificate is
+# refused ("access denied") for LocalMachine\Root even with a full administrator token.
 $cer = Join-Path $kit 'ToneSphereTestSigning.cer'
-Import-Certificate -FilePath $cer -CertStoreLocation Cert:\LocalMachine\Root | Out-Null
-Import-Certificate -FilePath $cer -CertStoreLocation Cert:\LocalMachine\TrustedPublisher | Out-Null
+foreach ($store in 'Root', 'TrustedPublisher') {
+    certutil -addstore -f $store $cer | Out-Null
+    if ($LASTEXITCODE) { throw "could not add the test certificate to LocalMachine\$store ($LASTEXITCODE)" }
+}
 Write-Host "Trusted the test certificate (Root and TrustedPublisher)."
 
 & (Join-Path $kit 'devcon.exe') install (Join-Path $kit 'SimpleAudioSample.inf') $hardwareId

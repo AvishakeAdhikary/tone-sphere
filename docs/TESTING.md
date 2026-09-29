@@ -34,7 +34,7 @@ missing, and never pass by default.
 |---|---|---|
 | `tests/native/` | the C++ engine through its C ABI: rings under two-thread stress, plan swaps under a running audio thread, mixing, channel mapping, gain ramps, strips, EQ against the Python reference sample for sample, compressor, delay, limiter, resampler, sample conversion, meters, statistics, allocation counting, the VST3 host with the deterministic test plugin (bit-exact gain and delay, reported latency equal to measured, state, a plugin that crashes on load and one that crashes on the audio thread), the ASIO host's conversions and message handling, `AudioEngine` on the native host with no device | the built DLLs (Windows) |
 | `tests/unit/`, `tests/test_*.py` | the control plane, the PortAudio host's mixer with synthetic signals, DSP formulas, presets, config store, network transport and jitter buffer, the UI offscreen, i18n catalogues, legal documents, packaging, and `test_honesty.py` | nothing |
-| `tests/hardware/` | WASAPI render into loopback (bit-exact), exclusive-mode negotiation, three independent clocks, process loopback; ASIO against FlexASIO; the round-trip measurement on the digital path; VST3 with Surge XT; `AudioEngine` through a plugin to the speaker, heard back by process loopback (level within 2 %, balance, bypass, per-channel meters); the inserts dialog driving a real plugin; the virtual driver | a real audio device; FlexASIO; Surge XT; the driver (VM only) |
+| `tests/hardware/` | WASAPI render into loopback (bit-exact), exclusive-mode negotiation, three independent clocks, process loopback; ASIO against FlexASIO, including FlexASIO on a USB interface; a USB interface's own clock in exclusive and shared mode, its input's real signal, and a monitoring path (`test_interface.py`, `TONESPHERE_TEST_INTERFACE`); the round-trip measurement on the digital path, and through an interface cable when one is connected; VST3 with Surge XT; `AudioEngine` through a plugin to the speaker, heard back by process loopback (level within 2 %, balance, bypass, per-channel meters); the inserts dialog driving a real plugin; the virtual driver | a real audio device; FlexASIO; Surge XT; the driver (VM only) |
 
 About 880 tests in all; `uv run pytest --collect-only -q` gives the current number.
 
@@ -100,18 +100,22 @@ design (see [REALTIME.md](REALTIME.md)). Results are kept under `benchmarks/resu
 
 ## The virtual audio driver
 
-Tested only inside a Hyper-V VM with test-signing on, never on a development machine:
+Tested only inside a Hyper-V VM with test-signing on, never on a development machine. On
+a host with Hyper-V, elevated:
 
-1. `uv run python scripts/build_driver.py` builds and test-signs the package and assembles
+1. `scripts\vm\new_driver_vm.ps1 -Iso <Windows 11 ISO>` builds the VM once: the image applied
+   to a VHDX, test-signing on in the VM disk's own boot store, Secure Boot off, an answer
+   file, Windows Update off in the guest, and a `clean` checkpoint taken once OOBE's own
+   restart is over.
+2. `uv run python scripts/build_driver.py` builds and test-signs the package and assembles
    `driver/windows_virtual_audio/x64/Release/vm_kit/`.
-2. In a Generation 2 Windows 11 VM with Secure Boot off: `bcdedit /set testsigning on`,
-   reboot, copy the kit in, run `driver_install.ps1` elevated.
-3. With the repository and `uv` in the VM:
-   `uv run pytest tests/hardware/test_virtual_driver.py -m hardware -s`.
-4. `driver_uninstall.ps1` removes the device, the driver-store package and the certificate
-   trust, and fails if anything is left.
+3. `scripts\vm\run_driver_tests.ps1` restores a checkpoint, copies in the tree and the built
+   binaries, installs the driver, runs `tests/hardware/test_virtual_driver.py`, uninstalls,
+   checks nothing is left, and brings every log back. The first pass also takes a `deps`
+   checkpoint with Python and the locked dependencies installed.
 
-Until step 3 has passed, the driver is IMPLEMENTED, not VERIFIED.
+It passed on 2026-09-30, 7 of 7, and the driver is HARDWARE VERIFIED in the VM
+([VIRTUAL_AUDIO_DRIVER.md](VIRTUAL_AUDIO_DRIVER.md)).
 
 ## CI
 

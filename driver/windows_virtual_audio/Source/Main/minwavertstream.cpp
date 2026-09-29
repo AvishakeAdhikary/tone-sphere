@@ -1248,6 +1248,11 @@ NTSTATUS CMiniportWaveRTStream::SetState
             break;
 
         case KSSTATE_RUN:
+            // ToneSphere: a capture starts from an empty cable (cable.cpp, CableFlush).
+            if (m_bCapture)
+            {
+                CableFlush();
+            }
             // Start DMA
             LARGE_INTEGER ullPerfCounterTemp;
             ullPerfCounterTemp = KeQueryPerformanceCounter(&m_ullPerformanceCounterFrequency);
@@ -1365,11 +1370,11 @@ VOID CMiniportWaveRTStream::UpdatePosition
             m_bLastBufferRendered = TRUE;
         }
 
-        if (!g_DoNotCreateDataFiles)
-        {
-            // Read from buffer and write to a file.
-            ReadBytes(ByteDisplacement);
-        }
+        // ToneSphere: always, into the cable. In the sample this call wrote render audio to a
+        // file and was gated on g_DoNotCreateDataFiles, which is fixed at 1 here since the
+        // registry override was removed; left gated, nothing ever entered the cable (found
+        // by tests/hardware/test_virtual_driver.py in the test VM, 2026-09-30).
+        ReadBytes(ByteDisplacement);
     }
     
     // Increment the DMA position by the number of bytes displaced since the last

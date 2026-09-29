@@ -1507,8 +1507,10 @@ class AudioEngine:
 
     # --- The ToneSphere virtual audio driver ---
 
-    VIRTUAL_CABLE_RENDER = "ToneSphere Cable Input"
-    VIRTUAL_CABLE_CAPTURE = "ToneSphere Cable Output"
+    # Windows names each endpoint after its pin category and the device, so the driver's two
+    # endpoints are "Speakers (ToneSphere Virtual Audio Cable)" and "Microphone Array
+    # (ToneSphere Virtual Audio Cable)"; the device name is what identifies them.
+    VIRTUAL_CABLE = "ToneSphere Virtual Audio Cable"
 
     def virtual_device_status(self) -> dict[str, Any]:
         """
@@ -1516,8 +1518,8 @@ class AudioEngine:
         reports: it is what enumeration shows, not a claim that audio crosses the cable,
         which only `tests/hardware/test_virtual_driver.py` proves.
         """
-        render = next((d for d in self._devices if d.can_output and self.VIRTUAL_CABLE_RENDER in d.name), None)
-        capture = next((d for d in self._devices if d.can_input and self.VIRTUAL_CABLE_CAPTURE in d.name), None)
+        render = next((d for d in self._devices if d.can_output and self.VIRTUAL_CABLE in d.name), None)
+        capture = next((d for d in self._devices if d.can_input and self.VIRTUAL_CABLE in d.name), None)
         ids = {d.key: i for i, d in self._device_by_id.items()}
         return {
             'installed': render is not None and capture is not None,

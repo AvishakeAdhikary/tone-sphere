@@ -1,0 +1,49 @@
+============================= test session starts =============================
+platform win32 -- Python 3.13.15, pytest-9.1.1, pluggy-1.6.0 -- C:\ts-venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: C:\ts
+configfile: pyproject.toml
+plugins: anyio-4.11.0
+collecting ... collected 7 items
+
+tests/hardware/test_virtual_driver.py::test_windows_enumerates_both_endpoints_with_one_format 
+render: Speakers (ToneSphere Virtual Audio Cable) [{0.0.0.00000000}.{9a7062f4-4665-432a-890c-3d317d68876f}]
+capture: Microphone Array (ToneSphere Virtual Audio Cable) [{0.0.1.00000000}.{46e51b3a-9e29-4e5e-85fe-1c3c50bb129c}]
+PASSED
+tests/hardware/test_virtual_driver.py::test_one_application_to_another_through_the_cable 
+PortAudio -> cable -> PortAudio: 1000.00 Hz, rms 0.14142 (expected 0.14142, +0.000 dB)
+PASSED
+tests/hardware/test_virtual_driver.py::test_an_application_into_tonesphere 
+PortAudio -> cable -> ToneSphere: 1000.00 Hz, rms 0.14142 (expected 0.14142, +0.000 dB)
+PASSED
+tests/hardware/test_virtual_driver.py::test_tonesphere_through_a_plugin_into_another_application 
+ToneSphere -> Test Gain x0.5 -> cable -> PortAudio: 1000.00 Hz, rms 0.07071 (expected 0.07071, +0.000 dB)
+PASSED
+tests/hardware/test_virtual_driver.py::test_nothing_rendered_is_silence PASSED
+tests/hardware/test_virtual_driver.py::test_a_new_capture_does_not_hear_what_was_played_before_it PASSED
+tests/hardware/test_virtual_driver.py::test_the_engine_reports_the_cable_installed [32m[INFO][0m 2026-09-29 22:51:58 - tonesphere - Added channel control for device 0 with 2 channels
+[32m[INFO][0m 2026-09-29 22:51:58 - tonesphere - Added channel control for device 1 with 2 channels
+[32m[INFO][0m 2026-09-29 22:51:58 - tonesphere.core.engine - Engine initialized: 2 devices, Windows WASAPI
+[32m[INFO][0m 2026-09-29 22:51:58 - tonesphere.network.udp_transport - UDP audio transport stopped
+[32m[INFO][0m 2026-09-29 22:51:58 - tonesphere - Network audio router stopped
+[32m[INFO][0m 2026-09-29 22:51:58 - tonesphere.core.engine - Engine cleanup complete
+PASSED
+
+=================================== PASSES ====================================
+_________________ test_the_engine_reports_the_cable_installed _________________
+------------------------------ Captured log call ------------------------------
+INFO     tonesphere:channel_control.py:230 Added channel control for device 0 with 2 channels
+INFO     tonesphere:channel_control.py:230 Added channel control for device 1 with 2 channels
+INFO     tonesphere.core.engine:engine.py:171 Engine initialized: 2 devices, Windows WASAPI
+INFO     tonesphere.network.udp_transport:udp_transport.py:484 UDP audio transport stopped
+INFO     tonesphere:audio_router.py:188 Network audio router stopped
+INFO     tonesphere.core.engine:engine.py:292 Engine cleanup complete
+=========================== short test summary info ===========================
+PASSED tests/hardware/test_virtual_driver.py::test_windows_enumerates_both_endpoints_with_one_format
+PASSED tests/hardware/test_virtual_driver.py::test_one_application_to_another_through_the_cable
+PASSED tests/hardware/test_virtual_driver.py::test_an_application_into_tonesphere
+PASSED tests/hardware/test_virtual_driver.py::test_tonesphere_through_a_plugin_into_another_application
+PASSED tests/hardware/test_virtual_driver.py::test_nothing_rendered_is_silence
+PASSED tests/hardware/test_virtual_driver.py::test_a_new_capture_does_not_hear_what_was_played_before_it
+PASSED tests/hardware/test_virtual_driver.py::test_the_engine_reports_the_cable_installed
+============================= 7 passed in 18.89s ==============================

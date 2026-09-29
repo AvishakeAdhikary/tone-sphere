@@ -1,0 +1,13 @@
+{
+    "Steps":  {
+                  "pytest":  0,
+                  "install":  0,
+                  "uninstall":  0,
+                  "uv_sync":  0
+              },
+    "Os":  "Microsoft Windows 11 Enterprise LTSC Evaluation 10.0.26100.0",
+    "Session":  0,
+    "PSComputerName":  "ToneSphereDriverVM",
+    "RunspaceId":  "cd759fc7-4404-438b-9f13-8a9ec5b3bdb9",
+    "PSShowComputerName":  true
+}

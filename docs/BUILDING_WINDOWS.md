@@ -79,3 +79,13 @@ The driver additionally needs the kernel-mode headers and WDF, both of which the
 has (`Include\10.0.28000.0\km`, `Include\wdf`). Driver packages are only ever installed
 into a Hyper-V VM with test-signing on — never on the development host. See
 `docs/VIRTUAL_AUDIO_DRIVER.md`.
+
+`build_driver.py` passes `Inf2CatUseLocalTime`: stampinf dates the INF in local time and
+inf2cat otherwise checks that date against UTC, so east of UTC, between local and UTC
+midnight, the package fails as "postdated".
+
+The test VM (`scripts/vm/`) needs Hyper-V enabled on the host and an elevated Windows
+PowerShell, and nothing else installed: the image is applied with the Dism and Storage
+modules and made bootable with the host's own `bcdboot` (the 26100 image's copy fails on a
+26200 host). The VM was built from the Windows 11 Enterprise LTSC 90-day evaluation ISO
+from Microsoft's Evaluation Center.

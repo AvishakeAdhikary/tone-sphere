@@ -7,8 +7,8 @@ SimpleAudioSample and distributed under the same Microsoft Public License (see L
 driver/windows_virtual_audio).
 
 This is the only component of the driver that is not Microsoft's sample. It joins the two
-endpoints: what applications render into "ToneSphere Cable Input" is what applications
-capturing "ToneSphere Cable Output" receive. Both endpoints run the same format (48 kHz,
+endpoints: what applications render into the cable's render endpoint is what applications
+capturing its capture endpoint receive. Both endpoints run the same format (48 kHz,
 32-bit PCM, stereo), so this copies bytes and never converts.
 
 It does nothing else, deliberately: no mixing, no resampling, no DSP. All of that belongs in
@@ -137,4 +137,20 @@ VOID CableRead(_Out_writes_bytes_(Bytes) UCHAR* Destination, _In_ ULONG Bytes)
     {
         RtlZeroMemory(Destination, Bytes - available);
     }
+}
+
+// A capture that starts begins with an empty cable: whatever is queued was rendered before
+// anyone was listening, and replaying it would put a previous application's audio into a new
+// recording (up to kMaxQueuedBytes of it).
+VOID CableFlush()
+{
+    if (g_buffer == nullptr)
+    {
+        return;
+    }
+    KIRQL irql;
+    KeAcquireSpinLock(&g_lock, &irql);
+    g_read = 0;
+    g_fill = 0;
+    KeReleaseSpinLock(&g_lock, irql);
 }
