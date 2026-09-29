@@ -2,8 +2,8 @@
 title: Terms of Service
 layout: default
 permalink: /legal/terms-of-service/
-version: "1.2"
-effective_date: "2026-09-29"
+version: "1.3"
+effective_date: "2026-09-30"
 publisher: Neural Nexus Studios
 description: What the ToneSphere application provides and does not provide, how it is distributed, updated and supported, and the terms attaching to its optional network streaming feature.
 ---
@@ -12,8 +12,8 @@ description: What the ToneSphere application provides and does not provide, how 
 
 - **Application:** ToneSphere
 - **Publisher:** Neural Nexus Studios, an individual developer, Kolkata, West Bengal, India
-- **Document version:** 1.2
-- **Effective date:** 29 September 2026
+- **Document version:** 1.3
+- **Effective date:** 30 September 2026
 
 ## 1. What this document covers
 
@@ -103,12 +103,13 @@ This section exists so that you do not have to discover these by trying them.
   commercial plugin has been tested, and none is represented as compatible.
 - **No whole-system capture.** Capturing everything a device plays is not implemented;
   capturing one application's audio (below) is.
-- **No ASIO verified against audio interface hardware.** ASIO on Windows is provided by a
+- **No audio interface's own ASIO driver tested.** ASIO on Windows is provided by a
   component built from Steinberg's ASIO SDK under the GNU GPL version 3, and a build that
   includes it is distributed under that licence (section 3 of the
-  [Terms and Conditions](terms-and-conditions.md)). It has been verified against FlexASIO,
-  a genuine but software ASIO driver; no hardware interface's own ASIO driver has been
-  tested.
+  [Terms and Conditions](terms-and-conditions.md)). It has been verified with FlexASIO, a
+  genuine but software ASIO driver, including with FlexASIO driving a USB audio interface;
+  no interface manufacturer's ASIO driver has been tested. **The Microsoft Store package
+  does not include ASIO at all**; it runs on WASAPI, shared and exclusive.
 - **No recording to file.** ToneSphere routes and monitors audio; it does not capture it to
   disk. If you want to record, record in your DAW or recorder of choice, downstream of
   ToneSphere.
@@ -231,11 +232,16 @@ this section apply to a copy acquired from the Store once it is available there.
 - Information handling by both channels is described in section 6 of the
   [Privacy Policy](privacy-policy.md).
 
-## 10. Sponsorship and donations
+## 10. Price, sponsorship and donations
 
-ToneSphere is offered at no charge, and every feature it has is available without paying
-for it. No function is withheld, delayed, time-limited, nagged for, or gated behind a
+ToneSphere is currently offered at no charge, and every feature it has is available without
+paying for it. No function is withheld, delayed, time-limited, nagged for, or gated behind a
 payment or a donation prompt.
+
+Future versions or editions may be offered for a price, through the Microsoft Store or
+another channel. That does not change the terms of a copy you already have, and a price is
+always shown before anything is charged; section 3 of the
+[Terms and Conditions](terms-and-conditions.md) sets this out.
 
 You can support the project's continued development through GitHub Sponsors, Patreon, Ko-fi
 or Buy Me a Coffee. If you do:

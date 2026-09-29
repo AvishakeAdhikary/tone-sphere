@@ -216,6 +216,18 @@ New-Item -ItemType Directory -Force -Path $layoutDir | Out-Null
 Copy-Item -Recurse -Path $distApp -Destination (Join-Path $layoutDir 'ToneSphere')
 Copy-Item -Recurse -Path $assetsDir -Destination (Join-Path $layoutDir 'assets')
 
+# The Store package never carries the ASIO host (docs/MICROSOFT_STORE.md section 7): with
+# tonesphere_asio.dll in it the package would be GPLv3 as a whole, and the owner keeps the
+# Store listing free of GPLv3 so that its price and licence terms stay theirs to set. Without
+# the DLL the app reports "ASIO: unavailable" and runs on WASAPI shared and exclusive; the
+# GPLv3 texts go with the DLL, since nothing left in the package is under GPLv3.
+$gpl = @(Get-ChildItem -Path $layoutDir -Recurse -Filter 'tonesphere_asio.dll') +
+       @(Get-ChildItem -Path $layoutDir -Recurse -Directory | Where-Object { $_.Name -in 'gpl-3.0', 'asio-sdk' })
+foreach ($item in $gpl) {
+    Write-Host "   leaving out $($item.FullName.Substring($layoutDir.Length + 1))"
+    Remove-Item -LiteralPath $item.FullName -Recurse -Force
+}
+
 $manifest.Package.Identity.Version = $msixVersion
 $manifest.Save((Join-Path $layoutDir 'AppxManifest.xml'))
 

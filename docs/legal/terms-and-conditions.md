@@ -2,8 +2,8 @@
 title: Terms and Conditions
 layout: default
 permalink: /legal/terms-and-conditions/
-version: "1.1"
-effective_date: "2026-09-29"
+version: "1.2"
+effective_date: "2026-09-30"
 publisher: Neural Nexus Studios
 description: The agreement between you and Neural Nexus Studios governing your use of the ToneSphere application, including the grant of use, acceptable use, warranties, liability and governing law.
 ---
@@ -12,8 +12,8 @@ description: The agreement between you and Neural Nexus Studios governing your u
 
 - **Application:** ToneSphere
 - **Publisher:** Neural Nexus Studios, an individual developer, Kolkata, West Bengal, India
-- **Document version:** 1.1
-- **Effective date:** 29 September 2026
+- **Document version:** 1.2
+- **Effective date:** 30 September 2026
 
 ## 1. About this document
 
@@ -58,8 +58,9 @@ under-read:
 - **The one condition is attribution.** The copyright notice and the permission notice must
   be included in all copies or substantial portions of the Application. Removing them is
   the one thing that takes you outside the licence.
-- **No fee is charged** by us for the Application as we distribute it, through either the
-  Microsoft Store or the project's releases.
+- **No fee is charged today** by us for the Application as we distribute it, through
+  either the Microsoft Store or the project's releases. See "Price and future versions"
+  below.
 - **The licence covers the software, not the name.** "ToneSphere" and "Neural Nexus Studios"
   are ours. MIT grants no trademark rights, so a modified or redistributed build must not be
   presented in a way that suggests it is the official Application or that we endorse,
@@ -71,8 +72,8 @@ License, version 3.** ASIO support is a separate component, `tonesphere_asio.dll
 Steinberg's ASIO SDK, which Steinberg licenses under GPLv3; its own source, in the
 `native/asio` directory of the repository, is GPLv3 (the licence text is in that directory's
 `LICENSE` file). A distributed build that includes that component — the Windows executable
-published on the project's releases page, and any Microsoft Store package that includes
-it — is distributed under GPLv3 as a whole. For such a build:
+published on the project's releases page — is distributed under GPLv3 as a whole. The
+Microsoft Store package does not include that component. For a build that does:
 
 - you have every right GPLv3 grants, including to run, study, modify and convey it;
 - its Corresponding Source, including the Steinberg SDK sources it was built from, is
@@ -84,8 +85,21 @@ it — is distributed under GPLv3 as a whole. For such a build:
   the acceptable-use terms in section 4: they describe conduct the law or other people's
   rights already govern, and are not conditions on your licence.
 
-Builds without that component (the Linux and macOS executables) are under the MIT Licence
-alone.
+Builds without that component — the Microsoft Store package, and the Linux and macOS
+executables — are under the MIT Licence alone.
+
+**Price and future versions.** The Application is free of charge today. We may in future
+offer paid versions, editions or features, through the Microsoft Store or through other
+channels, and may release future versions under licence terms different from those above.
+If we do:
+
+- a copy you have already obtained keeps the licence it came with, which is not withdrawn,
+  and continues to work as it did;
+- the price, and the licence terms of a paid version, are shown to you before you pay, and
+  nothing is charged for without your acting to buy it;
+- a purchase through the Microsoft Store, including payment and refunds, is handled by
+  Microsoft under its own terms (section 14), and a purchase through another channel under
+  that channel's terms as presented at the time.
 
 ## 4. Acceptable use
 
@@ -197,8 +211,8 @@ of such loss.
 
 To the fullest extent permitted by applicable law, our total aggregate liability arising out
 of or in connection with the Application and this agreement is limited to the greater of the
-amount you actually paid us for the Application — which, as we charge nothing for it, will
-ordinarily be zero — or INR 1,000.
+amount you actually paid for the Application in the twelve months before the claim — which,
+for a copy obtained free of charge, is zero — or INR 1,000.
 
 Nothing in this agreement excludes or limits liability that cannot lawfully be excluded or
 limited, including liability for death or personal injury caused by negligence, or for

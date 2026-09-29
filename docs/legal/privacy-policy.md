@@ -2,8 +2,8 @@
 title: Privacy Policy
 layout: default
 permalink: /legal/privacy-policy/
-version: "1.1"
-effective_date: "2026-09-29"
+version: "1.2"
+effective_date: "2026-09-30"
 publisher: Neural Nexus Studios
 description: ToneSphere collects no user information and has no user accounts. This policy states what stays on your machine, and what the one optional feature that sends audio off it actually does.
 ---
@@ -12,8 +12,8 @@ description: ToneSphere collects no user information and has no user accounts. T
 
 - **Application:** ToneSphere
 - **Publisher:** Neural Nexus Studios, an individual developer, Kolkata, West Bengal, India
-- **Policy version:** 1.1
-- **Effective date:** 29 September 2026
+- **Policy version:** 1.2
+- **Effective date:** 30 September 2026
 
 ## 1. Summary
 
@@ -141,6 +141,11 @@ service, and those services keep their own records:
   opening an issue there, is processed under the GitHub Privacy Statement. Publicly filed
   issues are visible to everyone, including the GitHub username you write them under.
   Neural Nexus Studios sees the public issue and aggregate download counts, nothing more.
+
+If a version of ToneSphere is ever sold, the sale is processed by the store or platform it
+is bought through, under that platform's privacy statement. Neural Nexus Studios receives no
+card or bank details, and would receive only what that platform passes to publishers about
+a sale; no account with us is created or needed.
 
 Neither channel reports anything to ToneSphere, and the application does not contact either
 of them while running. It performs no update check and makes no outbound request of its own.

@@ -20,6 +20,7 @@ Read this first, because it governs everything below:
 | `packaging/msix/generate_assets.py` — the 40-file logo set from one brand PNG | **done**, run for real |
 | `packaging/msix/build_msix.ps1` — freeze, stage, pack, optionally sign | **done** through the pack step: run end to end on Windows 11 build 26200 / SDK 10.0.26100.8249, producing an 87.8 MB unsigned x64 `.msix` (317 entries, `ToneSphere/ToneSphere.exe` at the declared path). The `signtool` branch has never run — no certificate exists |
 | `tests/test_msix_packaging.py` — manifest, capability set, version, asset coverage | **done**, in the CI-safe suite |
+| The package leaves out the GPLv3 ASIO host (section 7) | **written** in `build_msix.ps1`; no package has been built with it yet, so the exclusion itself has not run |
 | Real Store `Identity` values in the manifest | **owner**, Partner Center only |
 | Signed package installed and launched from an MSIX | **not done** — see below |
 | Partner Center product, age rating, privacy policy URL, submission | **owner** |
@@ -303,33 +304,51 @@ Per-submission, on the reserved product:
   `"%ProgramFiles(x86)%\Windows Kits\10\App Certification Kit\appcert.exe" test -appxpackagepath <msix> -reportoutputpath report.xml`.
   It is the same suite Store ingestion runs. **It has not been run here.**
 
-## 7. Licensing: the package is GPLv3 if it carries ASIO
+## 7. Licensing: the Store package does not carry ASIO
 
-`build_msix.ps1` stages the one-folder frozen app, and on a machine where the native build
-produced it, that app contains `tonesphere_asio.dll` — built from Steinberg's ASIO SDK under
-GPLv3. A package carrying it is distributed under GPLv3 as a whole (section 3 of the Terms
-and Conditions; `docs/ASIO.md`). That has three consequences at submission:
+**Decision (30 September 2026): the Store package is MIT only.** `build_msix.ps1` leaves
+`tonesphere_asio.dll` and the GPLv3 licence texts out of the staged layout, and says which
+files it left out. The app then reports `ASIO: unavailable` and runs on WASAPI shared and
+exclusive, which is its lowest-latency path on this machine anyway (`docs/WINDOWS_AUDIO.md`).
 
-1. **The licence text travels with it.** `tonesphere.spec` bundles `licenses/gpl-3.0`, the
-   ASIO SDK's and VST3 SDK's licence files and ToneSphere's own MIT `LICENSE` whenever the
-   DLLs are present, so the staged package already contains them.
-2. **The Corresponding Source has to be offered.** Every Windows release publishes
-   `ToneSphere-windows-source.zip` (`scripts/package_source.py`), which includes both SDKs.
-   The Store listing's description should say the app is GPLv3 and link that release's
-   source archive, and a Store package should be built from a tagged release so that the
-   archive matches it.
-3. **The Store's own licence terms must not add restrictions.** Unless the publisher
-   supplies licence terms, a Store app is offered under Microsoft's Standard Application
-   License Terms, and GPLv3 section 10 forbids imposing further restrictions on the rights
-   it grants. Partner Center lets a publisher supply its own licence terms for the listing;
-   those should state GPLv3 (with MIT for ToneSphere's own files) and point at the Terms
-   and Conditions. **Not yet checked against the current Store policy and Partner Center
-   fields**: confirm both at submission time rather than relying on this paragraph.
+Why, given that the owner wants ToneSphere free today and wants to be able to charge for it
+later, through the Store or elsewhere:
 
-The alternative is a Store package **without** ASIO: leave `tonesphere_asio.dll` out of the
-staged app, and the package is MIT alone, with WASAPI (shared and exclusive) as its
-low-latency path. That is a one-line exclusion in the staging step, not implemented,
-because which of the two the Store should carry is the owner's decision.
+1. **A package carrying the ASIO host is GPLv3 as a whole.** Anyone could then redistribute
+   that package, or sell it, without the owner, and every copy would owe its Corresponding
+   Source. That is fine for the GitHub build, which is free and ships its source archive; it
+   is the wrong starting point for a listing whose price the owner may want to set.
+2. **GPLv3 and a store's licence terms sit uneasily.** Without publisher-supplied terms a
+   Store app is under Microsoft's Standard Application License Terms, and GPLv3 section 10
+   forbids adding restrictions. Supplying custom terms can resolve it, but it is the kind of
+   question a lawyer, not a runbook, should settle. An MIT package avoids it.
+3. **Nothing is lost that the Store user needed.** ASIO matters for hardware interfaces
+   whose manufacturers ship an ASIO driver; WASAPI exclusive gives 3 ms periods on the
+   interface tested here (`tests/hardware/test_interface.py`).
+
+What stays as it is:
+
+- **GitHub releases keep ASIO**, under GPLv3, with the GPLv3 text inside the executable
+  (`tonesphere.spec`) and the Corresponding Source beside it
+  (`ToneSphere-windows-source.zip`, `scripts/package_source.py`).
+- **ToneSphere's own code stays MIT.** As the sole copyright holder the owner can still sell
+  builds and can license future versions differently; what has already been published
+  under MIT stays MIT. Contributions are accepted on the same MIT terms (`CONTRIBUTING.md`),
+  so they never limit that.
+- **The name is not licensed.** MIT covers code, not "ToneSphere" or "Neural Nexus Studios";
+  section 3 of the Terms and Conditions says so, which is what stops a rebuilt copy being
+  sold as the official one.
+
+If a paid build ever needs ASIO, the route is Steinberg's proprietary ASIO SDK licence: it
+is free of charge but has to be signed with Steinberg before publishing, and a build made
+under it is not GPLv3. Until that agreement exists, no package other than the GitHub build
+carries `tonesphere_asio.dll`.
+
+The Terms and Conditions (1.2, section 3) and Terms of Service (1.3, section 10) say that
+the app is free today, that later versions or editions may be paid, and that a copy already
+obtained keeps its licence; the Privacy Policy (1.2, section 6) says who would process a
+payment. These revisions were drafted by an engineer, not reviewed by a lawyer; have them
+reviewed before the first paid release.
 
 A kernel-mode driver cannot be installed by an MSIX package at all, so the virtual audio
 driver (`docs/VIRTUAL_AUDIO_DRIVER.md`), if it is ever production-signed, needs its own
@@ -350,7 +369,7 @@ telling anyone the app is Store-ready.
    SDK 10.0.26100.
 3. **Whether audio works from inside the package is unknown**, and it is the biggest open
    risk here, not a formality. Specifically unverified:
-   - that PortAudio/WASAPI can open exclusive-mode streams from a packaged process;
+   - that the native WASAPI engine can open exclusive-mode streams from a packaged process;
    - that the microphone consent prompt appears and that a denial surfaces as the actionable
      error `AudioHost._explain_open_failure` produces rather than as a silent dead stream —
      which is exactly the "reports healthy, moves nothing" failure this project exists to
@@ -362,9 +381,9 @@ telling anyone the app is Store-ready.
    Run `main.py test` from the *installed* app and check the measured latency and xrun
    figures before believing any of it.
 4. **VST3 plug-in loading from a packaged install is unverified.** MSIX installs to a
-   read-only, partly virtualised `WindowsApps` location; pedalboard's plug-in host loading
-   third-party VST3 binaries from the user's own plug-in directories has not been tried
-   there.
+   read-only, partly virtualised `WindowsApps` location; the native VST3 host loading
+   third-party VST3 binaries from the user's own plug-in directories, and the scanner
+   subprocess it starts, have not been tried there.
 5. **Preset write paths are unverified under MSIX filesystem virtualisation.** Writes to the
    install directory are redirected or refused; presets are meant to live in the user
    profile, but no packaged run has confirmed where they actually land.
