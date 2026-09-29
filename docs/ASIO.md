@@ -16,10 +16,33 @@ binds it.
 |---|---|
 | ASIO host implementation | **IMPLEMENTED** — driver discovery, loading, initialisation, channel/format/rate/buffer negotiation, `createBuffers`, a native buffer switch driving the engine, `asioMessage` handling, stop/dispose/release |
 | Boundary tests without a driver | **VERIFIED** — `tests/native/test_asio.py`: every Windows ASIO sample type round-trips, aligned types put the sample in the low bits, over-range clips, big-endian types are refused, a missing driver fails with the reason |
-| ASIO hardware verification | **NOT AVAILABLE ON THIS MACHINE** — the development machine has no ASIO driver registered (`HKLM\SOFTWARE\ASIO` is empty). `tests/hardware/test_asio.py` is ready and skips with exactly that message until a driver is installed |
+| Against a real ASIO driver: **FlexASIO 1.10b** (software ASIO driver) | **HARDWARE VERIFIED** on the development machine, 2026-09-29 — see below |
+| Against a hardware audio interface's own ASIO driver | **NOT AVAILABLE ON THIS MACHINE** — no interface attached. Until one is tested, ToneSphere's ASIO support is proven with a software driver only |
 
 A driver name in the registry is not ASIO support. Only a driver initialised by this host,
-with audio moving through its buffer switch, would be — and that has not happened yet.
+with audio moving through its buffer switch, is — and that has now happened with FlexASIO.
+
+## Verified with FlexASIO
+
+FlexASIO 1.10b (MIT-licensed; installer from its GitHub release, SHA-256
+`FE496BCC08D6C421C6244C8A60AC7B538560BDA138000FD1A54AB8EBCE031209`, not Authenticode-signed)
+was installed on the development machine for this. It is a real ASIO driver that renders
+through Windows audio APIs from inside the host process. `tests/hardware/test_asio.py`:
+
+- **Query:** loads, initialises and unloads it: 2 inputs and 2 outputs, all float32;
+  buffers 441–44100 frames (preferred 882, granularity 1); every probed rate accepted;
+  reported latency 882 / 3528 frames; `outputReady` supported.
+- **Buffer switch:** at 48 kHz with its preferred 882-frame buffer, 80 buffer switches in
+  1.5 s (1.47 s of audio — none missed), engine callback mean 35.2 µs, max 67.5 µs, 0.4 %
+  of the 18.4 ms period, 0 xruns, 0 audio-thread allocations. Both inputs delivered frames
+  (the microphone's; their content was not asserted).
+- **Output content:** a 1 kHz tone played by the ASIO host was captured back through this
+  process's loopback at exactly 1000 Hz. Its level came back **+9.2 dB** high — the same
+  driver enhancement effect `docs/WINDOWS_AUDIO.md` measures for any stream that does not
+  ask for raw mode: FlexASIO opens its own stream without it. It is not the ASIO host's.
+
+What this does not establish: behaviour with a hardware interface's driver (different
+threading, sample types, buffer behaviour, reset requests), and anything acoustic.
 
 ## Licence
 

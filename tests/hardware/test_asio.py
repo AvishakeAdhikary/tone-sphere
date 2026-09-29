@@ -53,10 +53,10 @@ def driver(request):
 def test_drivers_are_registered_and_load():
     for d in working_drivers():
         info = asio.query(d.name)
-        assert info.inputs + info.outputs > 0, f"{d.name} reports no channels"
+        assert len(info.inputs) + len(info.outputs) > 0, f"{d.name} reports no channels"
         assert info.min_buffer <= info.preferred_buffer <= info.max_buffer
         assert info.sample_rates, f"{d.name} accepts none of {asio.RATES}"
-        print(f"\n{d.name}: '{info.name}' v{info.version}, {info.inputs} in / {info.outputs} out, "
+        print(f"\n{d.name}: '{info.name}' v{info.version}, {len(info.inputs)} in / {len(info.outputs)} out, "
               f"buffer {info.min_buffer}-{info.max_buffer} (preferred {info.preferred_buffer}, granularity "
               f"{info.granularity}), rates {info.sample_rates}, reported latency {info.input_latency_frames}/"
               f"{info.output_latency_frames} frames, outputReady={info.post_output}, "
@@ -66,8 +66,8 @@ def test_drivers_are_registered_and_load():
 def test_the_buffer_switch_runs_the_engine(driver):
     info = asio.query(driver)
     rate = 48000 if 48000 in info.sample_rates else info.sample_rates[0]
-    ins = tuple(range(min(2, info.inputs)))
-    outs = tuple(range(min(2, info.outputs)))
+    ins = tuple(range(min(2, len(info.inputs))))
+    outs = tuple(range(min(2, len(info.outputs))))
     block = max(info.preferred_buffer, 64)
     tone = sine(rate * 3, 1000.0, rate=rate, amplitude=0.05, channels=max(1, len(outs)))
 
@@ -109,7 +109,7 @@ def test_output_content_where_the_driver_renders_through_wasapi(driver):
     and the test says so instead of passing.
     """
     info = asio.query(driver)
-    if info.outputs < 2:
+    if len(info.outputs) < 2:
         pytest.skip("needs a stereo output")
     rate = 48000 if 48000 in info.sample_rates else info.sample_rates[0]
     clock = default_endpoint('render')
