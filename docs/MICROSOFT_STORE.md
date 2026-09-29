@@ -303,6 +303,38 @@ Per-submission, on the reserved product:
   `"%ProgramFiles(x86)%\Windows Kits\10\App Certification Kit\appcert.exe" test -appxpackagepath <msix> -reportoutputpath report.xml`.
   It is the same suite Store ingestion runs. **It has not been run here.**
 
+## 7. Licensing: the package is GPLv3 if it carries ASIO
+
+`build_msix.ps1` stages the one-folder frozen app, and on a machine where the native build
+produced it, that app contains `tonesphere_asio.dll` — built from Steinberg's ASIO SDK under
+GPLv3. A package carrying it is distributed under GPLv3 as a whole (section 3 of the Terms
+and Conditions; `docs/ASIO.md`). That has three consequences at submission:
+
+1. **The licence text travels with it.** `tonesphere.spec` bundles `licenses/gpl-3.0`, the
+   ASIO SDK's and VST3 SDK's licence files and ToneSphere's own MIT `LICENSE` whenever the
+   DLLs are present, so the staged package already contains them.
+2. **The Corresponding Source has to be offered.** Every Windows release publishes
+   `ToneSphere-windows-source.zip` (`scripts/package_source.py`), which includes both SDKs.
+   The Store listing's description should say the app is GPLv3 and link that release's
+   source archive, and a Store package should be built from a tagged release so that the
+   archive matches it.
+3. **The Store's own licence terms must not add restrictions.** Unless the publisher
+   supplies licence terms, a Store app is offered under Microsoft's Standard Application
+   License Terms, and GPLv3 section 10 forbids imposing further restrictions on the rights
+   it grants. Partner Center lets a publisher supply its own licence terms for the listing;
+   those should state GPLv3 (with MIT for ToneSphere's own files) and point at the Terms
+   and Conditions. **Not yet checked against the current Store policy and Partner Center
+   fields**: confirm both at submission time rather than relying on this paragraph.
+
+The alternative is a Store package **without** ASIO: leave `tonesphere_asio.dll` out of the
+staged app, and the package is MIT alone, with WASAPI (shared and exclusive) as its
+low-latency path. That is a one-line exclusion in the staging step, not implemented,
+because which of the two the Store should carry is the owner's decision.
+
+A kernel-mode driver cannot be installed by an MSIX package at all, so the virtual audio
+driver (`docs/VIRTUAL_AUDIO_DRIVER.md`), if it is ever production-signed, needs its own
+installer outside the Store package.
+
 ## What is genuinely untested
 
 Everything in this section is a thing this repository does *not* establish. Read it before

@@ -2,8 +2,8 @@
 title: Privacy Policy
 layout: default
 permalink: /legal/privacy-policy/
-version: "1.0"
-effective_date: "2026-09-09"
+version: "1.1"
+effective_date: "2026-09-29"
 publisher: Neural Nexus Studios
 description: ToneSphere collects no user information and has no user accounts. This policy states what stays on your machine, and what the one optional feature that sends audio off it actually does.
 ---
@@ -12,8 +12,8 @@ description: ToneSphere collects no user information and has no user accounts. T
 
 - **Application:** ToneSphere
 - **Publisher:** Neural Nexus Studios, an individual developer, Kolkata, West Bengal, India
-- **Policy version:** 1.0
-- **Effective date:** 9 September 2026
+- **Policy version:** 1.1
+- **Effective date:** 29 September 2026
 
 ## 1. Summary
 
@@ -64,15 +64,18 @@ edit and delete. Nothing in these files is sent anywhere.
 
 | What | Where | Contains |
 |---|---|---|
-| Configuration | `config/default_config.yaml`, alongside the application | Sample rate, buffer size, backend choice, port numbers, logging switches |
-| Presets | the `presets` folder, alongside the application | Patch and mixer state as plain YAML, keyed on audio device names |
+| Settings | `settings.db` in your user data folder (on Windows `%LOCALAPPDATA%\Neural Nexus Studios\ToneSphere`); defaults are read from `config/default_config.yaml`, which ships with the application and is never written | Sample rate, buffer size, backend choice, port numbers, logging switches, interface language, the folders you asked to be scanned for plugins |
+| Presets | the `presets` folder in the folder ToneSphere was started from | Patch and mixer state as plain YAML, keyed on audio device names and identifiers; for each plugin in a chain, its file path, name, vendor, version and the plugin's own saved state |
+| Plugin scan cache | `plugin_cache.json` in the same user data folder | For each VST3 module found in the folders scanned: its file path, size and date, and the names, vendors, versions and categories it declares |
 | Log files | the `logs` folder, and only when you enable file logging, which is off by default | Diagnostic lines about streams, devices and errors |
 
-Two of these record names rather than only numbers, and it is fair to say so. Presets
+Some of these record names rather than only numbers, and it is fair to say so. Presets
 record the **names of your audio devices** — for example "Focusrite Scarlett 2i2" or
-"Speakers (Realtek Audio)" — because a preset keyed on a device index breaks the moment
-you plug something in. Logs may record device names, the file paths of plugins you loaded,
-and error messages. Both are local files under your control. Deleting those folders
+"Speakers (Realtek Audio)" — and Windows' identifiers for them, because a preset keyed on a
+device index breaks the moment you plug something in. Presets and the scan cache record
+**which plugins you have and where they are installed**, and a preset stores each plugin's
+own saved state, whose contents the plugin decides. Logs may record device names, the file
+paths of plugins you loaded, and error messages. Both are local files under your control. Deleting those folders
 removes them, and uninstalling the application leaves nothing about you behind on any
 service, because there is no service.
 
@@ -110,9 +113,10 @@ decision to make, and the default is the private one.
 
 ## 5. Third-party plugins you load
 
-ToneSphere hosts VST3 and AU plugins that you already own, on channels you choose. Those
-plugins are software written by other companies, running inside the ToneSphere process at
-your instruction.
+On Windows, ToneSphere hosts VST3 effect plugins that you already own, on the device
+inputs and outputs you choose. Those plugins are software written by other companies,
+running inside the ToneSphere process at your instruction. Scanning for plugins loads each
+one briefly, in a separate process, to read what it declares.
 
 A plugin can do things ToneSphere does not: check a licence over the internet, contact its
 vendor's servers, write files, or collect information about your machine. What a plugin

@@ -57,7 +57,17 @@ datas = [
     # frozen build; without this a frozen build ships with no catalogs at all, since a
     # .py package's own directory does not survive freezing the way this data does.
     (str(project_root / 'tonesphere' / 'locale'), 'tonesphere/locale'),
+    (str(project_root / 'LICENSE'), 'licenses/tonesphere'),
 ]
+
+# Licence texts that have to travel with the binary. The MIT notices are the one condition
+# of those licences; the GPLv3 text is required because a build that bundles
+# tonesphere_asio.dll is distributed under GPLv3 as a whole (docs/ASIO.md).
+if (native_bin / 'tonesphere_asio.dll').is_file():
+    datas += [(str(project_root / 'native' / 'asio' / 'LICENSE'), 'licenses/gpl-3.0'),
+              (str(project_root / 'sdks' / 'asiosdk' / 'LICENSE.txt'), 'licenses/asio-sdk')]
+if (native_bin / 'tonesphere_native.dll').is_file():
+    datas += [(str(project_root / 'sdks' / 'vst3sdk' / 'LICENSE.txt'), 'licenses/vst3-sdk')]
 
 hiddenimports = [
     # sounddevice reaches PortAudio through cffi, which PyInstaller cannot see statically.

@@ -211,8 +211,11 @@ When a verification is missing, name the reason (no device, no licence, no certi
 - `native/asio/` is **GPLv3**, because the Steinberg ASIO SDK is used under its GPLv3
   option. It builds to a separate DLL. Any binary distribution that includes it is
   distributed under GPLv3 as a whole, with source available — the README and legal docs
-  must say so.
-- The **VST3 SDK (3.8+) is MIT**; keep its notice in distributions.
+  must say so. Such a release ships the GPLv3 text inside it (`tonesphere.spec`) and its
+  Corresponding Source beside it (`scripts/package_source.py`, run by the release job),
+  SDKs included; never publish a Windows binary without that archive.
+- The **VST3 SDK (3.8+) is MIT**; keep its notice in distributions (`tonesphere.spec`
+  bundles it).
 - `driver/windows_virtual_audio/` is derived from Microsoft's Windows-driver-samples
   (**MS-PL**); it keeps that licence in its own directory and is a separate binary.
 - Check the licence before copying any third-party code, and record it next to the code.
@@ -250,8 +253,9 @@ check it before assuming something works, and update it when you change a status
 - `tonesphere/core` — the control-plane model: `AudioEngine` (routing matrix, buses,
   presets, network wiring), `engine_factory.py` (`UnifiedAudioEngine`), `presets.py`.
 - `tonesphere/engine` — `graph.py` (the immutable routing graph and feedback check),
-  `host.py` (the PortAudio host: Python callbacks, **not real-time safe**, kept for
-  Linux/macOS), `dsp.py`/`effects.py` (reference implementations of the mixer and DSP
+  `native_host.py` (the Windows host: `AudioHost` over the native engine — enumeration by
+  endpoint ID, plan compilation, strips, meters, plugins per device side), `host.py` (the
+  PortAudio host: Python callbacks, **not real-time safe**, kept for Linux/macOS), `dsp.py`/`effects.py` (reference implementations of the mixer and DSP
   formulas), `devices.py`, `wasapi_com.py`/`process_capture.py`/`app_capture.py`
   (Windows COM via ctypes).
 - `tonesphere/native` — ctypes bindings to the native DLLs.
@@ -259,7 +263,10 @@ check it before assuming something works, and update it when you change a status
   cache).
 - `tonesphere/network` — UDP/TCP audio streaming; its threads only touch rings, never
   the callback.
-- `tonesphere/api`, `tonesphere/cli`, `tonesphere/ui` — REST/WebSocket, terminal, Qt.
+- `tonesphere/api`, `tonesphere/cli`, `tonesphere/ui` — REST/WebSocket, terminal, Qt
+  (`main_window.py`; `plugin_views.py` — browser, insert chains, parameters;
+  `diagnostics_view.py` — timing, latency breakdown, round-trip measurement, virtual-device
+  presence).
 - `native/` — `include/` (the C ABI), `engine/` (plan executor, mixer, meters, rings),
   `windows_audio/` (WASAPI), `asio/` (GPLv3), `vst3/`, `test_plugin/` (a deterministic
   MIT VST3 used by the tests), and `coreaudio-plugin/` (macOS AudioServerPlugIn, proven
@@ -267,7 +274,14 @@ check it before assuming something works, and update it when you change a status
   "works on macOS").
 - `driver/windows_virtual_audio/` — the Windows virtual audio driver (MS-PL-derived).
 - `sdks/` — fetched SDKs, git-ignored except `README.md`.
-- `benchmarks/` — measured performance runs.
+- `scripts/` — `fetch_sdks.py`, `build_native.py`, `build_driver.py` (driver + VM kit),
+  `driver_install.ps1`/`driver_uninstall.ps1` (VM only), `package_source.py` (GPLv3
+  Corresponding Source).
+- `benchmarks/` — measured performance runs: `bench_engine.py` (offline cost per block),
+  `soak.py` (the live path for 30 minutes, then restarts); results in `results/`.
+
+`docs/ARCHITECTURE.md`, `docs/REALTIME.md` and `docs/TESTING.md` explain the design, the
+audio-thread rules and how evidence is gathered.
 
 `docs/VIRTUAL_AUDIO_DRIVER.md` documents what an OS-visible device needs on each
 platform and the signing situation; read it before working on the driver.

@@ -17,11 +17,15 @@ panel from 2006. That is the whole idea.
 
 ## What it does
 
-- Routes and mixes audio between the devices on your own machine, one stream per device,
-  mixing inside the driver's callback. A device used in both directions gets a single duplex
-  stream, so its input and output cannot drift apart.
-- Gives you a mixer and a patchbay: constant-power pan, polarity, trim, mute, solo, smoothed
-  gain, a limiter on every output, and cables you make by dragging a port onto a port.
+- Routes and mixes audio between the devices on your own machine. On Windows the audio runs
+  on a native real-time engine with WASAPI and ASIO backends; on Linux and macOS, on a
+  PortAudio host.
+- Hosts **VST3 effect plugins on Windows** — a browser that scans each plugin in a separate
+  process, insert chains on any device's input or output, parameters, bypass and the
+  plugin's own editor. Proven with the project's own test plugin and with Surge XT.
+- Gives you a mixer and a patchbay: pan and balance, polarity, trim, mute, solo, smoothed
+  gain, a limiter on every output, per-channel meters, and cables you make by dragging a
+  port onto a port.
 - Ships real effects: biquad EQ, a compressor with actual attack, release, knee and makeup,
   and a delay with feedback.
 - Captures **one application's audio on Windows** (Windows 10 build 20348 and later, no
@@ -29,13 +33,12 @@ panel from 2006. That is the whole idea.
 - Creates **a Linux sink other applications can select**, and publishes a **CoreAudio
   loopback device on macOS** that is proven in continuous integration and unverified in
   day-to-day use — stated that way on purpose.
-- Saves presets as plain YAML keyed on device names, so they survive you plugging something
-  in, and tells you what was missing when it loads one without your interface attached.
-- Reports the latency your **driver reports** next to the nominal buffer arithmetic, and
-  labels each for what it is. On one machine, at a 128-frame buffer on WASAPI exclusive:
-  5.7 ms reported round trip at roughly 5% DSP load. Neither figure is a measurement of a
-  signal ToneSphere sent and heard back; that measurement is being built, and until it
-  exists it is shown as `--`.
+- Saves presets as plain YAML keyed on stable device identifiers, with their plugin chains,
+  and tells you what was missing when it loads one without your interface attached.
+- Keeps latency figures apart: ToneSphere's own buffer arithmetic, what the drivers and
+  plugins report, and — on Windows — a round trip it **measures** by playing a sweep and
+  timing its return. Until that measurement has been taken on your own output and input,
+  at your current settings, it is shown as `--`.
 
 There is one rule in this project, and its test suite enforces it:
 
@@ -44,8 +47,8 @@ There is one rule in this project, and its test suite enforces it:
 
 The repository's [README](https://github.com/AvishakeAdhikary/tone-sphere#readme) is the
 authoritative list of what works, what does not work yet, and why — including the Windows
-virtual device that deliberately is not attempted, and the reasoning behind that in the
-[virtual audio driver notes](VIRTUAL_AUDIO_DRIVER.md).
+virtual device, whose driver is built but not yet verified or signed, and exactly where it
+stands in the [virtual audio driver notes](VIRTUAL_AUDIO_DRIVER.md).
 
 ## Download
 
@@ -55,7 +58,11 @@ virtual device that deliberately is not attempted, and the reasoning behind that
 On Linux, install PortAudio from your distribution first (`libportaudio2` on Debian and
 Ubuntu, `portaudio` on Fedora, `portaudio` on Arch); the Linux Python wheel does not bundle
 it. Run `main.py test` before anything else — it opens a stream, plays a tone, reports the
-driver's latency and tells you PASS, WARN or FAIL per capability.
+engine's timing and the driver's latency, and tells you PASS, WARN or FAIL per capability.
+
+The Windows executable includes ASIO support built from Steinberg's ASIO SDK under the GNU
+GPL version 3, and is distributed under that licence; each release carries its complete
+source, SDKs included. The Linux and macOS executables are MIT-licensed.
 
 ## Sponsor ToneSphere
 

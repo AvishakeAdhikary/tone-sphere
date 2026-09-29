@@ -278,6 +278,21 @@ jobs:
           path: ${{ matrix.asset_name }}
           if-no-files-found: error
 
+      - name: Package the Corresponding Source (Windows)
+        # The Windows executable bundles the GPLv3 ASIO host, so it is distributed under
+        # GPLv3 and its Corresponding Source -- including both SDKs, which are never
+        # committed -- has to be released next to it. See scripts/package_source.py.
+        if: runner.os == 'Windows'
+        run: uv run python scripts/package_source.py ToneSphere-windows-source.zip
+
+      - name: Upload the Corresponding Source (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ToneSphere-windows-source.zip
+          path: ToneSphere-windows-source.zip
+          if-no-files-found: error
+
   tag-release:
     # Cutting a release is "bump the version in pyproject.toml and land it on main" --
     # nothing here decides *whether* to release, only *that* a version nobody has tagged
