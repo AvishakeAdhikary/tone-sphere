@@ -271,6 +271,11 @@ Found by signal tests during the migration, each now covered by one:
   Corresponding Source next to it (`scripts/package_source.py`: 38.7 MiB, the tree, the
   ASIO SDK as fetched, the compiled parts of the VST3 SDK). Checked: extracted on its own,
   it rebuilds both DLLs with no download, and the 148 native tests pass against them.
+  CI first built it on 2026-09-30, for this branch's pull request (38 MiB, uploaded as a
+  run artifact beside the executable); publishing both on a version tag has not happened
+  yet. That same first CI run found the Windows build could not find the compiler on
+  GitHub's runners (an environment-variable name compared case-sensitively); fixed, and the
+  Windows job now builds the native engine and passes 833 tests there.
 - **The Microsoft Store package leaves ASIO out** and is MIT only (`build_msix.ps1`), so
   the owner can set its price and terms: ToneSphere is free today and may be paid later.
   GitHub releases keep ASIO under GPLv3 with their source. A paid build with ASIO would
