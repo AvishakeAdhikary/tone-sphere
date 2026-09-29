@@ -35,11 +35,14 @@ def capture_env(batch: str, *args: str) -> dict[str, str]:
     result = subprocess.run(f'cmd /d /s /c "{command}"', capture_output=True, text=True, errors="replace")
     if result.returncode != 0:
         sys.exit(f"{batch} failed:\n{result.stdout}\n{result.stderr}")
+    # Upper-cased: Windows variable names are case-insensitive, but a dict is not. vcvars64
+    # reports "Path" and the EWDK "PATH", and code that reads env["PATH"] after vcvars saw
+    # nothing and replaced the compiler's whole search path (GitHub's Windows runners).
     env = {}
     for line in result.stdout.splitlines():
         key, sep, value = line.partition("=")
         if sep and key:
-            env[key] = value
+            env[key.upper()] = value
     return env
 
 
@@ -92,7 +95,7 @@ def add_ewdk_sdk_paths(env: dict[str, str], root: Path) -> None:
     User-mode DLLs need it on INCLUDE/LIB/PATH, from the same kit the driver build uses.
     """
     kit = root / "Program Files" / "Windows Kits" / "10"
-    version = env.get("Version_Number") or sorted(p.name for p in (kit / "Include").glob("10.*"))[-1]
+    version = env.get("VERSION_NUMBER") or sorted(p.name for p in (kit / "Include").glob("10.*"))[-1]
     include = kit / "Include" / version
     lib = kit / "Lib" / version
     extra_include = [include / part for part in ("ucrt", "um", "shared", "winrt", "cppwinrt")]
