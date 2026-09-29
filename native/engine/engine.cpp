@@ -450,6 +450,14 @@ ts_result Engine::set_channel_inverted(uint32_t node, uint32_t channel, bool inv
     return TS_OK;
 }
 
+ts_result Engine::set_node_swapped(uint32_t node, bool swapped) {
+    NodeControls* c = find_controls(node);
+    if (!c) return TS_ERR_NOT_FOUND;
+    if (c->channels < 2) { fail("swap needs two channels"); return TS_ERR_INVALID; }
+    c->swapped.store(swapped ? 1u : 0u, std::memory_order_relaxed);
+    return TS_OK;
+}
+
 ts_result Engine::set_insert_param(uint32_t node, uint32_t slot, uint32_t param, float value) {
     InsertState* s = find_insert(node, slot);
     if (!s) return TS_ERR_NOT_FOUND;
@@ -701,9 +709,9 @@ void Engine::mix_into(Plan& plan, Node& node, uint32_t frames) noexcept {
     }
 }
 
-// Polarity and trim, then inserts in slot order, then fader and mute — the order of a
-// console channel, so a trim change moves the level into the compressor, and the fader
-// does not.
+// Polarity and trim, then swap, then inserts in slot order, then fader and mute — the
+// order of a console channel, so a trim change moves the level into the compressor, and
+// the fader does not.
 void Engine::strip(Node& node, uint32_t frames) noexcept {
     NodeControls& c = *node.controls;
     for (uint32_t ch = 0; ch < node.channels; ++ch) {
@@ -714,6 +722,24 @@ void Engine::strip(Node& node, uint32_t frames) noexcept {
         const float g0 = from * sign;
         const float g1 = target * sign;
         apply_ramp(node.channel_ptrs[ch], frames, g0, g1);
+    }
+
+    if (node.channels >= 2) {
+        const float to = c.swapped.load(std::memory_order_relaxed) ? 1.0f : 0.0f;
+        const float from = c.swap_current;
+        c.swap_current = to;
+        if (from != 0.0f || to != 0.0f) {
+            float* left = node.channel_ptrs[0];
+            float* right = node.channel_ptrs[1];
+            const float step = (to - from) / static_cast<float>(frames);
+            for (uint32_t i = 0; i < frames; ++i) {
+                const float s = from == to ? to : from + step * static_cast<float>(i + 1);
+                const float l = left[i];
+                const float r = right[i];
+                left[i] = l + s * (r - l);
+                right[i] = r + s * (l - r);
+            }
+        }
     }
 
     for (uint32_t k = 0; k < node.insert_count; ++k) {
@@ -783,16 +809,27 @@ void Engine::meter(Node& node, uint32_t frames, uint32_t reset_generation) noexc
     if (m.reset_seen != reset_generation) {
         m.reset_seen = reset_generation;
         m.peak_since_reset = 0.0f;
+        for (float& p : m.channel_peak_since_reset) p = 0.0f;
         m.clipped.store(0, std::memory_order_relaxed);
     }
     float block_peak = 0.0f;
     double sum_squares = 0.0;
     for (uint32_t c = 0; c < node.channels; ++c) {
         const float* buf = node.channel_ptrs[c];
+        float channel_peak = 0.0f;
+        double channel_squares = 0.0;
         for (uint32_t i = 0; i < frames; ++i) {
             const float a = std::abs(buf[i]);
-            block_peak = a > block_peak ? a : block_peak;
-            sum_squares += static_cast<double>(buf[i]) * buf[i];
+            channel_peak = a > channel_peak ? a : channel_peak;
+            channel_squares += static_cast<double>(buf[i]) * buf[i];
+        }
+        block_peak = channel_peak > block_peak ? channel_peak : block_peak;
+        sum_squares += channel_squares;
+        if (c < TS_METER_CHANNELS) {
+            float& held = m.channel_peak_since_reset[c];
+            if (channel_peak > held) held = channel_peak;
+            m.channel_peak[c].store(held, std::memory_order_relaxed);
+            m.channel_rms[c].store(static_cast<float>(std::sqrt(channel_squares / frames)), std::memory_order_relaxed);
         }
     }
     if (block_peak > m.peak_since_reset) m.peak_since_reset = block_peak;
@@ -875,6 +912,10 @@ ts_result Engine::get_meter(uint32_t node_id, ts_meter& out) {
     out.rms = node.meter.rms.load(std::memory_order_relaxed);
     out.clipped = node.meter.clipped.load(std::memory_order_relaxed);
     out.channels = node.channels;
+    for (uint32_t c = 0; c < TS_METER_CHANNELS; ++c) {
+        out.channel_peak[c] = node.meter.channel_peak[c].load(std::memory_order_relaxed);
+        out.channel_rms[c] = node.meter.channel_rms[c].load(std::memory_order_relaxed);
+    }
     return TS_OK;
 }
 

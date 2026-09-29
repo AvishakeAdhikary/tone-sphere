@@ -384,6 +384,33 @@ class TestSafetyAndMeasurement:
         assert meter['rms'] == pytest.approx(0.5 / math.sqrt(2), rel=1e-2)
         assert meter['clipped'] is False
 
+    def test_swap_exchanges_the_channels_without_a_step(self, engine):
+        engine.apply_plan([Node.source(SRC, 2), Node.sink(OUT, 2)], [Route(SRC, OUT)])
+        stereo = np.column_stack([sine(BLOCK * 6, 1000.0)[:, 0], sine(BLOCK * 6, 3000.0, amplitude=0.25)[:, 0]])
+        run(engine, 2, {SRC: stereo[:BLOCK * 2]}, {OUT: 2})
+        engine.set_node_swapped(SRC, True)
+        out = run(engine, 4, {SRC: stereo[BLOCK * 2:]}, {OUT: 2})[OUT]
+        settled = out[BLOCK:]
+        assert dominant_frequency(settled[:, 0]) == pytest.approx(3000.0, abs=50.0)
+        assert dominant_frequency(settled[:, 1]) == pytest.approx(1000.0, abs=50.0)
+        assert peak(settled[:, 0]) == pytest.approx(0.25, abs=1e-3)
+        fade = out[:BLOCK, 0]
+        assert np.max(np.abs(np.diff(fade))) < 0.2, "the exchange must be crossfaded, not a step"
+        with pytest.raises(NativeError):
+            engine.apply_plan([Node.source(SRC, 1), Node.sink(OUT, 1)], [Route(SRC, OUT)])
+            engine.set_node_swapped(SRC, True)
+
+    def test_each_channel_is_metered_on_its_own(self, engine):
+        engine.apply_plan([Node.source(SRC, 2), Node.sink(OUT, 2)], [Route(SRC, OUT)])
+        stereo = np.column_stack([sine(BLOCK * 4, amplitude=0.5)[:, 0], sine(BLOCK * 4, amplitude=0.1)[:, 0]])
+        run(engine, 4, {SRC: stereo}, {OUT: 2})
+        meter = engine.meter(OUT)
+        assert meter['channel_peak'] == pytest.approx([0.5, 0.1], abs=1e-3)
+        assert meter['channel_rms'] == pytest.approx([0.5 / math.sqrt(2), 0.1 / math.sqrt(2)], rel=1e-2)
+        engine.reset_meters()
+        run(engine, 1, {SRC: stereo[:BLOCK] * np.float32([0.0, 1.0])}, {OUT: 2})
+        assert engine.meter(OUT)['channel_peak'][0] == 0.0, "a reset must clear each channel's held peak"
+
     def test_clipping_latches_until_reset(self, engine):
         engine.apply_plan([Node.source(SRC, 1), Node.sink(OUT, 1)], [Route(SRC, OUT)])
         run(engine, 2, {SRC: np.full((BLOCK * 2, 1), 1.2, np.float32)}, {OUT: 1})

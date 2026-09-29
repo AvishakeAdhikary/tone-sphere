@@ -52,3 +52,28 @@ def test_an_acoustic_attempt_either_measures_or_refuses():
         assert result.confidence > CONFIDENCE_THRESHOLD
     print(f"\n{result.output} -> {result.input}: measured {result.measured_ms} ms, "
           f"confidence {result.confidence:.1f}; {result.note}")
+
+
+def test_the_engine_keeps_a_loopback_measurement_apart_from_the_round_trip():
+    """As the Diagnostics view runs it: the digital path is recorded, never reported as the round trip."""
+    from tonesphere.core.engine import AudioEngine
+
+    engine = AudioEngine(sample_rate=48000, buffer_size=480, exclusive=False)
+    engine.initialize()
+    try:
+        speaker = engine.default_output_id()
+        if speaker is None:
+            pytest.skip("no default output")
+        result = engine.measure_round_trip(speaker)
+        assert result['path'] == 'loopback' and result['measured_ms'] is not None, result['note']
+        stats = engine.get_performance_stats()
+        assert stats['round_trip']['measured_ms'] == result['measured_ms']
+        assert stats['measured_round_trip_ms'] is None, "a loopback measurement is not a round trip"
+        bus = engine.create_virtual_input("feed", channels=2)
+        assert engine.create_routing(bus, speaker)[0]
+        engine.start_engine()
+        assert engine.host.is_running
+        with pytest.raises(ValueError):
+            engine.measure_round_trip(speaker)
+    finally:
+        engine.cleanup()

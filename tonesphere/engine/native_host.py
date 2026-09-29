@@ -26,6 +26,7 @@ import time
 import numpy as np
 
 from tonesphere.engine.devices import DeviceInfo, HostApi
+from tonesphere.engine.dsp import balance_gains
 from tonesphere.engine.graph import GraphHolder, NodeId, RoutingGraph, bus_node
 from tonesphere.engine.host import HostStatistics
 from tonesphere.engine.meters import MeterReading
@@ -103,8 +104,9 @@ class _Strip:
     """
     A device side's channel strip, as `DeviceChannelControl.apply_to_strip` drives it,
     mapped onto the native node's strip. Mute is a trim of zero because the native strip
-    has per-channel trim and polarity but no per-channel mute; pan and swap on a device
-    strip are not implemented natively (pan lives on routes) and are recorded, not applied.
+    has per-channel trim and polarity but no per-channel mute. A stereo strip's balance
+    (channel 0's pan) is folded into the trims, by the engine's own balance law; pan on a
+    non-stereo strip belongs on routes.
     """
 
     def __init__(self, engine: NativeEngine, node: int, channels: int):
@@ -114,6 +116,8 @@ class _Strip:
         self._gain = [1.0] * channels
         self._muted = [False] * channels
         self._inverted = [False] * channels
+        self._balance = [1.0] * channels
+        self._swapped = False
         self._master = 1.0
 
     def rebind(self, engine: NativeEngine, node: int):
@@ -123,10 +127,13 @@ class _Strip:
         for c in range(self.channels):
             self._push(c)
             engine.set_channel_inverted(node, c, self._inverted[c])
+        if self.channels >= 2:
+            engine.set_node_swapped(node, self._swapped)
         engine.set_node_gain(node, self._master)
 
     def _push(self, channel: int):
-        self._engine.set_channel_trim(self._node, channel, 0.0 if self._muted[channel] else self._gain[channel])
+        trim = 0.0 if self._muted[channel] else self._gain[channel] * self._balance[channel]
+        self._engine.set_channel_trim(self._node, channel, trim)
 
     def set_channel_gain(self, channel: int, gain: float):
         if channel < self.channels:
@@ -144,10 +151,15 @@ class _Strip:
             self._engine.set_channel_inverted(self._node, channel, inverted)
 
     def set_channel_pan(self, channel: int, pan: float):
-        pass
+        if self.channels == 2 and channel == 0:
+            self._balance = list(balance_gains(pan))
+            self._push(0)
+            self._push(1)
 
     def set_swapped(self, swapped: bool):
-        pass
+        if self.channels >= 2:
+            self._swapped = bool(swapped)
+            self._engine.set_node_swapped(self._node, self._swapped)
 
     def set_master_gain(self, gain: float):
         self._master = max(0.0, float(gain))
@@ -163,7 +175,7 @@ class _Meters:
 
     def __init__(self, host: "NativeHost"):
         self._host = host
-        self._held: dict[str, tuple[float, float]] = {}
+        self._held: dict[str, list[tuple[float, float]]] = {}
         self._clipped: set[str] = set()
 
     def read_summaries(self) -> dict[str, MeterReading]:
@@ -175,13 +187,20 @@ class _Meters:
                 m = engine.meter(node)
             except NativeError:
                 continue
-            held, until = self._held.get(key, (0.0, 0.0))
-            if m['peak'] >= held or now > until:
-                held, until = m['peak'], now + PEAK_HOLD_S
-            self._held[key] = (held, until)
+            peaks = [m['peak'], *m['channel_peak']]
+            holds = self._held.get(key)
+            if holds is None or len(holds) != len(peaks):
+                holds = [(0.0, 0.0)] * len(peaks)
+            for i, peak in enumerate(peaks):
+                held, until = holds[i]
+                if peak >= held or now > until:
+                    holds[i] = (peak, now + PEAK_HOLD_S)
+            self._held[key] = holds
             if m['clipped']:
                 self._clipped.add(key)
-            out[key] = MeterReading(peak=m['peak'], rms=m['rms'], peak_hold=held, clipped=key in self._clipped)
+            out[key] = MeterReading(peak=m['peak'], rms=m['rms'], peak_hold=holds[0][0], clipped=key in self._clipped,
+                                    channel_peaks=tuple(m['channel_peak']), channel_rms=tuple(m['channel_rms']),
+                                    channel_holds=tuple(h for h, _ in holds[1:]))
         engine.reset_meters()
         return out
 
@@ -262,6 +281,7 @@ class NativeHost:
         instance.close()
         fresh = PluginInstance(instance.info, self._samplerate, self._engine.max_block, instance.channels)
         fresh.restore(state)
+        fresh.bypassed = instance.bypassed
         return fresh
 
     # --- Plugins, owned per device side ---
@@ -298,18 +318,31 @@ class NativeHost:
     def plugins_for(self, device_key: str, is_input: bool) -> list:
         return list(self._plugins.get((device_key, INPUT if is_input else OUTPUT), []))
 
+    def set_plugin_bypassed(self, device_key: str, is_input: bool, index: int, bypassed: bool) -> bool:
+        """The host's bypass: the plugin is not called at all, and its reported latency no longer counts."""
+        with self._lock:
+            slots = self._plugins.get((device_key, INPUT if is_input else OUTPUT), [])
+            if not 0 <= index < len(slots):
+                return False
+            slots[index].bypassed = bool(bypassed)
+            self._sync_plugin_inserts()
+            self._republish()
+            return True
+
     def _sync_plugin_inserts(self):
         from tonesphere.native import VST3
 
         for side in set(self._plugins) | set(self._inserts):
             builtins = [p for p in self._inserts.get(side, []) if p[1] != VST3]
             first = max((p[0] for p in builtins), default=-1) + 1
-            plugins = [(first + i, VST3, False, inst.handle) for i, inst in enumerate(self._plugins.get(side, []))]
+            plugins = [(first + i, VST3, inst.bypassed, inst.handle)
+                       for i, inst in enumerate(self._plugins.get(side, []))]
             self._inserts[side] = builtins + plugins
 
     def plugin_latency_samples(self) -> int:
         """Reported by the plugins on output paths plus the worst input path: what a player hears."""
-        per_side = {side: sum(inst.latency_samples for inst in slots) for side, slots in self._plugins.items()}
+        per_side = {side: sum(inst.latency_samples for inst in slots if not inst.bypassed)
+                    for side, slots in self._plugins.items()}
         worst_in = max((n for (key, role), n in per_side.items() if role == INPUT), default=0)
         worst_out = max((n for (key, role), n in per_side.items() if role == OUTPUT), default=0)
         return worst_in + worst_out
@@ -672,6 +705,7 @@ class NativeHost:
         stats.xruns = s['xruns']
         stats.audio_thread_allocations = s['rt_allocations']
         if s['blocks']:
+            stats.callback_min_ms = s['callback_ns_min'] / 1e6
             stats.callback_mean_ms = s['callback_ns_mean'] / 1e6
             stats.callback_max_ms = s['callback_ns_max'] / 1e6
             stats.callback_p99_ms = s['callback_ns_p99'] / 1e6

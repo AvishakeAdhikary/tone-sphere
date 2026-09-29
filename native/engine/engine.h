@@ -28,8 +28,11 @@ struct MeterState {
     std::atomic<float> peak{0.0f};
     std::atomic<float> rms{0.0f};
     std::atomic<uint32_t> clipped{0};
+    std::atomic<float> channel_peak[TS_METER_CHANNELS] = {};
+    std::atomic<float> channel_rms[TS_METER_CHANNELS] = {};
     // Audio-thread-owned.
     float peak_since_reset = 0.0f;
+    float channel_peak_since_reset[TS_METER_CHANNELS] = {};
     uint32_t reset_seen = 0;
 };
 
@@ -50,10 +53,12 @@ struct NodeControls {
     const uint32_t channels;
     std::atomic<float> gain{1.0f};
     std::atomic<uint32_t> muted{0};
+    std::atomic<uint32_t> swapped{0};
     std::unique_ptr<std::atomic<float>[]> trim;
     std::unique_ptr<std::atomic<uint32_t>[]> inverted;
     // Audio-thread-owned.
     float gain_current = 1.0f;
+    float swap_current = 0.0f;  // 0 straight, 1 exchanged
     std::unique_ptr<float[]> trim_current;
 };
 
@@ -157,6 +162,7 @@ public:
     ts_result set_node_muted(uint32_t node, bool muted);
     ts_result set_channel_trim(uint32_t node, uint32_t channel, float gain);
     ts_result set_channel_inverted(uint32_t node, uint32_t channel, bool inverted);
+    ts_result set_node_swapped(uint32_t node, bool swapped);
     ts_result set_insert_param(uint32_t node, uint32_t slot, uint32_t param, float value);
     ts_result get_insert_param(uint32_t node, uint32_t slot, uint32_t param, float& value);
     ts_result set_insert_bypassed(uint32_t node, uint32_t slot, bool bypassed);

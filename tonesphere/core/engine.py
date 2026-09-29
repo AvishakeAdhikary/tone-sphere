@@ -102,6 +102,7 @@ class AudioEngine:
 
         # Id bookkeeping.
         self._devices: list[DeviceInfo] = []
+        self._round_trip: dict[str, Any] | None = None
         self._id_to_node: dict[int, Any] = {}
         self._node_to_id: dict[str, int] = {}
         self._device_by_id: dict[int, DeviceInfo] = {}
@@ -1281,6 +1282,8 @@ class AudioEngine:
         """Open a scanned plugin (`plugins.PluginInfo`) on one side of a device, after any already there."""
         from tonesphere.plugins import PluginError
 
+        if info.is_instrument:
+            return False, f"{info.name} is an instrument: it needs MIDI input, which ToneSphere does not provide yet"
         key, problem = self._plugin_side(device_id)
         if key is None:
             return False, problem
@@ -1319,8 +1322,16 @@ class AudioEngine:
                 'crashed': status.crashed,
                 'fault': status.fault,
                 'has_editor': instance.has_editor(),
+                'bypassed': instance.bypassed,
             })
         return out
+
+    def set_plugin_bypassed(self, device_id: int, index: int, bypassed: bool, is_input: bool = True) -> bool:
+        key, _ = self._plugin_side(device_id)
+        if key is None:
+            return False
+        with self._lock:
+            return self.host.set_plugin_bypassed(key, is_input, index, bypassed)
 
     def set_plugin_parameter(self, device_id: int, index: int, param_id: int, normalized: float,
                              is_input: bool = True) -> bool:
@@ -1352,9 +1363,14 @@ class AudioEngine:
 
     # --- Metering ---
 
-    def get_meters(self) -> dict[int, dict[str, float]]:
+    def get_meters(self) -> dict[int, dict[str, Any]]:
         """
         Current levels per device id, in dBFS.
+
+        A duplex device (an ASIO driver) is one id with two sides, metered separately:
+        `sides` holds 'input' and/or 'output', each with per-channel lists where the host
+        measured each channel on its own. The top-level fields are the louder side, for a
+        single-meter display.
 
         Returns nothing when stopped rather than zeros: a meter reading of 0.0 while no
         audio is running would suggest silence was measured, when nothing was.
@@ -1362,28 +1378,45 @@ class AudioEngine:
         if not self.host.is_running:
             return {}
 
-        meters: dict[int, dict[str, float]] = {}
+        meters: dict[int, dict[str, Any]] = {}
 
         for key, reading in self.host.meters.read_summaries().items():
-            device_id = self._meter_key_to_id(key)
-            if device_id is None:
+            located = self._meter_key_to_side(key)
+            if located is None:
                 continue
+            device_id, side = located
 
-            meters[device_id] = {
+            channels = reading.channel_db()
+            entry = meters.setdefault(device_id, {'sides': {}})
+            entry['sides'][side] = {
                 'peak_db': reading.peak_db,
                 'rms_db': reading.rms_db,
                 'peak_hold_db': reading.peak_hold_db,
                 'clipped': reading.clipped,
+                'channel_peak_db': channels['peak_db'],
+                'channel_rms_db': channels['rms_db'],
+                'channel_peak_hold_db': channels['peak_hold_db'],
             }
+
+        for entry in meters.values():
+            loudest = max(entry['sides'].values(), key=lambda s: s['peak_db'])
+            entry.update({k: loudest[k] for k in ('peak_db', 'rms_db', 'peak_hold_db')})
+            entry['clipped'] = any(s['clipped'] for s in entry['sides'].values())
 
         return meters
 
-    def _meter_key_to_id(self, key: str) -> int | None:
+    def _meter_key_to_side(self, key: str) -> tuple[int, str] | None:
         if key.startswith('bus::'):
-            return self._node_to_id.get(f"bus:{key[5:]}")
+            bus_id = self._node_to_id.get(f"bus:{key[5:]}")
+            if bus_id is None:
+                return None
+            return bus_id, self._bus_meta.get(bus_id, {}).get('direction', 'output')
 
-        device_key = key.rsplit('::', 1)[0]
-        return self._node_to_id.get(f"device:{device_key}")
+        device_key, _, role = key.rpartition('::')
+        device_id = self._node_to_id.get(f"device:{device_key}")
+        if device_id is None:
+            return None
+        return device_id, 'input' if role == 'in' else 'output'
 
     def clear_clip_indicators(self):
         self.host.meters.clear_clips()
@@ -1408,7 +1441,90 @@ class AudioEngine:
         stats['backend_error'] = self._backend_error
         stats['problems'] = list(self._problems)
 
+        if hasattr(self.host, 'plugin_latency_samples'):
+            samples = self.host.plugin_latency_samples()
+            stats['plugin_latency_samples'] = samples
+            stats['plugin_latency_ms'] = samples / self.sample_rate * 1000
+        else:
+            stats['plugin_latency_samples'] = stats['plugin_latency_ms'] = None
+
+        # Only a measurement taken at the current rate and block describes the current
+        # configuration, and only an acoustic or cabled path is a round trip; a loopback
+        # measurement is the digital path alone and is reported only as itself.
+        trip = self._round_trip
+        stats['round_trip'] = trip
+        current = (trip is not None and trip['sample_rate'] == self.sample_rate
+                   and trip['block'] == self.buffer_size)
+        if current and trip['path'] == 'capture':
+            stats['measured_round_trip_ms'] = trip['measured_ms']
+
         return stats
+
+    # --- Measured round trip ---
+
+    def measure_round_trip(self, output_id: int, input_id: int | None = None) -> dict:
+        """
+        Play a sweep out of `output_id` and time its return on `input_id`: through a
+        loopback cable, or a microphone that hears the speaker. With no input, listen to
+        the output endpoint's own loopback: the digital path only, which checks the method
+        but is not the latency anyone hears.
+
+        The engine must be stopped (the measurement opens the devices itself), and the
+        sweep is audible at -24 dBFS. The result is None — `--` — unless the returning
+        signal was found with confidence; the note says why not.
+        """
+        from tonesphere.native import roundtrip
+
+        if getattr(self.host, 'backend', 'portaudio') != 'native' or self.host.host_api != HostApi.WASAPI:
+            raise ValueError("round-trip measurement needs the native engine on WASAPI")
+        if self.host.is_running:
+            raise ValueError("stop the engine first: the measurement opens the devices itself")
+        out_dev = self._device_by_id.get(output_id)
+        in_dev = self._device_by_id.get(input_id) if input_id is not None else None
+        if out_dev is None or not out_dev.can_output or not out_dev.endpoint_id:
+            raise ValueError(f"device {output_id} is not an output endpoint")
+        if input_id is not None and (in_dev is None or not in_dev.can_input or not in_dev.endpoint_id):
+            raise ValueError(f"device {input_id} is not an input endpoint")
+
+        loopback = in_dev is None
+        result = roundtrip.measure(out_dev.endpoint_id, out_dev.endpoint_id if loopback else in_dev.endpoint_id,
+                                   input_kind='loopback' if loopback else 'capture',
+                                   sample_rate=self.sample_rate, block=self.buffer_size, exclusive=self.host.exclusive)
+        self._round_trip = {
+            'path': 'loopback' if loopback else 'capture',
+            'measured_ms': result.measured_ms,
+            'measured_frames': result.measured_frames,
+            'confidence': result.confidence,
+            'nominal_ms': result.nominal_ms,
+            'reported_ms': result.reported_ms,
+            'sample_rate': result.sample_rate,
+            'block': result.block,
+            'output': result.output,
+            'input': result.input,
+            'note': result.note,
+        }
+        return dict(self._round_trip)
+
+    # --- The ToneSphere virtual audio driver ---
+
+    VIRTUAL_CABLE_RENDER = "ToneSphere Cable Input"
+    VIRTUAL_CABLE_CAPTURE = "ToneSphere Cable Output"
+
+    def virtual_device_status(self) -> dict[str, Any]:
+        """
+        Whether Windows enumerates the ToneSphere driver's endpoints. Presence is all this
+        reports: it is what enumeration shows, not a claim that audio crosses the cable,
+        which only `tests/hardware/test_virtual_driver.py` proves.
+        """
+        render = next((d for d in self._devices if d.can_output and self.VIRTUAL_CABLE_RENDER in d.name), None)
+        capture = next((d for d in self._devices if d.can_input and self.VIRTUAL_CABLE_CAPTURE in d.name), None)
+        ids = {d.key: i for i, d in self._device_by_id.items()}
+        return {
+            'installed': render is not None and capture is not None,
+            'render': {'name': render.name, 'id': ids.get(render.key)} if render else None,
+            'capture': {'name': capture.name, 'id': ids.get(capture.key)} if capture else None,
+            'platform_supported': __import__('sys').platform == 'win32',
+        }
 
     def get_ring_statistics(self) -> dict[str, dict]:
         return self.host.ring_statistics()

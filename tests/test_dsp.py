@@ -21,6 +21,7 @@ from tonesphere.engine.dsp import (
     Limiter,
     Panner,
     SmoothedGain,
+    balance_gains,
     pan_gains,
 )
 
@@ -427,6 +428,19 @@ class TestChannelStrip:
         strip.process(block, BLOCK)
 
         assert not np.allclose(block[:, 0], block[:, 1])
+
+    def test_a_stereo_strips_pan_is_balance_unity_at_centre(self):
+        """Only the far side is attenuated: a stereo source does not dip 3 dB off centre."""
+        assert balance_gains(0.0) == (1.0, 1.0)
+        assert balance_gains(-1.0) == pytest.approx((1.0, 0.0), abs=1e-7)
+        strip = ChannelStrip(2, BLOCK)
+        strip.set_channel_pan(0, 0.5)
+
+        block = sine(BLOCK, amplitude=0.5)
+        strip.process(block, BLOCK)
+
+        assert float(np.max(np.abs(block[:, 1]))) == pytest.approx(0.5, abs=2e-3)
+        assert float(np.max(np.abs(block[:, 0]))) == pytest.approx(0.5 * math.cos(math.pi / 4), abs=2e-3)
 
     def test_master_gain_applies_to_every_channel(self):
         strip = ChannelStrip(2, BLOCK)

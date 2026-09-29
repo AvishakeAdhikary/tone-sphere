@@ -132,3 +132,84 @@ def test_the_engine_plays_through_a_plugin_and_keeps_it_across_a_restart(engine,
         assert restored.parameters()[0].normalized == pytest.approx(0.25)
     finally:
         listener.close()
+
+
+def channel_levels(captured) -> tuple[float, float]:
+    loud = np.nonzero(np.abs(captured).max(axis=1) > 1e-5)[0]
+    assert len(loud) > RATE // 2, "nothing of the tone was heard back"
+    window = captured[loud[0] + RATE // 5: loud[0] + RATE // 5 + RATE // 2]
+    return rms(window[:, 0]), rms(window[:, 1])
+
+
+def test_bypass_balance_and_per_channel_meters_are_what_is_heard(engine, test_gain):
+    """The controls the new views drive, each proven at the speaker, not by a return value."""
+    import math
+    import threading
+
+    speaker = engine.default_output_id()
+    bus = engine.create_virtual_input("tone", channels=2)
+    assert engine.create_routing(bus, speaker)[0]
+    assert engine.add_plugin(speaker, test_gain, is_input=False)[0]
+    engine.set_plugin_parameter(speaker, 0, 0, 0.25, is_input=False)  # x0.5
+    engine.start_engine()
+    listener = Listener()
+    try:
+        def heard(seconds=1.5):
+            t = threading.Thread(target=play, args=(engine, bus, seconds))
+            t.start()
+            captured = listener.listen(seconds)
+            t.join()
+            return channel_levels(captured)
+
+        full = rms(sine(RATE, amplitude=0.2))
+        assert heard() == pytest.approx((full * 0.5, full * 0.5), rel=0.02)
+        assert engine.get_performance_stats()['plugin_latency_samples'] == 64
+
+        engine.set_plugin_bypassed(speaker, 0, True, is_input=False)
+        assert heard() == pytest.approx((full, full), rel=0.02), "a bypassed plugin must not touch the audio"
+        assert engine.get_performance_stats()['plugin_latency_samples'] == 0, "nor count its latency"
+        assert engine.list_plugins(speaker, is_input=False)[0]['bypassed'] is True
+
+        engine.set_channel_pan(speaker, 0, 0.5)
+        left, right = heard()
+        assert right == pytest.approx(full, rel=0.02), "balance leaves the near side at unity"
+        assert left == pytest.approx(full * math.cos(math.pi / 4), rel=0.02)
+
+        # The meter, read while the tone plays, must agree with what was heard, per channel.
+        t = threading.Thread(target=play, args=(engine, bus, 1.0))
+        t.start()
+        time.sleep(0.6)
+        engine.get_meters()
+        time.sleep(0.2)
+        side = engine.get_meters()[speaker]['sides']['output']
+        t.join()
+        peak_left, peak_right = side['channel_peak_db']
+        assert peak_right == pytest.approx(20 * math.log10(0.2), abs=0.3)
+        assert peak_left == pytest.approx(20 * math.log10(0.2 * math.cos(math.pi / 4)), abs=0.3)
+    finally:
+        listener.close()
+
+
+def test_the_inserts_dialog_drives_a_real_plugin(engine, test_gain, monkeypatch):
+    """The dialog's slider reaches the plugin, and what it then shows is the plugin's own read-back."""
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+
+    from tonesphere.ui.plugin_views import SLIDER_STEPS, InsertsDialog
+
+    QApplication.instance() or QApplication([])
+    speaker = engine.default_output_id()
+    dialog = InsertsDialog(engine, speaker, False, "speaker")
+    try:
+        assert dialog.add(test_gain)
+        panel = dialog.parameters
+        assert panel.table.rowCount() >= 1 and panel.table.item(0, 0).text()
+        panel.table.selectRow(0)
+        panel.slider.setValue(SLIDER_STEPS // 4)
+        instance = engine.plugin_instances(speaker, is_input=False)[0]
+        assert instance.parameters()[0].normalized == pytest.approx(0.25, abs=1e-3)
+        assert panel.table.item(0, 1).text() == instance.parameters()[0].display
+        dialog.bypass_button.setChecked(True)
+        assert engine.list_plugins(speaker, is_input=False)[0]['bypassed'] is True
+    finally:
+        dialog.done(0)

@@ -139,6 +139,7 @@ class PresetManager:
                         'name': instance.info.name,
                         'vendor': instance.info.vendor,
                         'version': instance.info.version,
+                        'bypassed': instance.bypassed,
                         'state': instance.state().to_dict(),
                     })
                 if entries:
@@ -378,11 +379,14 @@ class PresetManager:
                     if not ok:
                         result.missing_plugins.append(f"{info.name}: {message}")
                         continue
-                    instance = engine.plugin_instances(device_id, is_input)[-1]
+                    index = len(engine.plugin_instances(device_id, is_input)) - 1
+                    instance = engine.plugin_instances(device_id, is_input)[index]
                     try:
                         instance.restore(PluginState.from_dict(entry.get('state', {})))
                     except PluginError as e:
                         result.warnings.append(f"{info.name} opened but kept its defaults: {e}")
+                    if entry.get('bypassed'):
+                        engine.set_plugin_bypassed(device_id, index, True, is_input)
                     result.restored_plugins += 1
 
     # --- Files ---

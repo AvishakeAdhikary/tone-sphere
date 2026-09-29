@@ -59,6 +59,11 @@ class PluginInfo:
     sdk_version: str
     is_audio_effect: bool
 
+    @property
+    def is_instrument(self) -> bool:
+        """An instrument needs note input, and nothing in ToneSphere sends MIDI yet."""
+        return 'Instrument' in self.subcategories.split('|')
+
     def to_dict(self) -> dict:
         return dict(self.__dict__)
 
@@ -163,6 +168,8 @@ class PluginInstance:
         if result != _abi.OK:
             raise PluginError(f"{info.name}: {_error()}")
         self.handle = handle.value
+        # The host's bypass, not the plugin's own bypass parameter; the native host applies it.
+        self.bypassed = False
 
     def close(self):
         if self.handle:

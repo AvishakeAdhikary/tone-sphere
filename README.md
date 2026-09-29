@@ -151,23 +151,27 @@ API with a WebSocket stats feed, and a CLI.
 
 ## What does not work yet
 
-- **VST3 plugins in the app.** A native VST3 host now exists and is proven — with
-  ToneSphere's own deterministic test plugin and with Surge XT, a real third-party plugin
-  (see [docs/VST3.md](docs/VST3.md)) — but the UI and API cannot load a plugin onto a
-  channel yet. Commercial plugins (Guitar Rig, Neural DSP, ...) have not been tested, and
-  nothing is claimed about them. AU is not supported.
+- **VST3 plugins beyond the desktop UI, and beyond effects.** The native VST3 host is
+  proven with ToneSphere's own deterministic test plugin and with Surge XT, a real
+  third-party plugin (see [docs/VST3.md](docs/VST3.md)), and the desktop UI loads plugins
+  onto a device's input or output (Windows). The REST API and CLI cannot yet. Instruments
+  are refused: nothing sends them MIDI. Commercial plugins (Guitar Rig, Neural DSP, ...)
+  have not been tested, and nothing is claimed about them. AU is not supported.
 - **Routing from a device through a bus to another device.** Audio routed into a bus from a
   device never reaches the bus's outputs — proved by a signal test recorded as a known
   defect (`test_device_to_bus_to_device_carries_the_signal`). Buses fed from the network or
   from per-application capture do work.
-- **Measured round-trip latency** — see above; shown as `--`.
+- **An acoustic or cabled round-trip figure for this project's own hardware.** The
+  measurement exists (Diagnostics → Measure, Windows) and is proven on the digital path;
+  it needs a loopback cable or a microphone that hears the speaker, and until one is
+  measured at the current rate and block the latency reads `--`.
 - **Whole-system loopback capture.** Nothing opens a loopback stream yet; per-application
   capture (above) works.
-- **The strip pan knob** has no audible effect yet (the value is stored, not applied).
 - **Virtual devices other applications can select, on Windows.** The buses are in-process
-  summing points; nothing outside ToneSphere can see them. On Windows that needs a signed
-  kernel driver — [docs/VIRTUAL_AUDIO_DRIVER.md](docs/VIRTUAL_AUDIO_DRIVER.md) covers
-  exactly what and how much. It is the one deliberately-undone item here.
+  summing points; nothing outside ToneSphere can see them. A kernel driver publishing a
+  "ToneSphere Cable" is now built and test-signed, but has not yet been installed and
+  shown to carry audio (that happens only in a test VM), and cannot be production-signed
+  without an EV certificate — [docs/VIRTUAL_AUDIO_DRIVER.md](docs/VIRTUAL_AUDIO_DRIVER.md).
 - **The macOS virtual device, in day-to-day use.** There is now a real CoreAudio HAL
   plug-in in [native/coreaudio-plugin/](native/coreaudio-plugin/) that publishes a
   **ToneSphere Audio** loopback device. It **builds, installs, and round-trips audio in
@@ -177,9 +181,9 @@ API with a WebSocket stats feed, and a CLI.
   Discord/OBS/a DAW, sleep/wake, Gatekeeper on a real user's own install method — is
   **unverified**, and the plug-in's C was written on a Windows machine by someone who
   could not compile or listen to it. Treat it as "proven in CI, unproven in life".
-- **ASIO.** Not in the PyPI PortAudio build. A native ASIO host is being built (Steinberg's
-  ASIO SDK is now available under GPLv3); until it has initialised a real driver and moved
-  audio, there is no ASIO support.
+- **ASIO against a hardware interface.** The native ASIO host (a separate GPLv3 DLL;
+  [docs/ASIO.md](docs/ASIO.md)) is verified against FlexASIO, a real but software ASIO
+  driver. No hardware interface's ASIO driver has been tested.
 - **Opus compression for network audio.** The UDP transport carries PCM — float32 or int16,
   optionally zlib'd — and reserves a codec id for Opus that both encode and decode refuse
   rather than quietly substituting PCM for. The blocker is packaging, not the codec: PyOgg

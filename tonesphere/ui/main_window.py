@@ -58,8 +58,12 @@ class MainWindow(QMainWindow):
         self.engine = UnifiedAudioEngine(self.config_manager)
         self.engine.initialize()
 
-        self._strips: dict[int, ChannelStripWidget] = {}
+        # Keyed by side as well as id: a duplex device (an ASIO driver) is one id with an
+        # input strip and an output strip, each metered on its own.
+        self._strips: dict[tuple[int, str], ChannelStripWidget] = {}
         self._node_positions: dict[int, QPointF] = {}
+        self._inserts_dialogs: dict[tuple[int, bool], object] = {}
+        self._diagnostics = None
 
         self.setWindowTitle(tr('app.name'))
         self.resize(1360, 880)
@@ -146,7 +150,21 @@ class MainWindow(QMainWindow):
             tr('transport.caption.buffer'), self.buffer_combo, layout
         )
 
+        self.rate_combo = QComboBox()
+        self.rate_combo.setMinimumWidth(90)
+        self._fill_rates()
+        self.rate_combo.setToolTip(tr('transport.rate_tooltip'))
+        self.rate_combo.currentIndexChanged.connect(self._change_rate)
+        self.rate_caption = self._labelled(
+            tr('transport.caption.rate'), self.rate_combo, layout
+        )
+
         layout.addStretch()
+
+        self.diagnostics_button = QPushButton(tr('transport.diagnostics'))
+        self.diagnostics_button.setToolTip(tr('transport.diagnostics_tooltip'))
+        self.diagnostics_button.clicked.connect(self._show_diagnostics)
+        layout.addWidget(self.diagnostics_button)
 
         self.monitor_button = QPushButton(tr('transport.monitor'))
         self.monitor_button.setToolTip(tr('transport.monitor_tooltip'))
@@ -159,6 +177,18 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.rescan_button)
 
         return panel
+
+    SAMPLE_RATES = (44100, 48000, 88200, 96000)
+
+    def _fill_rates(self):
+        self.rate_combo.blockSignals(True)
+        self.rate_combo.clear()
+        for rate in self.SAMPLE_RATES:
+            self.rate_combo.addItem(tr('transport.rate_khz', khz=f"{rate / 1000:g}"), rate)
+        index = self.rate_combo.findData(self.engine.sample_rate)
+        if index >= 0:
+            self.rate_combo.setCurrentIndex(index)
+        self.rate_combo.blockSignals(False)
 
     def _labelled(self, text: str, control: QWidget, parent_layout: QHBoxLayout) -> QLabel:
         """
@@ -288,6 +318,11 @@ class MainWindow(QMainWindow):
         rescan.triggered.connect(self._rescan)
         engine_menu.addAction(rescan)
 
+        diagnostics = QAction(tr('menu.engine.diagnostics'), self)
+        diagnostics.setShortcut(QKeySequence("Ctrl+D"))
+        diagnostics.triggered.connect(self._show_diagnostics)
+        engine_menu.addAction(diagnostics)
+
         engine_menu.addSeparator()
         quit_action = QAction(tr('menu.engine.quit'), self)
         quit_action.setShortcut(QKeySequence.StandardKey.Quit)
@@ -308,6 +343,12 @@ class MainWindow(QMainWindow):
         arrange = QAction(tr('menu.patch.auto_arrange'), self)
         arrange.triggered.connect(self._auto_arrange)
         patch_menu.addAction(arrange)
+
+        plugins_menu = self.menuBar().addMenu(tr('menu.plugins'))
+        browse = QAction(tr('menu.plugins.browse'), self)
+        browse.setShortcut(QKeySequence("Ctrl+B"))
+        browse.triggered.connect(self._show_plugin_browser)
+        plugins_menu.addAction(browse)
 
         language_menu = self.menuBar().addMenu(tr('menu.language'))
         group = QActionGroup(language_menu)
@@ -370,22 +411,31 @@ class MainWindow(QMainWindow):
             strip.deleteLater()
         self._strips.clear()
 
+    def _hosts_plugins(self, device: dict) -> bool:
+        return device['origin'] != 'in_process_bus' and hasattr(self.engine.engine.host, 'add_plugin')
+
     def _add_strip(self, device: dict):
         direction_key = f"device.direction.{device['direction']}"
+        is_input = device['direction'] == 'input'
         strip = ChannelStripWidget(
             device_id=device['id'],
             name=device['name'],
             subtitle=tr('device.subtitle', direction=tr(direction_key), channels=device['channels']),
             channels=min(device['channels'], 2),
+            is_input=is_input,
+            hosts_plugins=self._hosts_plugins(device),
         )
         strip.gain_changed.connect(self._set_device_gain)
         strip.pan_changed.connect(self._set_device_pan)
         strip.mute_toggled.connect(self._set_device_mute)
         strip.solo_toggled.connect(self._set_device_solo)
+        strip.inserts_requested.connect(self._show_inserts)
 
         # Before the stretch, so strips stay left-aligned.
         self.strip_layout.insertWidget(self.strip_layout.count() - 1, strip)
-        self._strips[device['id']] = strip
+        self._strips[(device['id'], device['direction'])] = strip
+        if strip.inserts_button.isEnabled():
+            self._refresh_insert_count(device['id'], is_input)
 
     def _place_nodes(self, inputs: list[dict], outputs: list[dict]):
         """
@@ -472,6 +522,53 @@ class MainWindow(QMainWindow):
         if size:
             self.engine.set_buffer_size(int(size))
             self._update_stats()
+
+    def _change_rate(self, index: int):
+        rate = self.rate_combo.itemData(index)
+        if rate:
+            try:
+                self.engine.set_sample_rate(int(rate))
+            except Exception as e:
+                self._error(tr('dialog.rate_error'), str(e))
+            self._update_stats()
+
+    # --- Views ---
+
+    def _show_diagnostics(self):
+        from tonesphere.ui.diagnostics_view import DiagnosticsDialog
+
+        if self._diagnostics is None:
+            self._diagnostics = DiagnosticsDialog(self.engine.engine, self)
+            self._diagnostics.finished.connect(lambda _result: setattr(self, '_diagnostics', None))
+        self._diagnostics.show()
+        self._diagnostics.raise_()
+
+    def _show_plugin_browser(self):
+        from tonesphere.ui.plugin_views import PluginBrowser
+
+        PluginBrowser(self.engine.engine, self.config_manager, picking=False, parent=self).exec()
+
+    def _show_inserts(self, device_id: int, is_input: bool):
+        from tonesphere.ui.plugin_views import InsertsDialog
+
+        key = (device_id, is_input)
+        dialog = self._inserts_dialogs.get(key)
+        if dialog is None:
+            strip = self._strips.get((device_id, 'input' if is_input else 'output'))
+            name = strip._name if strip is not None else str(device_id)
+            dialog = InsertsDialog(self.engine.engine, device_id, is_input, name, self.config_manager, self)
+            dialog.changed.connect(lambda d=device_id, i=is_input: self._refresh_insert_count(d, i))
+            dialog.finished.connect(lambda _result, k=key: self._inserts_dialogs.pop(k, None))
+            self._inserts_dialogs[key] = dialog
+        dialog.show()
+        dialog.raise_()
+
+    def _refresh_insert_count(self, device_id: int, is_input: bool):
+        strip = self._strips.get((device_id, 'input' if is_input else 'output'))
+        if strip is None:
+            return
+        entries = self.engine.engine.list_plugins(device_id, is_input)
+        strip.set_insert_count(len(entries), any(e['crashed'] for e in entries))
 
     def _rescan(self):
         self.engine.refresh_devices()
@@ -577,17 +674,24 @@ class MainWindow(QMainWindow):
 
         meters = self.engine.get_meters()
 
-        for device_id, strip in self._strips.items():
-            reading = meters.get(device_id)
+        for (device_id, direction), strip in self._strips.items():
+            reading = meters.get(device_id, {}).get('sides', {}).get(direction)
             if reading is None:
                 strip.set_inactive()
                 continue
 
-            peaks = [reading['peak_db']] * strip.channels
-            rms = [reading['rms_db']] * strip.channels
-            holds = [reading['peak_hold_db']] * strip.channels
+            if len(reading['channel_peak_db']) >= strip.channels:
+                peaks = reading['channel_peak_db'][:strip.channels]
+                rms = reading['channel_rms_db'][:strip.channels]
+                holds = reading['channel_peak_hold_db'][:strip.channels]
+            else:
+                # The host measured this side only as a whole: one reading, on every bar.
+                peaks = [reading['peak_db']] * strip.channels
+                rms = [reading['rms_db']] * strip.channels
+                holds = [reading['peak_hold_db']] * strip.channels
             strip.set_levels(peaks, rms, holds, reading['clipped'])
 
+        for device_id, reading in meters.items():
             node = self.routing_scene.nodes.get(device_id)
             if node is not None:
                 node.set_level(self._db_to_bar(reading['peak_db']))
@@ -624,7 +728,7 @@ class MainWindow(QMainWindow):
         self.engine_button.setStyleSheet("")   # force a restyle for the new object name
 
         failed = stats.get('failed_streams') or {}
-        for device_id, strip in self._strips.items():
+        for (device_id, _direction), strip in self._strips.items():
             device = self.engine.engine.get_device_info(device_id)
             reason = failed.get(device.key) if device else None
             strip.set_failed(reason)
@@ -697,6 +801,11 @@ class MainWindow(QMainWindow):
         self.buffer_combo.blockSignals(False)
         self.buffer_combo.setToolTip(tr('transport.buffer_tooltip'))
         self.buffer_caption.setText(tr('transport.caption.buffer'))
+        self._fill_rates()
+        self.rate_combo.setToolTip(tr('transport.rate_tooltip'))
+        self.rate_caption.setText(tr('transport.caption.rate'))
+        self.diagnostics_button.setText(tr('transport.diagnostics'))
+        self.diagnostics_button.setToolTip(tr('transport.diagnostics_tooltip'))
 
         self.monitor_button.setText(tr('transport.monitor'))
         self.monitor_button.setToolTip(tr('transport.monitor_tooltip'))
@@ -771,6 +880,8 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         self._meter_timer.stop()
         self._stats_timer.stop()
+        for dialog in list(self._inserts_dialogs.values()) + ([self._diagnostics] if self._diagnostics else []):
+            dialog.close()
         try:
             self.engine.cleanup()
         except Exception as e:

@@ -39,7 +39,7 @@ extern "C" {
 #endif
 
 /* Bumped whenever a struct layout or a signature changes; Python refuses a mismatch. */
-#define TS_ABI_VERSION 10
+#define TS_ABI_VERSION 12
 
 typedef int32_t ts_result;
 #define TS_OK               0
@@ -148,11 +148,16 @@ typedef struct ts_stats {
     uint64_t histogram[TS_HISTOGRAM_BUCKETS];
 } ts_stats;
 
+/* Channels metered individually; wider nodes are still metered as a whole. */
+#define TS_METER_CHANNELS 8
+
 typedef struct ts_meter {
     float peak;          /* max |x| since the last meter reset, all channels */
-    float rms;           /* RMS of the most recent block */
+    float rms;           /* RMS of the most recent block, all channels */
     uint32_t clipped;    /* 1 if any sample reached |x| >= 1.0 since the last reset */
     uint32_t channels;
+    float channel_peak[TS_METER_CHANNELS];  /* per channel, as `peak`; the first min(channels, 8) are set */
+    float channel_rms[TS_METER_CHANNELS];   /* per channel, as `rms` */
 } ts_meter;
 
 /* Events the audio thread reports without logging. Drained by ts_engine_poll_events. */
@@ -204,6 +209,9 @@ TS_API ts_result ts_engine_set_node_gain(ts_engine* engine, uint32_t node_id, fl
 TS_API ts_result ts_engine_set_node_muted(ts_engine* engine, uint32_t node_id, int32_t muted);
 TS_API ts_result ts_engine_set_channel_trim(ts_engine* engine, uint32_t node_id, uint32_t channel, float gain);
 TS_API ts_result ts_engine_set_channel_inverted(ts_engine* engine, uint32_t node_id, uint32_t channel, int32_t inverted);
+/* Exchange channels 0 and 1 after trim, crossfaded over one block. Refused on a node with
+ * fewer than two channels. */
+TS_API ts_result ts_engine_set_node_swapped(ts_engine* engine, uint32_t node_id, int32_t swapped);
 
 TS_API ts_result ts_engine_set_insert_param(ts_engine* engine, uint32_t node_id, uint32_t slot,
                                             uint32_t param, float value);

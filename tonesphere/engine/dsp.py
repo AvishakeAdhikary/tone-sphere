@@ -24,6 +24,17 @@ PAN_LAW_MINUS_6DB = 'minus6'
 PAN_LAW_LINEAR = 'linear'
 
 
+def balance_gains(pan: float) -> tuple[float, float]:
+    """
+    Left and right gain for a stereo source's balance, the native engine's law: unity at
+    centre, and only the far side is attenuated, so a stereo source does not drop 3 dB
+    the moment it leaves centre as it would through a pan law.
+    """
+    pan = min(max(pan, -1.0), 1.0)
+    far = math.cos(abs(pan) * math.pi / 2.0)
+    return (far if pan > 0.0 else 1.0, far if pan < 0.0 else 1.0)
+
+
 def pan_gains(pan: float, law: str = PAN_LAW_MINUS_3DB) -> tuple[float, float]:
     """
     Left and right gain for a pan position in [-1, 1].
@@ -136,7 +147,7 @@ class ChannelStrip:
 
     __slots__ = (
         'channels', 'blocksize', 'pan_law',
-        '_gains', '_pans', '_inverted', '_muted', '_master',
+        '_gains', '_pans', '_balance', '_inverted', '_muted', '_master',
         '_swap', '_scratch',
     )
 
@@ -147,6 +158,7 @@ class ChannelStrip:
 
         self._gains = [SmoothedGain(1.0, blocksize) for _ in range(channels)]
         self._pans = [0.0] * channels
+        self._balance = (1.0, 1.0)
         self._inverted = [False] * channels
         self._muted = [False] * channels
         self._master = SmoothedGain(1.0, blocksize)
@@ -168,8 +180,11 @@ class ChannelStrip:
             self._gains[channel].set(0.0 if muted else (target or 1.0))
 
     def set_channel_pan(self, channel: int, pan: float):
+        """On a stereo strip, channel 0's pan is the strip's balance; elsewhere pan belongs on routes."""
         if 0 <= channel < self.channels:
             self._pans[channel] = min(max(pan, -1.0), 1.0)
+            if self.channels == 2 and channel == 0:
+                self._balance = balance_gains(self._pans[0])
 
     def set_channel_inverted(self, channel: int, inverted: bool):
         """
@@ -212,9 +227,10 @@ class ChannelStrip:
         """
         Apply the strip in place.
 
-        Order is deliberate: polarity, then per-channel gain, then swap, then master. Pan
-        is not applied here because it changes channel count semantics — it belongs to the
-        route, where the destination width is known.
+        Order is deliberate: polarity, then per-channel gain, then a stereo strip's
+        balance, then swap, then master. Pan proper is not applied here because it changes
+        channel count semantics — it belongs to the route, where the destination width is
+        known.
         """
         channels = min(block.shape[1], self.channels)
 
@@ -224,6 +240,10 @@ class ChannelStrip:
 
             column = block[:frames, channel:channel + 1]
             self._gains[channel].apply(column, frames)
+
+        if self._balance != (1.0, 1.0) and block.shape[1] >= 2:
+            block[:frames, 0] *= self._balance[0]
+            block[:frames, 1] *= self._balance[1]
 
         if self._swap and block.shape[1] >= 2:
             # Copy through scratch: an in-place swap on NumPy views would alias.

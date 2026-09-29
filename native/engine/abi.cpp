@@ -131,6 +131,10 @@ TS_API ts_result ts_engine_set_channel_inverted(ts_engine* engine, uint32_t node
     return guarded(engine, [&](Engine& e) { return e.set_channel_inverted(node_id, channel, inverted != 0); });
 }
 
+TS_API ts_result ts_engine_set_node_swapped(ts_engine* engine, uint32_t node_id, int32_t swapped) {
+    return guarded(engine, [&](Engine& e) { return e.set_node_swapped(node_id, swapped != 0); });
+}
+
 TS_API ts_result ts_engine_set_insert_param(ts_engine* engine, uint32_t node_id, uint32_t slot, uint32_t param,
                                             float value) {
     return guarded(engine, [&](Engine& e) { return e.set_insert_param(node_id, slot, param, value); });

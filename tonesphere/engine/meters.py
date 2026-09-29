@@ -47,6 +47,11 @@ class MeterReading:
     rms: float = 0.0
     peak_hold: float = 0.0
     clipped: bool = False
+    # Per channel, where the host measured each channel on its own; empty otherwise, and
+    # then the summary above is all that is known.
+    channel_peaks: tuple[float, ...] = ()
+    channel_rms: tuple[float, ...] = ()
+    channel_holds: tuple[float, ...] = ()
 
     @property
     def peak_db(self) -> float:
@@ -59,6 +64,11 @@ class MeterReading:
     @property
     def peak_hold_db(self) -> float:
         return amplitude_to_db(self.peak_hold)
+
+    def channel_db(self) -> dict[str, list[float]]:
+        return {'peak_db': [amplitude_to_db(v) for v in self.channel_peaks],
+                'rms_db': [amplitude_to_db(v) for v in self.channel_rms],
+                'peak_hold_db': [amplitude_to_db(v) for v in self.channel_holds]}
 
 
 class ChannelMeter:
@@ -201,6 +211,9 @@ class MeterBank:
             rms=max(r.rms for r in readings),
             peak_hold=max(r.peak_hold for r in readings),
             clipped=any(r.clipped for r in readings),
+            channel_peaks=tuple(r.peak for r in readings),
+            channel_rms=tuple(r.rms for r in readings),
+            channel_holds=tuple(r.peak_hold for r in readings),
         )
 
     def clear_clip(self):

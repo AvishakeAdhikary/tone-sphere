@@ -76,6 +76,29 @@ def test_a_bus_reaches_a_network_send_sample_for_sample_with_no_device(engine):
     assert dominant_frequency(arrived) == pytest.approx(1000.0, abs=5.0)
 
 
+def test_the_native_strip_applies_balance_and_swap():
+    """The strip `AudioEngine` drives on a device side: balance through the trims, swap in the engine."""
+    import math
+
+    from tonesphere.engine.native_host import _Strip
+    from tonesphere.native import NativeEngine, Node, Route
+
+    left, right = sine(BLOCK * 4, 1000.0, amplitude=0.5), sine(BLOCK * 4, 3000.0, amplitude=0.5)
+    stereo = np.column_stack([left[:, 0], right[:, 0]])
+    with NativeEngine(RATE, BLOCK) as native:
+        native.apply_plan([Node.source(1, 2), Node.sink(2, 2)], [Route(1, 2)])
+        strip = _Strip(native, 1, 2)
+        strip.set_channel_pan(0, 0.5)
+        strip.set_swapped(True)
+        blocks = [native.process({1: stereo[i * BLOCK:(i + 1) * BLOCK]}, {2: 2})[2] for i in range(4)]
+    settled = np.concatenate(blocks[2:])
+    assert dominant_frequency(settled[:, 0]) == pytest.approx(3000.0, abs=50.0), "swap: right arrives on the left"
+    assert dominant_frequency(settled[:, 1]) == pytest.approx(1000.0, abs=50.0)
+    # Balance acts on the source's own channels before the swap: its left (1 kHz) is the far side.
+    assert float(np.max(np.abs(settled[:, 1]))) == pytest.approx(0.5 * math.cos(math.pi / 4), abs=2e-3)
+    assert float(np.max(np.abs(settled[:, 0]))) == pytest.approx(0.5, abs=2e-3)
+
+
 def test_writing_to_a_bus_with_no_routes_takes_nothing(engine):
     """As with the PortAudio host: an unrouted write is counted by the caller, not queued."""
     bus = engine.create_virtual_input("idle", channels=2)

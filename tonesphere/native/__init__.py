@@ -242,6 +242,10 @@ class NativeEngine:
         with self._control:
             self._check(self._dll.ts_engine_set_channel_inverted(self._handle, node, channel, int(inverted)))
 
+    def set_node_swapped(self, node: int, swapped: bool):
+        with self._control:
+            self._check(self._dll.ts_engine_set_node_swapped(self._handle, node, int(swapped)))
+
     def set_insert_param(self, node: int, slot: int, param: int, value: float):
         with self._control:
             self._check(self._dll.ts_engine_set_insert_param(self._handle, node, slot, param, value))
@@ -352,7 +356,9 @@ class NativeEngine:
         raw = _abi.Meter()
         with self._control:
             self._check(self._dll.ts_engine_get_meter(self._handle, node_id, ctypes.byref(raw)))
-        return {'peak': raw.peak, 'rms': raw.rms, 'clipped': bool(raw.clipped), 'channels': raw.channels}
+        metered = min(raw.channels, _abi.METER_CHANNELS)
+        return {'peak': raw.peak, 'rms': raw.rms, 'clipped': bool(raw.clipped), 'channels': raw.channels,
+                'channel_peak': list(raw.channel_peak[:metered]), 'channel_rms': list(raw.channel_rms[:metered])}
 
     def reset_meters(self):
         with self._control:

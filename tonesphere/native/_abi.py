@@ -21,7 +21,7 @@ from ctypes import (
     c_void_p,
 )
 
-ABI_VERSION = 10
+ABI_VERSION = 12
 
 OK = 0
 ERR_INVALID = -1
@@ -58,6 +58,7 @@ EQ_LOWPASS = 5
 MAX_CHANNELS = 64
 MAX_INSERTS = 16
 HISTOGRAM_BUCKETS = 64
+METER_CHANNELS = 8
 
 
 def bucket_edge_ns(i: int) -> float:
@@ -212,6 +213,8 @@ class Meter(Structure):
         ("rms", c_float),
         ("clipped", c_uint32),
         ("channels", c_uint32),
+        ("channel_peak", c_float * METER_CHANNELS),
+        ("channel_rms", c_float * METER_CHANNELS),
     ]
 
 
@@ -350,6 +353,7 @@ def bind(dll: ctypes.CDLL) -> ctypes.CDLL:
     proto("ts_engine_set_node_muted", c_int32, engine, c_uint32, c_int32)
     proto("ts_engine_set_channel_trim", c_int32, engine, c_uint32, c_uint32, c_float)
     proto("ts_engine_set_channel_inverted", c_int32, engine, c_uint32, c_uint32, c_int32)
+    proto("ts_engine_set_node_swapped", c_int32, engine, c_uint32, c_int32)
     proto("ts_engine_set_insert_param", c_int32, engine, c_uint32, c_uint32, c_uint32, c_float)
     proto("ts_engine_get_insert_param", c_int32, engine, c_uint32, c_uint32, c_uint32, f_ptr)
     proto("ts_engine_set_insert_bypassed", c_int32, engine, c_uint32, c_uint32, c_int32)

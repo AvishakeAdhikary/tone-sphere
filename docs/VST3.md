@@ -97,7 +97,9 @@ it.
 
 ## Not yet
 
-- MIDI and note events (instruments open but cannot be played).
+- MIDI and note events. Until something sends notes, `AudioEngine.add_plugin` refuses
+  instruments (subcategory `Instrument`), and the browser lists them as not offered.
 - Sidechain and multiple buses (only the main input and output bus are used).
 - Sample-accurate automation (a change applies at the start of the next block).
-- The plugin browser and editor in the UI, and plugin chains in presets (M8, M10).
+- Plugin chains from the REST API and CLI (the desktop UI has the browser, insert chains,
+  parameters, host bypass and the editor; presets carry chains, state and bypass).

@@ -41,14 +41,16 @@ class ChannelStripWidget(QFrame):
     pan_changed = Signal(int, float)       # device_id, -1..1
     mute_toggled = Signal(int, bool)
     solo_toggled = Signal(int, bool)
+    inserts_requested = Signal(int, bool)  # device_id, is_input
     selected = Signal(int)
 
     def __init__(self, device_id: int, name: str, subtitle: str, channels: int = 2,
-                 parent: QWidget | None = None):
+                 is_input: bool = True, hosts_plugins: bool = False, parent: QWidget | None = None):
         super().__init__(parent)
 
         self.device_id = device_id
         self.channels = channels
+        self.is_input = is_input
         self._name = name
 
         self.setObjectName("Panel")
@@ -62,6 +64,7 @@ class ChannelStripWidget(QFrame):
         layout.addWidget(self._build_header(name, subtitle))
         layout.addWidget(self._build_pan(), alignment=Qt.AlignmentFlag.AlignHCenter)
         layout.addLayout(self._build_buttons())
+        layout.addWidget(self._build_inserts(hosts_plugins))
         layout.addLayout(self._build_fader_and_meter(), stretch=1)
 
         self.setToolTip(tr('strip.tooltip', name=name, subtitle=subtitle))
@@ -116,11 +119,30 @@ class ChannelStripWidget(QFrame):
             )
 
     def _build_pan(self) -> QWidget:
+        """
+        Balance, on a stereo strip only. A mono source's position belongs on each of its
+        routes, where the destination width is known; a knob here would move nothing.
+        """
         self.pan_knob = PanKnob()
+        self.pan_knob.setToolTip(tr('strip.balance_tooltip'))
         self.pan_knob.value_changed.connect(
             lambda value: self.pan_changed.emit(self.device_id, value)
         )
+        self.pan_knob.setVisible(self.channels == 2)
         return self.pan_knob
+
+    def _build_inserts(self, hosts_plugins: bool) -> QWidget:
+        self.inserts_button = QPushButton(tr('strip.inserts', count=0))
+        self.inserts_button.setFixedHeight(METRICS.BUTTON_HEIGHT)
+        self.inserts_button.setToolTip(tr('strip.inserts_tooltip') if hosts_plugins
+                                       else tr('strip.inserts_unavailable'))
+        self.inserts_button.setEnabled(hosts_plugins)
+        self.inserts_button.clicked.connect(lambda: self.inserts_requested.emit(self.device_id, self.is_input))
+        return self.inserts_button
+
+    def set_insert_count(self, count: int, crashed: bool = False):
+        self.inserts_button.setText(tr('strip.inserts', count=count))
+        self.inserts_button.setStyleSheet(f"color: {Colors.ERROR.name()};" if crashed else "")
 
     def _build_buttons(self) -> QHBoxLayout:
         row = QHBoxLayout()
@@ -299,7 +321,8 @@ class HardwareBar(QFrame):
     Latency shows the driver-reported round trip with the nominal figure beside it, because
     those two numbers differ by a factor of four on shared-mode WASAPI and the difference
     is the single most useful thing a latency-sensitive user can know. Both are labelled
-    for what they are: neither is a measurement.
+    for what they are: neither is a measurement. A round trip measured at the current rate
+    and block (Diagnostics) replaces both.
     """
 
     def __init__(self, parent: QWidget | None = None):
@@ -397,6 +420,13 @@ class HardwareBar(QFrame):
     def _update_latency(self, stats: dict):
         reported = stats.get('reported_latency_ms')
         nominal = stats.get('nominal_latency_ms')
+        measured = stats.get('measured_round_trip_ms')
+
+        if measured is not None:
+            # A real measurement outranks anything a driver says about itself.
+            tone = Colors.OK if measured < 15 else (Colors.WARN if measured < 40 else Colors.ERROR)
+            self.latency.set_value(tr('status.latency_measured', ms=f"{measured:.1f}"), tone)
+            return
 
         if reported is None:
             # Never show the nominal figure alone as if it were the real one.
