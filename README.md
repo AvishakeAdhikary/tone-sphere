@@ -185,14 +185,23 @@ marked as such) Hindi.
 
 ## What does not work yet
 
-- **A virtual device other applications can select, on Windows.** The buses are in-process
-  summing points. A kernel driver publishing a "ToneSphere Cable" (a render and a capture
-  endpoint joined inside the driver) is built, test-signed and passes Microsoft's INF
-  checks, but has **not yet been installed and shown to carry audio** — that happens only
-  in a test VM — and cannot be offered to anyone until Microsoft signs it, which needs an EV
-  certificate this project does not have ([docs/VIRTUAL_AUDIO_DRIVER.md](docs/VIRTUAL_AUDIO_DRIVER.md)).
-- **ASIO against a hardware interface.** Verified against FlexASIO, a genuine but software
-  ASIO driver. No interface's own ASIO driver has been tested.
+- **A virtual device you can install, on Windows.** The buses are in-process summing
+  points. A kernel driver publishing a virtual cable (a render and a capture endpoint joined
+  inside the driver) works: in a Hyper-V test VM it installs, Windows enumerates it, audio
+  crosses between applications at exactly the level sent — including from ToneSphere
+  through a VST3 plugin into another program — and it uninstalls cleanly. But it is
+  test-signed, so it loads only where test-signing is on, and it cannot be offered to anyone
+  until Microsoft signs it, which needs an EV certificate this project does not have. It
+  has not been tried on a real desktop with Discord or OBS, and its endpoints carry Windows'
+  generic names ("Speakers" / "Microphone Array (ToneSphere Virtual Audio Cable)")
+  ([docs/VIRTUAL_AUDIO_DRIVER.md](docs/VIRTUAL_AUDIO_DRIVER.md)).
+- **An interface manufacturer's ASIO driver.** The ASIO host is verified against FlexASIO,
+  a genuine but software ASIO driver, including with FlexASIO driving a USB interface (an
+  Audio Array AI-04, whose maker publishes no ASIO driver). No manufacturer's ASIO driver
+  has been tested.
+- **A measured round trip through an interface.** The measurement works on the digital
+  path; through the AI-04 it needs a cable from its output back to its input, which was not
+  connected, so it reads `--`.
 - **Plugins beyond the desktop UI, and beyond effects.** The REST API and CLI cannot load
   plugins yet. Instruments are refused, because nothing sends them MIDI. No commercial
   plugin (Guitar Rig, Neural DSP, ...) has been tested, and nothing is claimed about them.
@@ -248,7 +257,7 @@ What is proven, and at which level, is tracked item by item in
 | 3 | Qt interface: mixer strips, dB faders, node-graph patchbay | done |
 | 4 | Real DSP, honest app detection, presets; VST3 hosting (native, phase 6) | done |
 | 5 | Packaging (CI-built and smoke-tested, releases on tag); per-process capture (Windows, done); virtual devices (Linux done; macOS proven in CI, unverified in daily use; Windows: see phase 6); Microsoft Store MSIX — manifest, logo generation and a local pack script exist and the manifest validates against the real `makeappx`, but nothing has been signed, installed from a package, or submitted, and the Store identity does not exist yet (see [docs/MICROSOFT_STORE.md](docs/MICROSOFT_STORE.md)) | mostly done |
-| 6 | Windows-native real-time engine: C++ audio path behind a C ABI (done), native WASAPI (done), ASIO (done; verified against a software driver only), VST3 host (done; the UI's plugin browser, inserts and editor), measured round trip (done; digital path proven), a Windows virtual audio driver (built and test-signed; install and audio **not yet verified**; production signing unavailable) — step by step in [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) | mostly done |
+| 6 | Windows-native real-time engine: C++ audio path behind a C ABI (done), native WASAPI (done), ASIO (done; verified against a software driver, including on a USB interface through it), VST3 host (done; the UI's plugin browser, inserts and editor), measured round trip (done; digital path proven), a Windows virtual audio driver (done in a test VM: installs, carries audio between applications, uninstalls; production signing unavailable) — step by step in [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) | mostly done |
 
 ## A note on how this was rebuilt
 
@@ -305,18 +314,21 @@ ToneSphere's own source is [MIT](LICENSE). Use it, change it, ship it, sell it �
 copyright and permission notice, and don't imply that a build you changed is the official
 one or that it comes from us.
 
-**The Windows executable is GPLv3.** Its ASIO support, `tonesphere_asio.dll`, is built from
-Steinberg's ASIO SDK under GPLv3 ([native/asio/](native/asio/) is GPLv3 for that reason),
-so a build that bundles it is distributed under GPLv3 as a whole. Each Windows release
-carries its Corresponding Source, SDKs included, as `ToneSphere-windows-source.zip`. The
-Linux and macOS executables are MIT alone. The virtual audio driver in
+**The Windows executable on GitHub is GPLv3.** Its ASIO support, `tonesphere_asio.dll`, is
+built from Steinberg's ASIO SDK under GPLv3 ([native/asio/](native/asio/) is GPLv3 for that
+reason), so a build that bundles it is distributed under GPLv3 as a whole. Each Windows
+release carries its Corresponding Source, SDKs included, as `ToneSphere-windows-source.zip`.
+The Microsoft Store package leaves ASIO out and is MIT alone, as are the Linux and macOS
+executables ([why](docs/MICROSOFT_STORE.md#7-licensing-the-store-package-does-not-carry-asio)).
+ToneSphere is free today; later versions or editions may be paid, and a copy you already
+have keeps its licence (Terms and Conditions, section 3). The virtual audio driver in
 [driver/windows_virtual_audio/](driver/windows_virtual_audio/) is Microsoft's sample under
 the MS-PL. The Terms and Conditions above only add what a licence does not speak to, and
 cannot narrow either licence — see their section 3.
 
 ## Contributing
 
-Contributions welcome. Run the tests with `uv run pytest -m "not hardware"` (what CI runs),
+Contributions welcome, under the MIT Licence with a DCO sign-off ([CONTRIBUTING.md](CONTRIBUTING.md)). Run the tests with `uv run pytest -m "not hardware"` (what CI runs),
 the hardware suite with `uv run pytest -m hardware` before trusting any change to the audio
 path, and lint with `uv run ruff check .` — CI runs on every push and PR, across Windows,
 Linux and macOS, building the native engine on Windows first. [AGENTS.md](AGENTS.md) holds

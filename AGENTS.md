@@ -214,6 +214,13 @@ When a verification is missing, name the reason (no device, no licence, no certi
   must say so. Such a release ships the GPLv3 text inside it (`tonesphere.spec`) and its
   Corresponding Source beside it (`scripts/package_source.py`, run by the release job),
   SDKs included; never publish a Windows binary without that archive.
+- **The Microsoft Store package never carries `tonesphere_asio.dll`** (`build_msix.ps1`
+  leaves it and the GPLv3 texts out): the owner keeps the Store listing MIT so its price
+  and terms stay theirs (`docs/MICROSOFT_STORE.md` section 7). A paid build with ASIO needs
+  Steinberg's proprietary ASIO licence signed first; never add ASIO to the Store package
+  or to a paid build without it.
+- Contributions come in under MIT (GPLv3 in `native/asio/`) with a DCO sign-off
+  (`CONTRIBUTING.md`), so any of them can go into a paid edition.
 - The **VST3 SDK (3.8+) is MIT**; keep its notice in distributions (`tonesphere.spec`
   bundles it).
 - `driver/windows_virtual_audio/` is derived from Microsoft's Windows-driver-samples
@@ -276,7 +283,8 @@ check it before assuming something works, and update it when you change a status
 - `sdks/` — fetched SDKs, git-ignored except `README.md`.
 - `scripts/` — `fetch_sdks.py`, `build_native.py`, `build_driver.py` (driver + VM kit),
   `driver_install.ps1`/`driver_uninstall.ps1` (VM only), `package_source.py` (GPLv3
-  Corresponding Source).
+  Corresponding Source), `vm/` (build the Hyper-V test VM; run a driver install/test/
+  uninstall pass in it).
 - `benchmarks/` — measured performance runs: `bench_engine.py` (offline cost per block),
   `soak.py` (the live path for 30 minutes, then restarts); results in `results/`.
 
