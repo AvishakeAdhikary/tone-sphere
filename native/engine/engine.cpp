@@ -6,8 +6,12 @@
 #include <deque>
 #include <new>
 #include <numbers>
+#include <unordered_set>
 
 #include "rt_alloc.h"
+#ifdef TS_WITH_VST3
+#include "vst3_host.h"
+#endif
 
 namespace ts {
 
@@ -128,13 +132,23 @@ ts_result Engine::apply_plan(const ts_plan& spec) {
     }
 
     std::vector<std::vector<const ts_insert_desc*>> node_inserts(node_count);
+    std::unordered_set<uint32_t> plugins_seen;
     for (uint32_t k = 0; k < insert_count; ++k) {
         const ts_insert_desc& d = inserts[k];
         auto n = by_id.find(d.node_id);
         const std::string label = "insert " + std::to_string(d.node_id) + "/" + std::to_string(d.slot);
         if (n == by_id.end()) { fail(label + ": unknown node"); return TS_ERR_INVALID; }
         if (d.slot >= TS_MAX_INSERTS) { fail(label + ": slot out of range"); return TS_ERR_INVALID; }
-        if (d.type < TS_INSERT_EQ || d.type > TS_INSERT_DELAY) { fail(label + ": unknown type"); return TS_ERR_INVALID; }
+        if (d.type < TS_INSERT_EQ || d.type > TS_INSERT_VST3) { fail(label + ": unknown type"); return TS_ERR_INVALID; }
+        if (d.type == TS_INSERT_VST3) {
+            if (d.plugin == 0) { fail(label + ": a VST3 insert needs a plugin handle"); return TS_ERR_INVALID; }
+            if (!plugins_seen.insert(d.plugin).second) {
+                // One process() call per block is the plugin contract; a second node
+                // would call it twice.
+                fail(label + ": plugin " + std::to_string(d.plugin) + " is already inserted elsewhere in this plan");
+                return TS_ERR_INVALID;
+            }
+        }
         for (const ts_insert_desc* other : node_inserts[n->second])
             if (other->slot == d.slot) { fail(label + ": duplicate slot"); return TS_ERR_INVALID; }
         node_inserts[n->second].push_back(&d);
@@ -183,17 +197,29 @@ ts_result Engine::apply_plan(const ts_plan& spec) {
     std::vector<uint32_t> position(node_count);
     for (uint32_t k = 0; k < node_count; ++k) position[order[k]] = k;
 
-    auto reuse_insert = [&](uint32_t node_id, uint32_t slot, uint32_t type, uint32_t channels) {
-        // Same processor, same channel count: keep it, with its parameters and memory.
+    std::string insert_error;
+    auto reuse_insert = [&](uint32_t node_id, uint32_t slot, uint32_t type, uint32_t channels,
+                            uint32_t plugin) -> InsertState* {
+        // Same processor, same channel count (and for a plugin, the same plugin): keep it,
+        // with its parameters and memory.
         const uint64_t key = insert_key(node_id, slot);
         auto existing = inserts_.find(key);
         std::shared_ptr<InsertState> state;
         if (existing != inserts_.end() && existing->second->processor->type() == type &&
-            existing->second->processor->channels() == channels) {
+            existing->second->processor->channels() == channels && existing->second->processor->plugin() == plugin) {
             state = existing->second;
         } else {
             state = std::make_shared<InsertState>();
-            state->processor = make_processor(type, channels, sample_rate_);
+            if (type == TS_INSERT_VST3) {
+#ifdef TS_WITH_VST3
+                state->processor = make_vst3_processor(plugin, channels, max_block_, insert_error);
+#else
+                insert_error = "this build has no VST3 host";
+#endif
+                if (!state->processor) return nullptr;
+            } else {
+                state->processor = make_processor(type, channels, sample_rate_);
+            }
         }
         insert_states.emplace(key, state);
         plan->inserts.push_back(state);
@@ -252,12 +278,16 @@ ts_result Engine::apply_plan(const ts_plan& spec) {
         }
 
         for (const ts_insert_desc* desc : node_inserts[i]) {
-            InsertState* state = reuse_insert(d.id, desc->slot, desc->type, d.channels);
+            InsertState* state = reuse_insert(d.id, desc->slot, desc->type, d.channels, desc->plugin);
+            if (!state) {
+                fail("insert " + std::to_string(d.id) + "/" + std::to_string(desc->slot) + ": " + insert_error);
+                return TS_ERR_INVALID;
+            }
             state->bypassed.store((desc->flags & TS_INSERT_FLAG_BYPASSED) ? 1u : 0u, std::memory_order_relaxed);
             n.inserts[n.insert_count++] = Insert{state->processor.get(), desc->slot, &state->bypassed};
         }
         if (d.flags & TS_NODE_FLAG_LIMITER)
-            n.limiter = reuse_insert(d.id, kLimiterSlot, TS_INSERT_LIMITER, d.channels)->processor.get();
+            n.limiter = reuse_insert(d.id, kLimiterSlot, TS_INSERT_LIMITER, d.channels, 0)->processor.get();
 
         n.route_begin = route_cursor;
         for (uint32_t r : incoming[i]) {

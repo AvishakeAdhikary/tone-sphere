@@ -21,7 +21,7 @@ from ctypes import (
     c_void_p,
 )
 
-ABI_VERSION = 6
+ABI_VERSION = 7
 
 OK = 0
 ERR_INVALID = -1
@@ -45,6 +45,7 @@ INSERT_EQ = 1
 INSERT_COMPRESSOR = 2
 INSERT_LIMITER = 3
 INSERT_DELAY = 4
+INSERT_VST3 = 5
 INSERT_FLAG_BYPASSED = 0x1
 
 EQ_OFF = 0
@@ -130,6 +131,48 @@ class InsertDesc(Structure):
         ("slot", c_uint32),
         ("type", c_uint32),
         ("flags", c_uint32),
+        ("plugin", c_uint32),
+    ]
+
+
+class Vst3Class(Structure):
+    _fields_ = [
+        ("uid", c_char * 64),
+        ("name", c_char * 128),
+        ("vendor", c_char * 128),
+        ("version", c_char * 64),
+        ("category", c_char * 64),
+        ("subcategories", c_char * 128),
+        ("sdk_version", c_char * 64),
+        ("class_flags", c_uint32),
+        ("is_audio_effect", c_uint32),
+    ]
+
+
+class Vst3Param(Structure):
+    _fields_ = [
+        ("id", c_uint32),
+        ("step_count", c_int32),
+        ("default_normalized", c_double),
+        ("normalized", c_double),
+        ("plain", c_double),
+        ("flags", c_int32),
+        ("unit_id", c_int32),
+        ("title", c_char * 128),
+        ("short_title", c_char * 64),
+        ("units", c_char * 32),
+        ("display", c_char * 64),
+    ]
+
+
+class Vst3Status(Structure):
+    _fields_ = [
+        ("crashed", c_uint32),
+        ("restart_flags", c_uint32),
+        ("latency", c_uint32),
+        ("channels", c_uint32),
+        ("blocks", c_uint64),
+        ("fault", c_char * 160),
     ]
 
 
@@ -316,6 +359,19 @@ def bind(dll: ctypes.CDLL) -> ctypes.CDLL:
     proto("ts_engine_get_meter", c_int32, engine, c_uint32, POINTER(Meter))
     proto("ts_engine_reset_meters", c_int32, engine)
     proto("ts_engine_poll_events", c_int32, engine, POINTER(Event), c_int32)
+    proto("ts_vst3_last_error", c_int32, ctypes.c_char_p, c_int32)
+    proto("ts_vst3_scan", c_int32, c_char_p, POINTER(Vst3Class), c_int32)
+    proto("ts_vst3_open", c_int32, c_char_p, c_char_p, c_uint32, c_uint32, c_uint32, POINTER(c_uint32))
+    proto("ts_vst3_close", c_int32, c_uint32)
+    proto("ts_vst3_param_count", c_int32, c_uint32)
+    proto("ts_vst3_param_info", c_int32, c_uint32, c_int32, POINTER(Vst3Param))
+    proto("ts_vst3_set_param", c_int32, c_uint32, c_uint32, c_double)
+    proto("ts_vst3_get_state", c_int32, c_uint32, c_int32, c_void_p, c_int32)
+    proto("ts_vst3_set_state", c_int32, c_uint32, c_void_p, c_int32, c_void_p, c_int32)
+    proto("ts_vst3_get_status", c_int32, c_uint32, POINTER(Vst3Status))
+    proto("ts_vst3_has_editor", c_int32, c_uint32)
+    proto("ts_vst3_open_editor", c_int32, c_uint32)
+    proto("ts_vst3_close_editor", c_int32, c_uint32)
     proto("ts_wasapi_enumerate", c_int32, POINTER(DeviceInfo), c_int32)
     proto("ts_wasapi_last_error", c_int32, ctypes.c_char_p, c_int32)
     proto("ts_wasapi_watch", c_int32, c_int32)

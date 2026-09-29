@@ -1,9 +1,9 @@
 # PyInstaller spec for ToneSphere.
 #
 # Replaces pyinstaller_to_program.sh, which was two lines and produced a binary that could
-# not start: PyInstaller does not find PortAudio's shared library or pedalboard's plugin
-# host by itself, because neither is imported as Python code — they are native libraries
-# loaded at runtime through cffi and a compiled extension.
+# not start: PyInstaller does not find PortAudio's shared library by itself, because it is
+# not imported as Python code — it is a native library loaded at runtime through cffi. The
+# same goes for ToneSphere's own native DLLs, loaded through ctypes (see native_bin below).
 #
 # Build:   uv run pyinstaller tonesphere.spec
 # Output:  dist/ToneSphere/ToneSphere.exe  (or the platform equivalent)
@@ -41,13 +41,6 @@ project_root = Path(SPECPATH)
 # raises OSError on first import and reports "no audio backend".
 binaries = collect_dynamic_libs('_sounddevice_data')
 binaries += collect_data_files('_sounddevice_data')
-
-# pedalboard bundles a compiled VST3 host. Missing it means plugin loading fails at
-# runtime with an import error rather than at build time.
-try:
-    binaries += collect_dynamic_libs('pedalboard')
-except Exception:
-    pass
 
 # The native engine (scripts/build_native.py). tonesphere/native looks for it under
 # sys._MEIPASS/tonesphere/native/_bin. Collected when present rather than required, so the

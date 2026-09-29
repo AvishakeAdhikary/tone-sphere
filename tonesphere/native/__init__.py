@@ -126,15 +126,20 @@ EQ = _abi.INSERT_EQ
 COMPRESSOR = _abi.INSERT_COMPRESSOR
 LIMITER = _abi.INSERT_LIMITER
 DELAY = _abi.INSERT_DELAY
+VST3 = _abi.INSERT_VST3
 
 
 @dataclass(frozen=True)
 class Insert:
-    """A built-in processor on a node. `slot` is both its address and its processing order."""
+    """
+    A processor on a node. `slot` is both its address and its processing order. For a
+    VST3 insert, `plugin` is the handle of an open `tonesphere.plugins.PluginInstance`.
+    """
     node: int
     slot: int
     type: int
     bypassed: bool = False
+    plugin: int = 0
 
 
 def _float_ptr(array: np.ndarray):
@@ -198,7 +203,8 @@ class NativeEngine:
             route_array[i] = _abi.RouteDesc(r.source, r.dest, r.gain, r.pan, flags)
         insert_array = (_abi.InsertDesc * max(1, len(inserts)))()
         for i, x in enumerate(inserts):
-            insert_array[i] = _abi.InsertDesc(x.node, x.slot, x.type, _abi.INSERT_FLAG_BYPASSED if x.bypassed else 0)
+            insert_array[i] = _abi.InsertDesc(x.node, x.slot, x.type, _abi.INSERT_FLAG_BYPASSED if x.bypassed else 0,
+                                              x.plugin)
         plan = _abi.Plan(node_array, len(nodes), route_array, len(routes), insert_array, len(inserts))
         with self._control:
             self._check(self._dll.ts_engine_apply_plan(self._handle, ctypes.byref(plan)))

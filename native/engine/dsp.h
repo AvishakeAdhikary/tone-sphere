@@ -39,6 +39,8 @@ public:
     }
     float param(uint32_t index) const { return params_[index].load(std::memory_order_relaxed); }
     virtual uint32_t param_count() const = 0;
+    // The VST3 handle this processor runs, or 0 for a built-in one.
+    virtual uint32_t plugin() const { return 0; }
     // A value the audio thread reports back (gain reduction), or NaN if none.
     virtual float readout() const { return NAN; }
 

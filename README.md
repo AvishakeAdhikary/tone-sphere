@@ -151,10 +151,11 @@ API with a WebSocket stats feed, and a CLI.
 
 ## What does not work yet
 
-- **VST3 / AU plugins.** Code that loads a plugin through `pedalboard` exists, but nothing in
-  the UI, API or CLI reaches it, no test has loaded a real plugin, and a stream restart
-  drops whatever was loaded. It is being replaced by a native VST3 host; until that is
-  proven with a real plugin, plugin hosting is not a feature.
+- **VST3 plugins in the app.** A native VST3 host now exists and is proven — with
+  ToneSphere's own deterministic test plugin and with Surge XT, a real third-party plugin
+  (see [docs/VST3.md](docs/VST3.md)) — but the UI and API cannot load a plugin onto a
+  channel yet. Commercial plugins (Guitar Rig, Neural DSP, ...) have not been tested, and
+  nothing is claimed about them. AU is not supported.
 - **Routing from a device through a bus to another device.** Audio routed into a bus from a
   device never reaches the bus's outputs — proved by a signal test recorded as a known
   defect (`test_device_to_bus_to_device_carries_the_signal`). Buses fed from the network or
@@ -201,7 +202,7 @@ API with a WebSocket stats feed, and a CLI.
 | 1 | Real audio I/O: PortAudio callback, lock-free graph, real enumeration | done |
 | 2 | Real mixer: pan law, polarity, limiter, drift resampling, metering | done |
 | 3 | Qt interface: mixer strips, dB faders, node-graph patchbay | done |
-| 4 | Real DSP, honest app detection, presets (done); VST3 hosting (pedalboard code exists but is unreachable and unproven — being replaced) | partly done |
+| 4 | Real DSP, honest app detection, presets (done); VST3 hosting (native host proven, see phase 6; the old pedalboard code is removed) | partly done |
 | 5 | Packaging (CI-built and smoke-tested, releases on tag); per-process capture (Windows, done); virtual devices (Linux done; macOS proven in CI, unverified in daily use; Windows kernel driver deliberately not attempted — see [docs/VIRTUAL_AUDIO_DRIVER.md](docs/VIRTUAL_AUDIO_DRIVER.md)); Microsoft Store MSIX — manifest, logo generation and a local pack script exist and the manifest validates against the real `makeappx`, but nothing has been signed, installed from a package, or submitted, and the Store identity does not exist yet (see [docs/MICROSOFT_STORE.md](docs/MICROSOFT_STORE.md)) | mostly done |
 
 | 6 | Windows-native real-time engine: C++ audio path behind a C ABI, native WASAPI, ASIO and VST3 hosts, a Windows virtual audio driver — tracked step by step in [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) | in progress |

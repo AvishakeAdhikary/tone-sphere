@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(tonesphere_native LANGUAGES C CXX)
+project(tonesphere_native VERSION 0.1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -19,6 +19,28 @@ if(MSVC)
     add_compile_definitions(NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
 endif()
 
+# The Steinberg VST3 SDK (MIT), fetched into sdks/vst3sdk by scripts/fetch_sdks.py. Only
+# what hosting needs: no examples, no VSTGUI, and never the plug-in symlink into the
+# system VST3 folder, which needs administrator rights.
+set(TS_VST3_SDK "${CMAKE_CURRENT_SOURCE_DIR}/../sdks/vst3sdk" CACHE PATH "Steinberg VST3 SDK root")
+set(TS_WITH_VST3 OFF)
+if(WIN32 AND EXISTS "${TS_VST3_SDK}/CMakeLists.txt")
+    set(TS_WITH_VST3 ON)
+    set(SMTG_ENABLE_VST3_PLUGIN_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(SMTG_ENABLE_VST3_HOSTING_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(SMTG_ENABLE_VSTGUI_SUPPORT OFF CACHE BOOL "" FORCE)
+    set(SMTG_CREATE_PLUGIN_LINK OFF CACHE BOOL "" FORCE)
+    set(SMTG_RUN_VST_VALIDATOR OFF CACHE BOOL "" FORCE)
+    set(SMTG_USE_STATIC_CRT ON CACHE BOOL "" FORCE)
+    # The SDK places a plug-in's binary inside its bundle only for configurations listed
+    # here, which a single-config generator such as Ninja leaves empty.
+    set(CMAKE_CONFIGURATION_TYPES "Debug;Release")
+    add_subdirectory("${TS_VST3_SDK}" vst3sdk EXCLUDE_FROM_ALL)
+    message(STATUS "VST3 host: building against ${TS_VST3_SDK}")
+else()
+    message(STATUS "VST3 host: not built (no VST3 SDK at ${TS_VST3_SDK}; run scripts/fetch_sdks.py)")
+endif()
+
 add_library(tonesphere_native SHARED
     engine/abi.cpp
     engine/engine.cpp
@@ -28,6 +50,32 @@ add_library(tonesphere_native SHARED
 target_include_directories(tonesphere_native PRIVATE include engine)
 if(WIN32)
     target_link_libraries(tonesphere_native PRIVATE ole32 avrt mmdevapi propsys)
+endif()
+if(TS_WITH_VST3)
+    target_sources(tonesphere_native PRIVATE
+        vst3/vst3_host.cpp
+        "${TS_VST3_SDK}/public.sdk/source/vst/hosting/module_win32.cpp"
+        "${TS_VST3_SDK}/public.sdk/source/vst/hosting/plugprovider.cpp"
+        "${TS_VST3_SDK}/public.sdk/source/common/memorystream.cpp"
+    )
+    target_include_directories(tonesphere_native PRIVATE vst3 "${TS_VST3_SDK}")
+    target_compile_definitions(tonesphere_native PRIVATE TS_WITH_VST3)
+    target_link_libraries(tonesphere_native PRIVATE sdk_hosting)
+    # The SDK's own sources are not held to this project's /WX.
+    set_source_files_properties(
+        "${TS_VST3_SDK}/public.sdk/source/vst/hosting/module_win32.cpp"
+        "${TS_VST3_SDK}/public.sdk/source/vst/hosting/plugprovider.cpp"
+        "${TS_VST3_SDK}/public.sdk/source/common/memorystream.cpp"
+        PROPERTIES COMPILE_OPTIONS "/WX-;/W3")
+
+    # The deterministic test plugin, and a module that crashes on load, for tests/native.
+    set(TS_TEST_PLUGINS "${CMAKE_BINARY_DIR}/test_plugins")
+    smtg_add_vst3plugin(tonesphere_test_gain test_plugin/test_plugin.cpp)
+    target_link_libraries(tonesphere_test_gain PRIVATE sdk)
+    add_library(tonesphere_test_crash_module SHARED test_plugin/crash_module.cpp)
+    set_target_properties(tonesphere_test_crash_module PROPERTIES
+        OUTPUT_NAME "ToneSphereTestCrashModule" SUFFIX ".vst3"
+        RUNTIME_OUTPUT_DIRECTORY "${TS_TEST_PLUGINS}/ToneSphereTestCrashModule.vst3/Contents/x86_64-win")
 endif()
 target_compile_definitions(tonesphere_native PRIVATE TONESPHERE_NATIVE_BUILD)
 if(MSVC)

@@ -803,21 +803,6 @@ class AudioHost:
             return None
         return stream.input_inserts if is_input else stream.output_inserts
 
-    def total_plugin_latency_ms(self) -> float:
-        """
-        Latency the loaded plugins add, on top of the driver's.
-
-        Must be included in what we report: a look-ahead limiter adds several milliseconds
-        by itself, and omitting it would make the latency figure wrong in exactly the
-        direction that flatters us.
-        """
-        samples = 0
-        for stream in self._streams.values():
-            for chain in (stream.input_inserts, stream.output_inserts):
-                if chain is not None:
-                    samples += chain.latency_samples
-        return samples / self.samplerate * 1000.0 if samples else 0.0
-
     def failed_streams(self) -> dict[str, str]:
         """Device key -> why its stream is not carrying audio."""
         return {
@@ -1438,15 +1423,11 @@ class AudioHost:
         stats.input_latency_ms = input_latency
         stats.output_latency_ms = output_latency
 
-        # Round trip is what a player feels: in, through us, and back out — including
-        # whatever the loaded plugins add, which can be several milliseconds. Every term
-        # here is reported, none is timed, so this is never labelled "measured".
+        # Round trip is what a player feels: in, through us, and back out. Every term here
+        # is reported, none is timed, so this is never labelled "measured". (This host has
+        # no plugins; the native engine reports plugin latency itself.)
         if input_latency is not None or output_latency is not None:
-            stats.reported_latency_ms = (
-                (input_latency or 0.0)
-                + (output_latency or 0.0)
-                + self.total_plugin_latency_ms()
-            )
+            stats.reported_latency_ms = (input_latency or 0.0) + (output_latency or 0.0)
 
         if cpu_loads:
             stats.cpu_load = max(cpu_loads) * 100.0

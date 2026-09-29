@@ -23,7 +23,6 @@ runtime or only to build. Update this file whenever `pyproject.toml` changes.
 | **uvicorn** | ASGI server that runs the API | No, while FastAPI stays | Keep |
 | **websockets** | Not imported by ToneSphere directly: uvicorn's WebSocket protocol implementation for `/ws/events` (`tonesphere.spec` hidden import `uvicorn.protocols.websockets.auto`) | uvicorn can use `wsproto` instead; no smaller | Keep |
 | **pyyaml** | Presets and the default config are YAML (`core/presets.py`, `utils/config.py`) | JSON from the standard library, at the cost of the presets' human-editable format and every existing preset file | Keep |
-| **pedalboard** | VST3 loading and processing in `engine/effects.py:PluginChain` | **Yes — the native VST3 host (M7).** It is also GPLv3, and no UI/API/CLI path reaches it today | **Remove in M7** |
 
 ## Build and development groups
 
@@ -46,6 +45,7 @@ is honest, not to add install steps.
 | Package | Why it was removed |
 |---|---|
 | requests | Nothing imported it (checked with a repository-wide import search, 2026-09-29) |
+| pedalboard | Replaced by the native VST3 host (`docs/VST3.md`). Its plugin chain was unreachable from the UI, API and CLI, never loaded a real plugin in a test, and made the frozen app a GPLv3 binary |
 
 ## Native and SDK dependencies
 

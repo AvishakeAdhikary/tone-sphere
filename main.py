@@ -187,6 +187,14 @@ def run_diagnostics() -> int:
 
 def main():
     """Main entry point"""
+    # The plugin scanner's subprocess in a frozen build, where sys.executable is this
+    # program rather than Python. Before anything else: its stdout is a JSON line for the
+    # parent, and loading config or logging would only slow a process that exists to
+    # load one plugin and exit.
+    if len(sys.argv) > 2 and sys.argv[1] == "scan-plugin":
+        from tonesphere.plugins.scan import scan_one_cli
+        return scan_one_cli(sys.argv[2])
+
     setup_console_encoding()
 
     config_manager = ConfigManager()

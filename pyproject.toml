@@ -17,7 +17,6 @@ dependencies = [
     "uvicorn>=0.37.0",
     "websockets>=15.0.1",
     "pyside6>=6.11.1",
-    "pedalboard>=0.9.24",
 ]
 
 [dependency-groups]
@@ -74,10 +73,10 @@ exclude = ["dist", "build", "presets"]
 select = ["E", "F", "W", "B", "UP", "I"]
 ignore = [
     "E402",   # a handful of modules import mid-file on purpose (optional deps, lazy
-              # imports to avoid pulling in PortAudio/Qt/pedalboard just for a type check)
+              # imports to avoid pulling in PortAudio/Qt just for a type check)
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# Tests intentionally build throwaway fixture objects inline and re-import optional
-# dependencies (pedalboard) after checking availability at runtime, not at module load.
+# Tests intentionally build throwaway fixture objects inline and import some modules only
+# after checking availability at runtime, not at module load.
 "tests/*" = ["E402"]

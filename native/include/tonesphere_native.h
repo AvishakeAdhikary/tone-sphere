@@ -39,7 +39,7 @@ extern "C" {
 #endif
 
 /* Bumped whenever a struct layout or a signature changes; Python refuses a mismatch. */
-#define TS_ABI_VERSION 6
+#define TS_ABI_VERSION 7
 
 typedef int32_t ts_result;
 #define TS_OK               0
@@ -92,6 +92,7 @@ typedef struct ts_route_desc {
 #define TS_INSERT_COMPRESSOR 2  /* [threshold dB, ratio, attack ms, release ms, knee dB, makeup dB] */
 #define TS_INSERT_LIMITER    3  /* [threshold linear, release ms] */
 #define TS_INSERT_DELAY      4  /* [delay ms, feedback, mix] */
+#define TS_INSERT_VST3       5  /* a VST3 plugin opened with ts_vst3_open; `plugin` is its handle */
 
 #define TS_EQ_OFF        0
 #define TS_EQ_PEAKING    1
@@ -104,9 +105,10 @@ typedef struct ts_route_desc {
 
 typedef struct ts_insert_desc {
     uint32_t node_id;
-    uint32_t slot;   /* 0..TS_MAX_INSERTS-1, unique per node; also the processing order */
-    uint32_t type;   /* TS_INSERT_* */
-    uint32_t flags;  /* TS_INSERT_FLAG_* */
+    uint32_t slot;    /* 0..TS_MAX_INSERTS-1, unique per node; also the processing order */
+    uint32_t type;    /* TS_INSERT_* */
+    uint32_t flags;   /* TS_INSERT_FLAG_* */
+    uint32_t plugin;  /* TS_INSERT_VST3 only: the ts_vst3_open handle; each at most once per plan */
 } ts_insert_desc;
 
 typedef struct ts_plan {
@@ -354,6 +356,72 @@ TS_API ts_result ts_engine_start_wasapi(ts_engine* engine, const ts_stream_desc*
                                         uint32_t master_index);
 TS_API ts_result ts_engine_stop_backend(ts_engine* engine);
 TS_API int32_t ts_engine_stream_status(ts_engine* engine, ts_stream_status* out, int32_t capacity);
+
+/* ---- VST3 plugins -------------------------------------------------------------------------
+ *
+ * Every call here runs on one plugin thread (OLE-initialised, with a message loop for
+ * editors), because VST3 controllers expect a single UI thread. Calls into plugin code are
+ * wrapped in structured exception handling: a plugin that faults while loading, opening,
+ * closing or processing is marked crashed and never called again, and the host keeps
+ * running. That catches access violations and C++ exceptions; a plugin that corrupts
+ * memory before faulting can still take the process down, which in-process hosting cannot
+ * prevent. */
+
+typedef struct ts_vst3_class {
+    char uid[64];            /* the class ID, 32 hex digits */
+    char name[128];
+    char vendor[128];
+    char version[64];
+    char category[64];       /* "Audio Module Class" for an audio processor */
+    char subcategories[128]; /* e.g. "Fx|Delay" */
+    char sdk_version[64];
+    uint32_t class_flags;
+    uint32_t is_audio_effect;
+} ts_vst3_class;
+
+typedef struct ts_vst3_param {
+    uint32_t id;
+    int32_t step_count;         /* 0 continuous, 1 toggle, n discrete */
+    double default_normalized;
+    double normalized;          /* the controller's current value */
+    double plain;
+    int32_t flags;              /* ParameterInfo::ParameterFlags: 1 can automate, 2 read-only, ... */
+    int32_t unit_id;
+    char title[128];
+    char short_title[64];
+    char units[32];
+    char display[64];           /* the controller's own text for the current value */
+} ts_vst3_param;
+
+typedef struct ts_vst3_status {
+    uint32_t crashed;           /* faulted once: bypassed from then on, never called again */
+    uint32_t restart_flags;     /* IComponentHandler::restartComponent flags since the last status read */
+    uint32_t latency;           /* samples, reported by the plugin (getLatencySamples) */
+    uint32_t channels;
+    uint64_t blocks;            /* process() calls */
+    char fault[160];
+} ts_vst3_status;
+
+TS_API int32_t ts_vst3_last_error(char* buffer, int32_t capacity);
+/* Load a module and list its classes, then unload it. Run this in a subprocess when the
+ * plugin is untrusted: a crash in a plugin's module-load code cannot be contained in-process. */
+TS_API int32_t ts_vst3_scan(const char* path, ts_vst3_class* out, int32_t capacity);
+TS_API ts_result ts_vst3_open(const char* path, const char* class_uid, uint32_t sample_rate, uint32_t max_block,
+                              uint32_t channels, uint32_t* handle);
+/* The plugin is released once no running plan uses it any more. */
+TS_API ts_result ts_vst3_close(uint32_t handle);
+TS_API int32_t ts_vst3_param_count(uint32_t handle);
+TS_API ts_result ts_vst3_param_info(uint32_t handle, int32_t index, ts_vst3_param* out);
+/* Updates the controller and queues the change for the audio thread's next block. */
+TS_API ts_result ts_vst3_set_param(uint32_t handle, uint32_t id, double normalized);
+/* which: 0 component state, 1 controller state. Returns the size; copies up to capacity. */
+TS_API int32_t ts_vst3_get_state(uint32_t handle, int32_t which, uint8_t* buffer, int32_t capacity);
+TS_API ts_result ts_vst3_set_state(uint32_t handle, const uint8_t* component, int32_t component_size,
+                                   const uint8_t* controller, int32_t controller_size);
+TS_API ts_result ts_vst3_get_status(uint32_t handle, ts_vst3_status* out);
+TS_API int32_t ts_vst3_has_editor(uint32_t handle);
+TS_API ts_result ts_vst3_open_editor(uint32_t handle);
+TS_API ts_result ts_vst3_close_editor(uint32_t handle);
 
 /* ---- External device backends ------------------------------------------------------------
  *
