@@ -378,6 +378,8 @@ def bind(dll: ctypes.CDLL) -> ctypes.CDLL:
     proto("ts_vst3_set_state", c_int32, c_uint32, c_void_p, c_int32, c_void_p, c_int32)
     proto("ts_vst3_get_status", c_int32, c_uint32, POINTER(Vst3Status))
     proto("ts_vst3_has_editor", c_int32, c_uint32)
+    proto("ts_vst3_event_inputs", c_int32, c_uint32)
+    proto("ts_vst3_send_midi", c_int32, c_uint32, ctypes.c_uint8, ctypes.c_uint8, ctypes.c_uint8, c_uint32)
     proto("ts_vst3_open_editor", c_int32, c_uint32)
     proto("ts_vst3_close_editor", c_int32, c_uint32)
     proto("ts_wasapi_enumerate", c_int32, POINTER(DeviceInfo), c_int32)

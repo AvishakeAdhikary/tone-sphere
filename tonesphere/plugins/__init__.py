@@ -231,6 +231,22 @@ class PluginInstance:
     def latency_samples(self) -> int:
         return self.status().latency_samples
 
+    @property
+    def event_inputs(self) -> int:
+        """Event input buses: 1 for an instrument, which plays notes; usually 0 for an effect."""
+        return max(0, int(self._dll.ts_vst3_event_inputs(self.handle)))
+
+    def send_midi(self, status: int, data1: int, data2: int = 0, sample_offset: int = 0):
+        """One MIDI message; see `ts_vst3_send_midi`. Any thread may call this."""
+        self._check(self._dll.ts_vst3_send_midi(self.handle, status & 0xFF, data1 & 0x7F, data2 & 0x7F,
+                                                max(0, int(sample_offset))))
+
+    def note_on(self, note: int, velocity: int = 100, channel: int = 0):
+        self.send_midi(0x90 | (channel & 0x0F), note, velocity)
+
+    def note_off(self, note: int, velocity: int = 0, channel: int = 0):
+        self.send_midi(0x80 | (channel & 0x0F), note, velocity)
+
     def has_editor(self) -> bool:
         return bool(self._dll.ts_vst3_has_editor(self.handle))
 

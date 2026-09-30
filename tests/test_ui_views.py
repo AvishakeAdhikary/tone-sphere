@@ -174,9 +174,19 @@ class TestPluginBrowser:
         browser.table.selectRow(2)
         assert browser.insert_button.isEnabled() is False, "a crashed module cannot be inserted"
         browser.table.selectRow(1)
-        assert browser.insert_button.isEnabled() is False, "an instrument has no MIDI to play it"
-        ok, message = AudioEngine().add_plugin(0, synth, is_input=False)
-        assert not ok and 'MIDI' in message
+        assert browser.insert_button.isEnabled() is False, "a chain takes effects; an instrument gets its own bus"
+        assert 'Add Instrument' in browser.table.item(1, 0).toolTip()
         browser.table.selectRow(0)
         browser._insert()
         assert chosen == [good]
+
+        picking_instruments = PluginBrowser(AudioEngine(), ConfigManager(db_path=tmp_path / "t.db"), picking=True,
+                                            auto_scan=False, instruments=True)
+        picked = []
+        picking_instruments.chosen.connect(picked.append)
+        picking_instruments.show_results(results)
+        picking_instruments.table.selectRow(0)
+        assert picking_instruments.insert_button.isEnabled() is False, "adding an instrument offers instruments"
+        picking_instruments.table.selectRow(1)
+        picking_instruments._insert()
+        assert picked == [synth]

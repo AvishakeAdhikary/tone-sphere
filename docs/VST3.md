@@ -26,7 +26,9 @@ chain it replaces was never reachable from the UI, API or CLI and has been remov
 | State (component + controller) save and restore through the SDK's state APIs; foreign state rejected | VERIFIED; HARDWARE VERIFIED (Surge XT) | round-trips into a fresh instance; bytes from elsewhere are refused and the plugin keeps working |
 | Editor window (IPlugView in a native window on the plugin thread) | HARDWARE VERIFIED (opens and closes) | Surge XT's editor; nothing interacts with it in a test |
 | Crash isolation: fault during initialise, during process on the audio thread | VERIFIED | initialise fault reported, host continues; process fault → plugin bypassed, dry signal passes, never called again |
-| Instruments (no audio input) | HARDWARE VERIFIED (opens, silent) | Surge XT opens and stays silent; **no MIDI/note input is implemented**, so an instrument cannot yet be played |
+| Instruments played by MIDI (M18) | **HARDWARE VERIFIED** with Surge XT 1.3.4 and Dexed 1.0.1 | An instrument goes on a bus of its own (`AudioEngine.create_instrument`, Plugins → Add Instrument) and is played by note on/off through `ts_vst3_send_midi`: pushed on the plugin thread into a single-producer queue, drained on the audio thread into a preallocated event list (512 events) handed to `process()`; controllers and the pitch wheel go through the plugin's `IMidiMapping` to its parameters. `tests/hardware/test_instruments.py`: Surge XT's note 69 at **440.63 Hz** from the engine, **440.17 Hz** over REST, C4 at **261.76 Hz** from the on-screen keyboard, and **440.63 Hz out of the AI-04 and back through its cable**; Dexed's notes 60 and 67 at 131.00 and 196.57 Hz (its default voice sits an octave below the key), an exact fifth; every note silent within two seconds of its release |
+| MIDI from a hardware port (winmm) | UNVERIFIED | `engine/midi_input.py` forwards a port's notes, controllers and pitch wheel to an instrument; the development machine has no MIDI input device, so only enumeration (none) and the refusals are tested |
+| Plugins from the REST API and the CLI (M18) | VERIFIED | `/plugins`, `/chains/{id}` (add a VST3 or a built-in, remove, move, bypass, parameters), `/instruments`, `/midi/{id}`; CLI `plugins`, `chain`, `effect`, `param`, `instrument`, `note`. `tests/native/test_plugins_remote.py`: the test plugin put on a bus and set to ×0.5 by parameter id over REST halves a 1 kHz tone exactly; a high-pass set from the CLI takes 100 Hz down by over 20 dB |
 | Commercial plugins (Guitar Rig, Neural DSP, ...) | **NOT TESTED** | none installed on the development machine; nothing is claimed about them |
 | Plugin process isolation (a worker process per plugin) | NOT IMPLEMENTED | see *Isolation* below |
 
@@ -95,11 +97,15 @@ reparenting across processes. The in-process design is what low-latency hosts co
 per-plugin process isolation remains an option to measure and add if crash reports warrant
 it.
 
+Dexed 1.0.1 (GPL-3.0; the official `Dexed-1.0.1-win.zip`, MD5 `f1d47cbee77a07f5bdb4848e8bcb078e`
+as the project's own `artifact_md5sum.txt` gives it, SHA-256 `1f118445…05f05`) was unzipped
+into a test folder (`TONESPHERE_TEST_PLUGINS`) — nothing installed. Neural Amp Modeler, the
+free amp modeller, was not tested: its Windows installer is not code-signed, and it was not
+installed with administrator rights on the development machine.
+
 ## Not yet
 
-- MIDI and note events. Until something sends notes, `AudioEngine.add_plugin` refuses
-  instruments (subcategory `Instrument`), and the browser lists them as not offered.
 - Sidechain and multiple buses (only the main input and output bus are used).
-- Sample-accurate automation (a change applies at the start of the next block).
-- Plugin chains from the REST API and CLI (the desktop UI has the browser, insert chains,
-  parameters, host bypass and the editor; presets carry chains, state and bypass).
+- Sample-accurate automation (a change applies at the start of the next block); notes play
+  at the start of the next block too.
+- MIDI from a hardware port is implemented and untested (no device).

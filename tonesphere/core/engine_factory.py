@@ -364,6 +364,30 @@ class UnifiedAudioEngine:
                              is_input: bool = True):
         return self.engine.set_plugin_parameter(device_id, index, param_id, normalized, is_input)
 
+    def find_plugin(self, path: str, uid: str | None = None):
+        return self.engine.find_plugin(path, uid)
+
+    def create_instrument(self, info, name: str | None = None, channels: int = 2):
+        return self.engine.create_instrument(info, name, channels)
+
+    def instruments(self) -> list[dict[str, Any]]:
+        return self.engine.instruments()
+
+    def send_midi(self, device_id: int, status: int, data1: int, data2: int = 0) -> tuple[bool, str]:
+        return self.engine.send_midi(device_id, status, data1, data2)
+
+    def midi_inputs(self) -> list[str]:
+        return self.engine.midi_inputs()
+
+    def connect_midi_input(self, port: int, device_id: int) -> tuple[bool, str]:
+        return self.engine.connect_midi_input(port, device_id)
+
+    def note_on(self, device_id: int, note: int, velocity: int = 100, channel: int = 0) -> tuple[bool, str]:
+        return self.engine.note_on(device_id, note, velocity, channel)
+
+    def note_off(self, device_id: int, note: int, channel: int = 0) -> tuple[bool, str]:
+        return self.engine.note_off(device_id, note, channel)
+
     def add_builtin(self, device_id: int, kind: str, is_input: bool = True, values=None) -> tuple[bool, str]:
         return self.engine.add_builtin(device_id, kind, is_input, values)
 

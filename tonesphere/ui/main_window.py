@@ -415,6 +415,9 @@ class MainWindow(QMainWindow):
         browse.setShortcut(QKeySequence("Ctrl+B"))
         browse.triggered.connect(self._show_plugin_browser)
         plugins_menu.addAction(browse)
+        instrument = QAction(tr('menu.plugins.add_instrument'), self)
+        instrument.triggered.connect(self._add_instrument)
+        plugins_menu.addAction(instrument)
 
         language_menu = self.menuBar().addMenu(tr('menu.language'))
         group = QActionGroup(language_menu)
@@ -608,6 +611,19 @@ class MainWindow(QMainWindow):
         from tonesphere.ui.plugin_views import PluginBrowser
 
         PluginBrowser(self.engine.engine, self.config_manager, picking=False, parent=self).exec()
+
+    def _add_instrument(self):
+        from tonesphere.ui.plugin_views import PluginBrowser
+
+        browser = PluginBrowser(self.engine.engine, self.config_manager, picking=True, instruments=True, parent=self)
+
+        def added(result):
+            ok, message, _bus = result
+            if not ok:
+                self._error(tr('dialog.instrument_error'), message)
+
+        browser.chosen.connect(lambda info: self._run(self.engine.create_instrument, info, refresh='all', done=added))
+        browser.exec()
 
     def _show_inserts(self, device_id: int, is_input: bool):
         from tonesphere.ui.plugin_views import InsertsDialog

@@ -151,6 +151,7 @@ class AudioEngine:
 
         self._lock = threading.RLock()
         self._monitor = None
+        self._midi_inputs: dict[int, Any] = {}
         self._device_change: dict[str, Any] | None = None
         self._initialized = False
         self._started = False
@@ -299,6 +300,8 @@ class AudioEngine:
             self._monitor.stop()
             self._monitor = None
         self._stop_all_process_captures()
+        for port in list(self._midi_inputs):
+            self.disconnect_midi_input(port)
 
         with self._lock:
             # Network threads are torn down here rather than in `stop_engine()`, because
@@ -1403,8 +1406,6 @@ class AudioEngine:
         """Open a scanned plugin (`plugins.PluginInfo`) at the end of a device side's or bus's chain."""
         from tonesphere.plugins import PluginError
 
-        if info.is_instrument:
-            return False, f"{info.name} is an instrument: it needs MIDI input, which ToneSphere does not provide yet"
         node, problem = self._chain_node(device_id)
         if node is None:
             return False, problem
@@ -1415,6 +1416,109 @@ class AudioEngine:
         latency = self.host.chain_for(node, is_input)[index].latency_samples
         note = f" (+{latency} samples latency, reported by the plugin)" if latency else ""
         return True, f"Loaded {info.name}{note}"
+
+    def find_plugin(self, path: str, uid: str | None = None):
+        """
+        The scanned class at `path` (and `uid`, when the module has several): scanned in a
+        subprocess like every scan, from the cache when unchanged. None if absent or broken.
+        """
+        from pathlib import Path
+
+        for result in self.scan_plugins([str(Path(path).parent)]):
+            if Path(result.path).resolve() != Path(path).resolve():
+                continue
+            for info in result.effects:
+                if uid is None or info.uid.upper() == uid.upper():
+                    return info
+        return None
+
+    # --- Instruments and MIDI ---
+
+    def create_instrument(self, info, name: str | None = None, channels: int = 2) -> tuple[bool, str, int | None]:
+        """
+        A new bus with the instrument as its first effect: a source the patchbay routes like
+        any other, playing whatever notes it is sent. Returns (ok, message, bus id).
+        """
+        bus = self.create_virtual_input(name or info.name, channels=channels)
+        if bus is None:
+            return False, "No bus available for the instrument (limit reached)", None
+        ok, message = self.add_plugin(bus, info, is_input=False)
+        if not ok:
+            self.remove_virtual_device(bus)
+            return False, message, None
+        instance = self.insert_instance(bus, 0, False)
+        if not instance.event_inputs:
+            self.remove_virtual_device(bus)
+            return False, f"{info.name} has no event input: it does not play notes", None
+        return True, f"{info.name} is playing on bus {bus}", bus
+
+    def _instrument(self, device_id: int):
+        for is_input in (False, True):
+            for entry in self._chain(device_id, is_input):
+                if not getattr(entry, 'is_builtin', False) and entry.event_inputs > 0:
+                    return entry
+        return None
+
+    def instruments(self) -> list[dict[str, Any]]:
+        """Every bus or device side carrying an instrument, and which one."""
+        out = []
+        for device_id in list(self._bus_meta) + list(self._device_by_id):
+            entry = self._instrument(device_id)
+            if entry is not None:
+                name = self._bus_meta[device_id]['name'] if device_id in self._bus_meta else \
+                    self._device_by_id[device_id].name
+                out.append({'id': device_id, 'name': name, 'instrument': entry.info.name,
+                            'vendor': entry.info.vendor})
+        return out
+
+    def send_midi(self, device_id: int, status: int, data1: int, data2: int = 0) -> tuple[bool, str]:
+        """One MIDI message to the first instrument in a bus's or device's chain."""
+        from tonesphere.plugins import PluginError
+
+        entry = self._instrument(device_id)
+        if entry is None:
+            return False, f"No instrument on {device_id}"
+        try:
+            entry.send_midi(status, data1, data2)
+        except PluginError as e:
+            return False, str(e)
+        return True, "sent"
+
+    def midi_inputs(self) -> list[str]:
+        """The MIDI input ports Windows lists; an index here is what `connect_midi_input` takes."""
+        from tonesphere.engine import midi_input
+
+        return midi_input.inputs()
+
+    def connect_midi_input(self, port: int, device_id: int) -> tuple[bool, str]:
+        """
+        Play the instrument on `device_id` from a MIDI port. The port's messages go straight
+        to that instrument's native queue, never through this lock, so closing the port
+        under it cannot wait on its own forwarding thread.
+        """
+        from tonesphere.engine import midi_input
+
+        entry = self._instrument(device_id)
+        if entry is None:
+            return False, f"No instrument on {device_id}"
+        self.disconnect_midi_input(port)
+        try:
+            self._midi_inputs[port] = midi_input.MidiInput(port, entry.send_midi)
+        except (OSError, IndexError) as e:
+            return False, str(e)
+        return True, f"MIDI port {port} ({self._midi_inputs[port].name}) plays {entry.info.name}"
+
+    def disconnect_midi_input(self, port: int) -> bool:
+        connection = self._midi_inputs.pop(port, None)
+        if connection is not None:
+            connection.close()
+        return connection is not None
+
+    def note_on(self, device_id: int, note: int, velocity: int = 100, channel: int = 0) -> tuple[bool, str]:
+        return self.send_midi(device_id, 0x90 | (channel & 0x0F), note, velocity)
+
+    def note_off(self, device_id: int, note: int, channel: int = 0) -> tuple[bool, str]:
+        return self.send_midi(device_id, 0x80 | (channel & 0x0F), note, 0)
 
     def add_builtin(self, device_id: int, kind: str, is_input: bool = True,
                     values: list[float] | None = None) -> tuple[bool, str]:
@@ -1437,14 +1541,14 @@ class AudioEngine:
                 out.append({'index': index, 'kind': 'builtin', 'type': entry.kind, 'name': entry.name,
                             'vendor': 'ToneSphere', 'version': '', 'path': '', 'latency_samples': 0,
                             'crashed': False, 'fault': '', 'has_editor': False, 'bypassed': entry.bypassed,
-                            'gain_reduction_db': self.host.insert_readout(node, is_input, index)})
+                            'gain_reduction_db': self.host.insert_readout(node, is_input, index), 'instrument': False})
                 continue
             status = entry.status()
             out.append({'index': index, 'kind': 'vst3', 'type': 'vst3', 'name': entry.info.name,
                         'vendor': entry.info.vendor, 'version': entry.info.version, 'path': entry.info.path,
                         'latency_samples': status.latency_samples, 'crashed': status.crashed,
                         'fault': status.fault, 'has_editor': entry.has_editor(), 'bypassed': entry.bypassed,
-                        'gain_reduction_db': None})
+                        'gain_reduction_db': None, 'instrument': entry.event_inputs > 0})
         return out
 
     def insert_instance(self, device_id: int, index: int, is_input: bool = True):

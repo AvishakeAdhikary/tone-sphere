@@ -437,6 +437,14 @@ TS_API int32_t ts_vst3_get_state(uint32_t handle, int32_t which, uint8_t* buffer
 TS_API ts_result ts_vst3_set_state(uint32_t handle, const uint8_t* component, int32_t component_size,
                                    const uint8_t* controller, int32_t controller_size);
 TS_API ts_result ts_vst3_get_status(uint32_t handle, ts_vst3_status* out);
+/* Event input buses: an instrument has one, most effects none. */
+TS_API int32_t ts_vst3_event_inputs(uint32_t handle);
+/* One MIDI message for the plugin: note on (0x9n) and off (0x8n) reach its event input on
+ * the next block at `sample_offset`, through a single-producer queue fed on the plugin thread
+ * (so any number of callers is safe); control change (0xBn) and pitch bend (0xEn) become the
+ * change of the parameter the plugin maps them to (IMidiMapping), or TS_ERR_NOT_FOUND. */
+TS_API ts_result ts_vst3_send_midi(uint32_t handle, uint8_t status, uint8_t data1, uint8_t data2,
+                                   uint32_t sample_offset);
 TS_API int32_t ts_vst3_has_editor(uint32_t handle);
 TS_API ts_result ts_vst3_open_editor(uint32_t handle);
 TS_API ts_result ts_vst3_close_editor(uint32_t handle);

@@ -75,11 +75,13 @@ class PluginBrowser(QDialog):
     COLUMNS = 7
 
     def __init__(self, engine, config_manager=None, picking: bool = False, auto_scan: bool = True,
-                 parent: QWidget | None = None):
+                 parent: QWidget | None = None, instruments: bool = False):
         super().__init__(parent)
         self._engine = engine
         self._config = config_manager
         self._picking = picking
+        # Picking for a chain offers effects; picking an instrument offers instruments.
+        self._instruments = instruments
         self._tasks = EngineTasks(self, name='plugin-scan')
         self._scanning = False
         self._closed = False
@@ -199,14 +201,14 @@ class PluginBrowser(QDialog):
         for result in results:
             if result.effects:
                 for info in result.effects:
+                    offered = info.is_instrument == self._instruments
                     if info.is_instrument:
-                        self._add_row(info.name, info.vendor, info.subcategories, info.version, result.architecture,
-                                      tr('plugins.status.instrument'), result.path, tr('plugins.instrument_detail'),
-                                      None)
-                        continue
+                        status, detail = tr('plugins.status.instrument'), tr('plugins.instrument_detail')
+                    else:
+                        status, detail = status_text(result.status), result.detail or tr('plugins.effect_detail')
                     self._add_row(info.name, info.vendor, info.subcategories or info.category, info.version,
-                                  result.architecture, status_text(result.status), result.path, result.detail, info)
-                    usable += 1
+                                  result.architecture, status, result.path, detail, info if offered else None)
+                    usable += offered
             else:
                 self._add_row(Path(result.path).stem, '', '', '', result.architecture,
                               status_text(result.status), result.path, result.detail, None)
@@ -428,11 +430,13 @@ class InsertsDialog(QDialog):
         self.bypass_button.toggled.connect(self._bypass)
         self.editor_button = QPushButton(tr('plugins.inserts.open_editor'))
         self.editor_button.clicked.connect(self._open_editor)
+        self.keyboard_button = QPushButton(tr('plugins.inserts.keyboard'))
+        self.keyboard_button.clicked.connect(self._open_keyboard)
         for b in (self.builtin_button, self.add_button, self.remove_button):
             buttons.addWidget(b)
         left_layout.addLayout(buttons)
         order = QHBoxLayout()
-        for b in (self.up_button, self.down_button, self.bypass_button, self.editor_button):
+        for b in (self.up_button, self.down_button, self.bypass_button, self.editor_button, self.keyboard_button):
             order.addWidget(b)
         left_layout.addLayout(order)
 
@@ -512,6 +516,7 @@ class InsertsDialog(QDialog):
         self.down_button.setEnabled(valid and row < len(entries) - 1)
         self.bypass_button.setEnabled(valid and not (valid and entries[row]['crashed']))
         self.editor_button.setEnabled(valid and entries[row]['has_editor'] and not entries[row]['crashed'])
+        self.keyboard_button.setEnabled(valid and entries[row].get('instrument', False) and not entries[row]['crashed'])
         self.bypass_button.blockSignals(True)
         self.bypass_button.setChecked(valid and entries[row]['bypassed'])
         self.bypass_button.blockSignals(False)
@@ -606,6 +611,11 @@ class InsertsDialog(QDialog):
 
         self._submit(open_editor, None,
                      lambda e: self.fault_label.setText(tr('plugins.inserts.editor_failed', reason=str(e))))
+
+    def _open_keyboard(self):
+        from tonesphere.ui.keyboard import KeyboardDialog
+
+        KeyboardDialog(self._engine, self._device_id, self.windowTitle(), self, tasks=self._tasks).show()
 
     def done(self, result):
         self._closed = True

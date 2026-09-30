@@ -38,6 +38,8 @@
 #include "pluginterfaces/vst/ivstaudioprocessor.h"
 #include "pluginterfaces/vst/ivstcomponent.h"
 #include "pluginterfaces/vst/ivsteditcontroller.h"
+#include "pluginterfaces/vst/ivstevents.h"
+#include "pluginterfaces/vst/ivstmidicontrollers.h"
 #include "pluginterfaces/vst/ivstparameterchanges.h"
 #include "pluginterfaces/vst/ivstprocesscontext.h"
 #include "pluginterfaces/vst/vstspeaker.h"
@@ -239,6 +241,46 @@ struct ParamChange {
     ParamValue value;
 };
 
+// A note for an instrument, on its way to the audio thread.
+struct NoteMessage {
+    uint8_t status;       // 0x80 note off or 0x90 note on, with the channel in the low nibble
+    uint8_t note;
+    uint8_t velocity;
+    uint32_t offset;      // sample offset within the block that plays it
+};
+
+// The events one process() call sees: preallocated, filled on the audio thread only.
+class FixedEvents final : public IEventList {
+public:
+    static constexpr int32 kEvents = 512;
+    void clear() { count_ = 0; }
+    int32 PLUGIN_API getEventCount() override { return count_; }
+    tresult PLUGIN_API getEvent(int32 index, Event& e) override {
+        if (index < 0 || index >= count_) return kResultFalse;
+        e = events_[index];
+        return kResultTrue;
+    }
+    tresult PLUGIN_API addEvent(Event& e) override {
+        if (count_ == kEvents) return kResultFalse;
+        events_[count_++] = e;
+        return kResultTrue;
+    }
+    tresult PLUGIN_API queryInterface(const TUID _iid, void** obj) override {
+        if (FUnknownPrivate::iidEqual(_iid, IEventList::iid) || FUnknownPrivate::iidEqual(_iid, FUnknown::iid)) {
+            *obj = this;
+            return kResultOk;
+        }
+        *obj = nullptr;
+        return kNoInterface;
+    }
+    uint32 PLUGIN_API addRef() override { return 1; }
+    uint32 PLUGIN_API release() override { return 1; }
+
+private:
+    Event events_[kEvents] = {};
+    int32 count_ = 0;
+};
+
 // ---- An open plugin ------------------------------------------------------------------------
 
 class Instance;
@@ -280,6 +322,7 @@ public:
     IPtr<IEditController> controller;
     ComponentHandler handler{*this};
     bool has_input = false;
+    int32 event_inputs = 0;  // event buses: an instrument has one, an effect usually none
     std::atomic<bool> crashed{false};
     std::atomic<uint32_t> restart_flags{0};
     std::atomic<uint32_t> latency{0};
@@ -287,6 +330,9 @@ public:
     std::atomic<uint32_t> fault_code{0};  // set by the audio thread when process() faults
     std::string fault;  // control side: written before `crashed` is set, or from fault_code
     ts::ItemQueue<ParamChange, 1024> changes;  // producer: plugin thread; consumer: audio thread
+    // SPSC like `changes`: every push happens on the plugin thread (ts_vst3_send_midi hops to
+    // it), so there is exactly one producer however many threads send notes.
+    ts::ItemQueue<NoteMessage, 512> notes;
     std::unique_ptr<EditorFrame> editor;
 
     void mark_crashed(const std::string& what) {
@@ -492,6 +538,24 @@ protected:
         }
         out_changes_.clear();
 
+        events_.clear();
+        NoteMessage note;
+        while (p.notes.pop(note)) {
+            Event e{};
+            e.busIndex = 0;
+            e.sampleOffset = static_cast<int32>(std::min(note.offset, frames ? frames - 1 : 0));
+            e.flags = Event::kIsLive;
+            const int16 channel = static_cast<int16>(note.status & 0x0F);
+            if ((note.status & 0xF0) == 0x90 && note.velocity > 0) {
+                e.type = Event::kNoteOnEvent;
+                e.noteOn = NoteOnEvent{channel, static_cast<int16>(note.note), 0.0f, note.velocity / 127.0f, 0, -1};
+            } else {
+                e.type = Event::kNoteOffEvent;
+                e.noteOff = NoteOffEvent{channel, static_cast<int16>(note.note), note.velocity / 127.0f, -1, 0.0f};
+            }
+            events_.addEvent(e);
+        }
+
         in_bus_.channelBuffers32 = const_cast<float**>(ch);
         ProcessData data;
         data.processMode = kRealtime;
@@ -502,6 +566,7 @@ protected:
         data.numOutputs = 1;
         data.outputs = &out_bus_;
         data.inputParameterChanges = &changes_;
+        data.inputEvents = p.event_inputs > 0 ? &events_ : nullptr;
         data.outputParameterChanges = &out_changes_;
         data.processContext = &context_;
 
@@ -535,6 +600,7 @@ private:
     AudioBusBuffers out_bus_{};
     FixedChanges changes_;
     FixedChanges out_changes_;
+    FixedEvents events_;
     ProcessContext context_{};
 };
 
@@ -690,6 +756,8 @@ TS_API ts_result ts_vst3_open(const char* path, const char* class_uid, uint32_t 
                 raw->component->activateBus(kAudio, kInput, 0, true);
             }
             raw->component->activateBus(kAudio, kOutput, 0, true);
+            raw->event_inputs = raw->component->getBusCount(kEvent, kInput);
+            if (raw->event_inputs > 0) raw->component->activateBus(kEvent, kInput, 0, true);
 
             step = "setup processing";
             if (raw->processor->canProcessSampleSize(kSample32) != kResultTrue) { error = "the plugin cannot process 32-bit float"; return; }
@@ -886,6 +954,64 @@ TS_API ts_result ts_vst3_get_status(uint32_t handle, ts_vst3_status* out) {
     out->channels = p->channels;
     out->blocks = p->blocks.load();
     copy_str(out->fault, sizeof(out->fault), p->fault);
+    return TS_OK;
+}
+
+TS_API int32_t ts_vst3_event_inputs(uint32_t handle) {
+    auto p = find(handle);
+    return p ? p->event_inputs : TS_ERR_NOT_FOUND;
+}
+
+TS_API ts_result ts_vst3_send_midi(uint32_t handle, uint8_t status, uint8_t data1, uint8_t data2,
+                                   uint32_t sample_offset) {
+    auto p = find(handle);
+    if (!p) return TS_ERR_NOT_FOUND;
+    const uint8_t kind = status & 0xF0;
+    if (data1 > 127 || data2 > 127 || (kind != 0x80 && kind != 0x90 && kind != 0xB0 && kind != 0xE0)) {
+        t_error = "supported: note on, note off, control change and pitch bend, with 7-bit data";
+        return TS_ERR_INVALID;
+    }
+    if (p->event_inputs < 1 && (kind == 0x80 || kind == 0x90)) {
+        t_error = "the plugin has no event input: it does not play notes";
+        return TS_ERR_STATE;
+    }
+    bool queued = true;
+    ts_result result = TS_OK;
+    DWORD code = 0;
+    plugin_thread().call([&] {
+        if (kind == 0x80 || kind == 0x90) {
+            queued = p->notes.push(NoteMessage{status, data1, data2, sample_offset});
+            return;
+        }
+        // VST3 has no controller events: a plugin maps a controller or the pitch wheel to
+        // one of its parameters, through IMidiMapping, and the value arrives as that
+        // parameter's change.
+        guarded([&] {
+            FUnknownPtr<IMidiMapping> mapping(p->controller);
+            ParamID id = 0;
+            const CtrlNumber controller = kind == 0xE0 ? static_cast<CtrlNumber>(kPitchBend) : static_cast<CtrlNumber>(data1);
+            if (!mapping || mapping->getMidiControllerAssignment(0, static_cast<int16>(status & 0x0F), controller, id) != kResultTrue) {
+                result = TS_ERR_NOT_FOUND;
+                return;
+            }
+            const double value = kind == 0xE0 ? ((data2 << 7) | data1) / 16383.0 : data2 / 127.0;
+            p->controller->setParamNormalized(id, value);
+            queued = p->changes.push(ParamChange{id, value});
+        }, code);
+    });
+    if (code) {
+        p->mark_crashed(fault_text("MIDI mapping", code));
+        t_error = p->fault;
+        return TS_ERR_BACKEND;
+    }
+    if (result == TS_ERR_NOT_FOUND) {
+        t_error = "the plugin maps nothing to that controller";
+        return result;
+    }
+    if (!queued) {
+        t_error = "the audio thread has not consumed the previous MIDI messages";
+        return TS_ERR_STATE;
+    }
     return TS_OK;
 }
 

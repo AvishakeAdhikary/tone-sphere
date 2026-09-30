@@ -6,10 +6,15 @@ from fastapi import FastAPI, HTTPException, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 
 from tonesphere.api.models import (
+    AddBuiltinRequest,
+    AddPluginRequest,
+    CreateInstrumentRequest,
     CreateLinuxSinkRequest,
     CreateRoutingRequest,
     CreateVirtualDeviceRequest,
     DeviceInfo,
+    MidiRequest,
+    NoteRequest,
     PerformanceStats,
     SetVolumeRequest,
     StartProcessCaptureRequest,
@@ -890,6 +895,161 @@ def stop_app_capture(bus_id: int):
         raise HTTPException(status_code=404, detail=f"No capture feeding bus {bus_id}")
 
     return {"message": f"Stopped the capture feeding bus {bus_id}"}
+
+# Plugins, effect chains, instruments and MIDI
+
+def _engine() -> UnifiedAudioEngine:
+    if not audio_engine:
+        raise HTTPException(status_code=500, detail="Audio engine not initialized")
+    if not audio_engine.hosts_plugins():
+        raise HTTPException(status_code=501, detail="Effect chains and plugins need the native engine (Windows)")
+    return audio_engine
+
+
+def _side(side: str) -> bool:
+    if side not in ('input', 'output'):
+        raise HTTPException(status_code=400, detail="side is 'input' or 'output'")
+    return side == 'input'
+
+
+def _plugin(path: str, uid: str | None):
+    info = _engine().find_plugin(path, uid)
+    if info is None:
+        which = f" with UID {uid}" if uid else ""
+        raise HTTPException(status_code=404, detail=f"No usable VST3 class at {path}{which}")
+    return info
+
+
+@app.get("/plugins")
+def list_plugins(path: str | None = None):
+    """
+    Every VST3 module in the standard folders (or under `path`), each scanned in its own
+    process, with what the scan found: its classes, or why it cannot be used.
+    """
+    results = _engine().scan_plugins([path] if path else None)
+    return [{
+        'path': r.path, 'status': r.status, 'detail': r.detail, 'architecture': r.architecture,
+        'classes': [{'uid': c.uid, 'name': c.name, 'vendor': c.vendor, 'version': c.version,
+                     'subcategories': c.subcategories, 'instrument': c.is_instrument} for c in r.effects],
+    } for r in results]
+
+
+@app.get("/chains/{device_id}")
+def get_chain(device_id: int, side: str = 'output'):
+    """A device side's (or bus's) effects, in processing order."""
+    return _engine().list_inserts(device_id, _side(side))
+
+
+@app.post("/chains/{device_id}/vst3")
+def add_chain_plugin(device_id: int, request: AddPluginRequest):
+    ok, message = _engine().add_plugin(device_id, _plugin(request.path, request.uid), _side(request.side))
+    if not ok:
+        raise HTTPException(status_code=400, detail=message)
+    return {'message': message, 'chain': audio_engine.list_inserts(device_id, _side(request.side))}
+
+
+@app.post("/chains/{device_id}/builtin")
+def add_chain_builtin(device_id: int, request: AddBuiltinRequest):
+    ok, message = _engine().add_builtin(device_id, request.type, _side(request.side), request.values)
+    if not ok:
+        raise HTTPException(status_code=400, detail=message)
+    return {'message': message, 'chain': audio_engine.list_inserts(device_id, _side(request.side))}
+
+
+@app.delete("/chains/{device_id}/{index}")
+def remove_chain_entry(device_id: int, index: int, side: str = 'output'):
+    if not _engine().remove_insert(device_id, index, _side(side)):
+        raise HTTPException(status_code=404, detail=f"No effect at {index}")
+    return {'message': f"Removed effect {index}"}
+
+
+@app.put("/chains/{device_id}/{index}/bypass")
+def bypass_chain_entry(device_id: int, index: int, bypassed: bool, side: str = 'output'):
+    if not _engine().set_insert_bypassed(device_id, index, bypassed, _side(side)):
+        raise HTTPException(status_code=404, detail=f"No effect at {index}")
+    return {'message': f"Effect {index} {'bypassed' if bypassed else 'active'}"}
+
+
+@app.put("/chains/{device_id}/{index}/move")
+def move_chain_entry(device_id: int, index: int, to: int, side: str = 'output'):
+    if not _engine().move_insert(device_id, index, to, _side(side)):
+        raise HTTPException(status_code=400, detail=f"Cannot move {index} to {to}")
+    return {'message': f"Moved effect {index} to {to}"}
+
+
+@app.get("/chains/{device_id}/{index}/parameters")
+def get_chain_parameters(device_id: int, index: int, side: str = 'output'):
+    """Every parameter, with the value the effect itself displays for it."""
+    entry = _engine().insert_instance(device_id, index, _side(side))
+    if entry is None:
+        raise HTTPException(status_code=404, detail=f"No effect at {index}")
+    return [{'id': p.id, 'title': p.title, 'display': p.display, 'units': p.units, 'normalized': p.normalized,
+             'step_count': p.step_count} for p in entry.parameters()]
+
+
+@app.put("/chains/{device_id}/{index}/parameters/{param_id}")
+def set_chain_parameter(device_id: int, index: int, param_id: int, normalized: float, side: str = 'output'):
+    """Set one parameter, normalised 0..1; the answer is what the effect reads back."""
+    if not 0.0 <= normalized <= 1.0:
+        raise HTTPException(status_code=400, detail="normalized is between 0 and 1")
+    engine = _engine()
+    if not engine.set_insert_parameter(device_id, index, param_id, normalized, _side(side)):
+        raise HTTPException(status_code=404, detail=f"No effect at {index}")
+    parameter = next((p for p in engine.insert_instance(device_id, index, _side(side)).parameters()
+                      if p.id == param_id), None)
+    if parameter is None:
+        raise HTTPException(status_code=404, detail=f"No parameter {param_id}")
+    return {'id': parameter.id, 'display': parameter.display, 'normalized': parameter.normalized}
+
+
+@app.get("/instruments")
+def list_instruments():
+    return _engine().instruments()
+
+
+@app.post("/instruments")
+def create_instrument(request: CreateInstrumentRequest):
+    """An instrument on a bus of its own: route the bus anywhere, and play it with /midi."""
+    ok, message, bus = _engine().create_instrument(_plugin(request.path, request.uid), request.name,
+                                                   request.channels)
+    if not ok:
+        raise HTTPException(status_code=400, detail=message)
+    return {'message': message, 'bus_id': bus}
+
+
+@app.get("/midi/inputs")
+def list_midi_inputs():
+    """The MIDI input ports Windows lists, by index."""
+    return [{'port': i, 'name': name} for i, name in enumerate(_engine().midi_inputs())]
+
+
+@app.post("/midi/inputs/{port}")
+def connect_midi_input(port: int, device_id: int):
+    """Play the instrument on `device_id` from MIDI port `port`."""
+    ok, message = _engine().connect_midi_input(port, device_id)
+    if not ok:
+        raise HTTPException(status_code=400, detail=message)
+    return {'message': message}
+
+
+@app.post("/midi/{device_id}/note")
+def play_note(device_id: int, request: NoteRequest):
+    engine = _engine()
+    if request.on:
+        ok, message = engine.note_on(device_id, request.note, request.velocity, request.channel)
+    else:
+        ok, message = engine.note_off(device_id, request.note, request.channel)
+    if not ok:
+        raise HTTPException(status_code=400, detail=message)
+    return {'message': message}
+
+
+@app.post("/midi/{device_id}")
+def send_midi(device_id: int, request: MidiRequest):
+    ok, message = _engine().send_midi(device_id, request.status, request.data1, request.data2)
+    if not ok:
+        raise HTTPException(status_code=400, detail=message)
+    return {'message': message}
 
 # Logging Control Endpoints
 @app.post("/logging/enable")
