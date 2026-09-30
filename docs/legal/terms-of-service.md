@@ -134,7 +134,7 @@ it away:
 |---|---|---|
 | Audio routing and mixing between devices | Windows, Linux, macOS | Working and covered by automated tests |
 | Routing through an internal bus from one device to another | Windows | Working; covered by automated signal tests of the native engine |
-| Routing through an internal bus from one device to another | Linux, macOS | **Not working** — a known defect in the PortAudio host; audio routed into a bus from a device does not reach the bus's outputs |
+| Routing through an internal bus from one device to another | Linux, macOS | Works; tested on Linux through a PulseAudio server. On macOS it runs the same code but has not been tested with real devices |
 | Built-in effects | Windows, Linux, macOS | Covered by automated tests; not yet reachable from the interface |
 | Per-application capture | Windows 10 build 20348 and later | Working, proven by a test that captures a known tone and measures it |
 | VST3 effect plugins | Windows | Working with the project's test plugin and with Surge XT, proven by tests that measure what the plugin did to a known signal; other plugins untested |

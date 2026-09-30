@@ -81,9 +81,9 @@ macOS"; "verified against FlexASIO" is not "works with your interface".
 stopped engines report empty meters, not zero dBFS; unmeasured latency is `None`; the
 round trip is `None` until a measurement at the current rate and block exists, and a
 loopback measurement is never reported as the round trip (`tests/test_ui_views.py`). The
-bus defect in the PortAudio host is a strict `xfail`
-(`test_device_to_bus_to_device_carries_the_signal`): when it is fixed, the suite fails
-until the documents that publish the defect are updated too.
+PortAudio host's bus defect was a strict `xfail`, so fixing it (M17) failed the suite until
+the documents that published it were corrected; `test_device_to_bus_to_device_carries_the_signal`
+now passes, and `TestRealLinuxBusRouting` proves the route through a real PulseAudio server.
 
 ## Benchmarks and the soak test
 
