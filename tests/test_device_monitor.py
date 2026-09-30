@@ -151,3 +151,20 @@ class TestTheEngineReopensOnlyWhatItUses:
         engine.present.pop('speakers')
         assert engine.handle_device_change()['reopened'] is False
         assert engine.restarts == []
+
+
+def test_a_process_that_never_cleans_its_engine_up_still_exits_cleanly():
+    """
+    An engine left running at exit used to leave its monitor thread calling the native DLL
+    while the interpreter tore down: every test passed and the process then died with a
+    fail-fast (0xC0000409), failing CI with nothing in the test report. Now it exits 0.
+    """
+    import subprocess
+    import sys
+
+    code = ("from tonesphere.core.engine import AudioEngine\n"
+            "e = AudioEngine()\n"
+            "e.initialize()\n"
+            "print('monitor', e._monitor is not None)\n")
+    result = subprocess.run([sys.executable, '-c', code], capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0, (result.returncode, result.stderr[-2000:])

@@ -13,8 +13,10 @@ engine can stop this monitor while it holds that lock itself without the two wai
 each other.
 """
 
+import atexit
 import threading
 import time
+import weakref
 from collections.abc import Callable
 
 from tonesphere.utils.logger import get_logger
@@ -92,6 +94,18 @@ class WasapiEvents:
             self._queue = None
 
 
+# Monitors still running when the interpreter exits — an engine nobody cleaned up — are
+# stopped before it tears down: a thread still calling into the native DLL during
+# finalisation took the process down with a fail-fast (0xC0000409) after every test passed.
+_running: "weakref.WeakSet[DeviceMonitor]" = weakref.WeakSet()
+
+
+@atexit.register
+def _stop_all():
+    for monitor in list(_running):
+        monitor.stop(timeout=2.0)
+
+
 class DeviceMonitor:
     """
     Calls `on_change(events)` with `lock` held, `DEBOUNCE_S` after the last relevant event
@@ -114,8 +128,10 @@ class DeviceMonitor:
         self._stop.clear()
         self._thread = threading.Thread(target=self._run, name='device-monitor', daemon=True)
         self._thread.start()
+        _running.add(self)
 
     def stop(self, timeout: float = 5.0):
+        _running.discard(self)
         self._stop.set()
         if self._thread is not None and self._thread is not threading.current_thread():
             self._thread.join(timeout)
