@@ -113,7 +113,7 @@ render-to-file feature is removed entirely, including its registry override.
 | A cable disappearing under a running engine, and coming back | **HARDWARE VERIFIED in the VM** | the engine reports it left, carries on without it, and reopens it on return with no user action |
 | Another program's application (ffmpeg, DirectShow) recording a cable | **HARDWARE VERIFIED in the VM** | 1 kHz at +0.000 dB |
 | The ASIO host through ASIO4ALL on a cable | **HARDWARE VERIFIED in the VM** (output at +0.00 dB from native WASAPI; its round trip `--`) | `tests/hardware/test_asio.py`, `test_roundtrip.py` with `TONESPHERE_TEST_INTERFACE='ToneSphere Cable 1'`; see `docs/ASIO.md` |
-| Measured round trip through a cable | **HARDWARE VERIFIED in the VM** | native WASAPI exclusive, 144-frame period: 12.02 ms, twice, confidence 79; shared: 63.35 / 73.35 ms |
+| Measured round trip through a cable | **HARDWARE VERIFIED in the VM**, exclusive mode **intermittent** | shared 10 of 10 (63.35 / 73.35 ms); the WASAPI **exclusive** round trip through a cable (144-frame period) measures 12.02 ms at confidence 79 most of the time, but 3 of 10 runs in one VM session found no path (confidence 1.3–2.3) — although the capture held the whole sweep, 13 ms after it was played, with no gap and the same peak. The audio crosses the cable intact; the correlation sometimes fails on it. Cause not established |
 | Loads again after the guest reboots | observed | a guest restart mid-run left the device and both endpoints present and working |
 | Custom pin names ("ToneSphere Cable Input/Output") | NOT IMPLEMENTED | see above; the cable's own name does appear in both endpoint names |
 | On a real desktop, with a real communications app (Discord, OBS) | NOT VERIFIED | the tests ran in the VM's PowerShell Direct session (session 0), with PortAudio processes and ffmpeg as "other applications" |
@@ -182,9 +182,14 @@ Earlier passes each found something real that nothing else would have:
     asked for only once the device has stopped.
 12. The two endpoints of a cable leave and arrive some hundreds of milliseconds apart, so a
     re-read straight after a change saw half a cable; the app waits for both.
-13. ASIO4ALL, after asking for a reset, never returned from `stop()`, and the host's control
-    thread waited on it for ever; the host now gives a driver five seconds, then abandons it
-    and says so (`docs/ASIO.md`).
+13. **Stopping a WASAPI stream on a cable ASIO4ALL was driving never returned.** Each stream
+    thread waited on `{device event, stop event}`, and `WaitForMultipleObjects` reports the
+    lowest-index handle signalled, so a device event that never stopped firing hid the stop
+    for ever. Stop now comes first (`docs/ASIO.md`). On the way: the capture threads' packet
+    drain is bounded, and the ASIO host gives a driver stuck in `stop()` five seconds, then
+    abandons it and says so.
+14. ASIO4ALL stays loaded in a process after release, and its left-over state disturbed later
+    WASAPI measurements on the same cable; the runner runs each test file in its own process.
 
 ### Testing it
 

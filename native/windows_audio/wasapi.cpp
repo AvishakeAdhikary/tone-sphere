@@ -731,11 +731,14 @@ void Backend::teardown(Stream& s) {
 
 // Wait for the stream's next device event. False means stop (or a dead device).
 bool Backend::wait(Stream& s) {
-    HANDLE handles[2] = {s.event, stop_};
+    // Stop first: WaitForMultipleObjects reports the lowest-index handle signalled, and a
+    // device whose event never stops firing (a shared stream on a cable ASIO4ALL holds
+    // through kernel streaming) otherwise hid the stop for ever, and stop() hung joining.
+    HANDLE handles[2] = {stop_, s.event};
     // Loopback streams get no event while nothing plays; poll them every 10 ms instead of
     // stalling. Everything else waits up to two seconds, then treats silence as a fault.
     const DWORD r = WaitForMultipleObjects(2, handles, FALSE, s.polled ? 10 : 2000);
-    if (r == WAIT_OBJECT_0 + 1) return false;
+    if (r == WAIT_OBJECT_0) return false;
     if (r == WAIT_TIMEOUT && !s.polled) {
         s.fail("the device stopped delivering events", HRESULT_FROM_WIN32(ERROR_TIMEOUT));
         return false;

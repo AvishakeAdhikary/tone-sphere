@@ -14,10 +14,8 @@ param(
     [string]$Name = 'ToneSphereDriverVM',
     [string]$Directory = 'C:\ToneSphereVM',
     [string]$Out = (Join-Path 'C:\ToneSphereVM' ('run-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))),
-    # One test is left out here, and only here: after the cable tests, with ASIO4ALL holding a
-    # cable through kernel streaming, stopping a WASAPI stream on that same cable never returns
-    # in this VM. A known failure, recorded in docs/ASIO.md; run it alone to reproduce it.
-    [string]$PytestArgs = '-m hardware -s -v -rA -o faulthandler_timeout=120 --deselect "tests/hardware/test_asio.py::test_output_content_where_the_driver_renders_through_wasapi[ASIO4ALL v2]"',
+    # A test stuck past two minutes dumps every thread's stack into pytest.log.
+    [string]$PytestArgs = '-m hardware -s -v -rA -o faulthandler_timeout=120',
     [string]$Tests = 'tests/hardware/test_virtual_driver.py tests/hardware/test_asio.py tests/hardware/test_roundtrip.py',
     # Third-party programs the tests drive, if present here: ASIO4ALL_2_22.exe (installed
     # silently in the guest, so the ASIO host is tested against it on a cable) and
@@ -138,9 +136,14 @@ try {
         $env:TONESPHERE_TEST_INTERFACE = 'ToneSphere Cable 1'
         $env:TONESPHERE_ARTIFACTS = $log
         if (-not $explore) {
-            $pytest = "C:\ts\uv.exe run pytest $tests $PytestArgs"
-            cmd /c "$pytest > $log\pytest.log 2>&1"
-            $steps.pytest = $LASTEXITCODE
+            # Each file in a process of its own: an ASIO driver is an in-process COM object that
+            # stays loaded after release, and ASIO4ALL's left-over state disturbed the WASAPI
+            # round trips run after it on the same cable.
+            $steps.pytest = 0
+            foreach ($file in ($tests -split '\s+' | Where-Object { $_ })) {
+                cmd /c "C:\ts\uv.exe run pytest $file $PytestArgs >> $log\pytest.log 2>&1"
+                if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 5) { $steps.pytest = $LASTEXITCODE }
+            }
         }
 
         & powershell -NoProfile -ExecutionPolicy Bypass -File "$kit\driver_uninstall.ps1" *>&1 | Out-File -Encoding utf8 "$log\uninstall.log"

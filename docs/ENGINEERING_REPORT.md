@@ -127,9 +127,10 @@ output heard at +0.00 dB from native WASAPI exclusive over the same cable; a mea
 trip of 15.58 / 18.27 / 23.58 / 34.27 ms at 64 / 128 / 256 / 512 frames, identical to the
 frame over three runs. In the driver VM on ToneSphere's cables: 48 kHz from the buffer switch
 after a 0.4 s start, and the output through a cable at +0.00 dB; its round trip there `--`
-(confidence 2.1, where native WASAPI measured the cable at 12.02 ms). One known failure there,
-recorded in `docs/ASIO.md`: after the cable tests, stopping a WASAPI stream on a cable
-ASIO4ALL is driving never returns. ASIO4ALL was uninstalled from this machine afterwards.
+(confidence 2.1 in one pass; 29.94 ms at 512 frames, confidence 79, in the next). Chasing a
+hang there found one of ToneSphere's own: stopping a WASAPI stream whose device event never
+stopped firing waited for ever, because the stop event was the second handle waited on;
+fixed (`docs/ASIO.md`). ASIO4ALL was uninstalled from this machine afterwards.
 
 ### 3.4 VST3 (`tests/native/test_vst3.py`, `tests/hardware/test_vst3_third_party.py`)
 
@@ -308,8 +309,10 @@ Found by signal tests during the migration, each now covered by one:
 - the PortAudio host's buses never forwarding their input;
 - a monitor thread alive at interpreter exit taking the process down (0xC0000409) after
   every test had passed;
-- WASAPI capture threads draining packets in an unbounded loop that never looked at the stop
-  event (now bounded per wake-up), and an ASIO host that would wait for ever on a driver
+- a WASAPI stop that never returned when a device's event never stopped firing (the stop
+  event was the second handle waited on, and `WaitForMultipleObjects` reports the first);
+  WASAPI capture threads draining packets in an unbounded loop that never looked at the stop
+  event (now bounded per wake-up); and an ASIO host that would wait for ever on a driver
   stuck in `stop()` (now abandoned after 5 s and reported);
 - a disable of a cable in use leaving it "pending a restart", and a device change recorded
   while the cable's second endpoint had not yet gone.
@@ -324,7 +327,7 @@ Found by signal tests during the migration, each now covered by one:
 | Commercial VST3 plugins; Neural Amp Modeler | licences; NAM's installer is unsigned | **owner** |
 | MIDI from a hardware keyboard | a MIDI device | **owner** |
 | macOS day to day, and bus routing with real macOS devices | a Mac | whoever owns one |
-| The VM-only hang stopping WASAPI beside ASIO4ALL after the cable tests | not reproduced outside that sequence; `docs/ASIO.md` | project |
+| An intermittent exclusive-mode round trip through a virtual cable in the VM: the capture holds the whole sweep, the correlation sometimes fails on it | cause not established; `docs/VIRTUAL_AUDIO_DRIVER.md` | project |
 | Plugin isolation (a plugin can still take the process down) | a plugin host process | project |
 | Legal review of T&C, ToS, Privacy | a lawyer | **owner** |
 | Store submission | Partner Center identity; the package is MIT-only by decision | **owner** |

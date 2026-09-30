@@ -230,7 +230,9 @@ marked as such) Hindi.
   others, and they are added, renamed, disabled, re-enabled and uninstalled from the UI.
   But the driver is test-signed, so it loads only where test-signing is on, and it cannot
   be offered to anyone until Microsoft signs it, which needs an EV certificate this project
-  does not have. It has not been tried on a real desktop with Discord or OBS
+  does not have. It has not been tried on a real desktop with Discord or OBS. A round trip
+  measured through a cable in exclusive mode fails intermittently in the VM (3 of 10 runs):
+  the sweep arrives intact, but the correlation misses it — not yet explained
   ([docs/VIRTUAL_AUDIO_DRIVER.md](docs/VIRTUAL_AUDIO_DRIVER.md)).
 - **An interface manufacturer's ASIO driver.** The ASIO host is verified against FlexASIO
   and ASIO4ALL — genuine ASIO drivers, but third-party wrappers over WASAPI and WDM-KS. The

@@ -1,10 +1,10 @@
 
 Status Class         FriendlyName                          InstanceId                                                          
 ------ -----         ------------                          ----------                                                          
-OK     AudioEndpoint Speakers (ToneSphere Cable 2)         SWD\MMDEVAPI\{0.0.0.00000000}.{2B865C0B-FD5C-4B35-B549-15C31CC15F62}
-OK     AudioEndpoint Speakers (ToneSphere Cable 1)         SWD\MMDEVAPI\{0.0.0.00000000}.{3BD704FB-51BE-450B-8E46-A3DEEC709A18}
-OK     AudioEndpoint Microphone Array (ToneSphere Cable 1) SWD\MMDEVAPI\{0.0.1.00000000}.{B04CB8E0-D6AD-4955-8CCF-D262AADEC9D4}
-OK     AudioEndpoint Microphone Array (ToneSphere Cable 2) SWD\MMDEVAPI\{0.0.1.00000000}.{D6C697AD-2A2C-4E68-9C12-9AC13418B3B8}
+OK     AudioEndpoint Speakers (ToneSphere Cable 2)         SWD\MMDEVAPI\{0.0.0.00000000}.{69E5FAC8-9EA7-4273-B9A0-C174674995A9}
+OK     AudioEndpoint Microphone Array (ToneSphere Cable 2) SWD\MMDEVAPI\{0.0.1.00000000}.{99CC0A7B-9FC1-4A34-BBC2-B6D5B6B9D740}
+OK     AudioEndpoint Microphone Array (ToneSphere Cable 1) SWD\MMDEVAPI\{0.0.1.00000000}.{37D78D12-C663-4DBA-8B70-21A92F70BEFF}
+OK     AudioEndpoint Speakers (ToneSphere Cable 1)         SWD\MMDEVAPI\{0.0.0.00000000}.{2BEDE39E-F38B-49BF-BC5F-E342FF3FACEF}
 OK     MEDIA         ToneSphere Cable 1                    ROOT\MEDIA\0000                                                     
 OK     MEDIA         ToneSphere Cable 2                    ROOT\MEDIA\0001                                                     
 

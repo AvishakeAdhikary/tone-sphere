@@ -12,10 +12,13 @@ host's download cache and ASIO4ALL installed silently.
 | `install.log` | `driver_install.ps1`: certificate trusted, package added to the driver store |
 | `cables.log` | `main.py cable-admin install-cables`: "ToneSphere Cable 1" and "ToneSphere Cable 2" created |
 | `devices_after_install.txt` | both cables and their four endpoints, as PnP lists them |
-| `pytest.log` | `test_virtual_driver.py`, `test_asio.py`, `test_roundtrip.py` against the cables: 22 passed, 2 skipped, 1 deselected (the known failure in `docs/ASIO.md`) |
+| `pytest.log` | `test_virtual_driver.py`, `test_asio.py`, `test_roundtrip.py` against the cables, each file in its own process: 22 passed, 1 failed, 2 skipped |
 | `uninstall.log` | `driver_uninstall.ps1`: every cable removed, package deleted, nothing left |
 | `devices_after_uninstall.txt` | empty: no ToneSphere device or endpoint remains |
 | `summary.json` | each step's exit code, the guest OS, and the session the tests ran in (0: PowerShell Direct, not a desktop session) |
 
-The skips: the laptop's acoustic test (no speaker or microphone in the VM), and the ASIO round
-trip through ASIO4ALL on a cable, which found no path above its confidence threshold.
+The skips: the laptop's acoustic test (no speaker or microphone in the VM), and ASIO4ALL's
+output-through-process-loopback test, which correctly finds that ASIO4ALL does not render
+through WASAPI. The failure is the intermittent exclusive-mode round trip through a cable
+recorded in `docs/VIRTUAL_AUDIO_DRIVER.md`: the first measurement found 12.02 ms, the repeat
+found no path, although its capture held the whole sweep.

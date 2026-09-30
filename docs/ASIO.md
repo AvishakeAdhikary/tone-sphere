@@ -19,7 +19,7 @@ binds it.
 | Against a real ASIO driver: **FlexASIO 1.10b** (software ASIO driver) | **HARDWARE VERIFIED** on the development machine, 2026-09-29 — see below |
 | Through FlexASIO to a USB audio interface, **Audio Array AI-04**, WASAPI exclusive | **HARDWARE VERIFIED** 2026-09-30: the interface's clock drives the buffer switch at 144 frames, and its input delivers a real signal — see below |
 | Against **ASIO4ALL 2.22** (a third-party WDM-KS ASIO driver) on the AI-04, with a cable from its output to its input | **HARDWARE VERIFIED** 2026-09-30: round trip measured at 64–512 frames, repeatable to the frame; the output heard through the cable at the level native WASAPI gives — see below |
-| ASIO4ALL in the driver VM, on ToneSphere's virtual cables | **HARDWARE VERIFIED in the VM** 2026-10-01, with one known failure (a hang stopping a WASAPI stream beside it after the cable tests) — see below |
+| ASIO4ALL in the driver VM, on ToneSphere's virtual cables | **HARDWARE VERIFIED in the VM** 2026-10-01 — see below; a hang it exposed in ToneSphere's WASAPI stop is fixed |
 | A driver that hangs in `stop()` | abandoned after 5 s, reported, no further ASIO load in that process: the engine side **IMPLEMENTED** (`tests/native/test_external_backend.py`); the ASIO host's timeout **UNVERIFIED** — no driver that hangs in `stop()` was available to prove it on |
 | Against an audio interface manufacturer's own ASIO driver | **NOT AVAILABLE** — the AI-04 has none: Audio Array sells it as driver-free, a USB Audio Class device on Windows' in-box driver. Until an interface with its own ASIO driver is tested, ToneSphere's ASIO support is proven through a software ASIO driver only |
 
@@ -141,28 +141,30 @@ where the only audio devices are ToneSphere's own cables, and runs `test_asio.py
 - ASIO4ALL asks for a reset (`kAsioResetRequest`) during its first stream there; the host
   flags it in the stream status, as it should, for the control plane to act on.
 
-**Known failure, not fixed:** after the cable tests have run — cables added, renamed,
-disabled, enabled and removed — `test_output_content_where_the_driver_renders_through_wasapi`
-hangs in this VM. With ASIO4ALL playing into a cable through kernel streaming, a second engine
-opens a WASAPI shared stream on that same cable (the default output) and a process loopback;
-stopping that WASAPI engine never returns, and two cores spin. It happens in a fresh process
-too, so it is left by the system state, not by the test process. It does not happen with the
-tests run alone, nor on the development machine. Two real defects were found and fixed while
-chasing it — neither was the cause:
+**A hang, found here and fixed.** After the cable tests, with ASIO4ALL playing into a cable
+through kernel streaming while a second engine held a WASAPI shared stream on the same cable,
+stopping that WASAPI engine never returned and two cores spun. The cause was ToneSphere's:
+each WASAPI stream thread waited on `{device event, stop event}`, and `WaitForMultipleObjects`
+reports the lowest-index handle signalled — so a device event that never stops firing (as it
+does for a shared stream fighting kernel streaming for the same pins) hid the stop request for
+ever, and `stop()` waited to join a thread that never saw it. The stop event now comes first.
+With that, the test finishes in the VM (it skips, correctly: ASIO4ALL does not render through
+WASAPI). Two more defects were fixed on the way:
 
 - the WASAPI capture threads drained packets in an unbounded loop that never looked at the
   stop event; the drain is now bounded per wake-up (`kMaxPacketsPerWake`);
-- the ASIO host waited for ever on a driver's `stop()`. It now gives the driver 5 seconds,
-  then abandons it — the driver, its thread and the stream are leaked rather than freed
-  under it — reports "the driver did not return from stop() within 5 s and was abandoned"
-  (the engine's stop returns that error), and refuses to load any ASIO driver again in that
-  process — a precaution: ASIO drivers are in-process and often single-instance. (One pass
-  of this test ended with the process failing fast, 0xC0000409; its cause was not
-  established.) `tests/native/test_external_backend.py` proves the engine side without a
-  driver; the host's timeout itself has not met a driver that hangs.
+- the ASIO host waited for ever on a driver's own `stop()`. It now gives the driver 5 seconds,
+  then abandons it — the driver, its thread and the stream are leaked rather than freed under
+  it — reports "the driver did not return from stop() within 5 s and was abandoned" (the
+  engine's stop returns that error), and loads no ASIO driver again in that process, as a
+  precaution: ASIO drivers are in-process and often single-instance.
+  `tests/native/test_external_backend.py` proves the engine side without a driver; the
+  host's timeout itself has not met a driver that hangs.
 
-The VM runner leaves that one test out (`--deselect`, with this reason in a comment) so the
-rest of the pass can run; run it alone to reproduce the failure.
+An ASIO driver also stays loaded in the process after release (an in-process COM object is
+not unloaded), and ASIO4ALL's left-over state disturbed WASAPI round trips measured on the
+same cable afterwards in the same process. The VM runner therefore runs each test file in a
+process of its own.
 
 ## Licence
 
