@@ -7,11 +7,11 @@ description: What the Windows-native migration built, what each part was proven 
 
 # Engineering report: the Windows-native migration
 
-Branch `windows-native`, 2026-09-29 and 30. Development machine: Intel Core i7-1165G7
+Branch `windows-native`, 2026-09-29 to 2026-10-01. Development machine: Intel Core i7-1165G7
 (4C/8T), Windows 11 Pro 26200, Realtek ALC257 (speakers, headphone output, microphone),
-Intel SST microphone array; from 2026-09-30 also an Audio Array AI-04 USB interface with a
-guitar on its input and earphones on its output. No loopback cable. The virtual driver was
-tested in a Hyper-V VM on the same machine.
+Intel SST microphone array; from 2026-09-30 also an Audio Array AI-04 USB interface — first
+with a guitar and earphones, then with a 6.35 mm cable from its headphone output to its input.
+The virtual driver was tested in a Hyper-V VM on the same machine; Linux routing in WSL2.
 
 Every figure below was measured on that machine unless it says otherwise, and cites the test
 or tool that produced it. A figure that was not measured is `--`.
@@ -24,28 +24,33 @@ Python control plane (`AudioEngine`) and its three front ends (Qt UI, REST API, 
 it unchanged, through a `NativeHost` implementing the interface the PortAudio host did. The
 UI gained a plugin browser, insert chains with parameters and editors, and a diagnostics
 view that measures the round trip instead of reporting it. A Windows kernel driver
-publishing a virtual cable carries audio between applications at exactly the level sent,
-**in a test VM**; it is test-signed, so it cannot be offered to anyone until Microsoft signs
-it.
+publishing virtual cables — two by default, up to eight, each managed from the UI — carries
+audio between applications at exactly the level sent, **in a test VM**; it is test-signed,
+so it cannot be offered to anyone until Microsoft signs it. The second half of the work
+(M13–M20) closed every other gap the README listed: a measured round trip through an
+interface and acoustically, a thread-safe control plane, devices that come and go, whole-
+system loopback as a source, built-in effects in the UI, TCP send, an adaptive jitter buffer,
+Opus, bus routing on the Linux/macOS host, plugins from the REST API and CLI, and instruments.
 
 | Area | Level | Evidence (section) |
 |---|---|---|
 | Native engine: plans, mixer, strips, DSP, rings, resampler, meters, statistics | VERIFIED | §3.1 |
 | Native WASAPI (shared, exclusive, raw, loopback, process loopback, multi-clock) | HARDWARE VERIFIED | §3.2 |
-| Native ASIO host (separate GPLv3 DLL) | HARDWARE VERIFIED against FlexASIO (software driver), including FlexASIO on a USB interface (Audio Array AI-04); a manufacturer's ASIO driver **not available** (the AI-04 has none) | §3.3 |
+| Native ASIO host (separate GPLv3 DLL) | HARDWARE VERIFIED against FlexASIO and ASIO4ALL, both on a USB interface (Audio Array AI-04), and ASIO4ALL in the driver VM; a manufacturer's ASIO driver **not available** (the AI-04 has none) | §3.3 |
 | Native VST3 host | VERIFIED (test plugin); HARDWARE VERIFIED with Surge XT; commercial plugins **not tested** | §3.4 |
-| Measured round trip | method HARDWARE VERIFIED on the digital path (Realtek and AI-04); through the AI-04 or acoustically `--` — no cable from output to input | §3.5 |
+| Measured round trip | HARDWARE VERIFIED: digital path; through the AI-04 and a cable (WASAPI and ASIO); acoustically on the laptop, just above the confidence threshold | §3.5 |
 | `AudioEngine` on the native host, end to end to the speaker | HARDWARE VERIFIED | §3.6 |
 | UI views | VERIFIED offscreen; the controls they drive HARDWARE VERIFIED | §3.7 |
 | Soak and restart | HARDWARE VERIFIED, 30 min + 25 restarts | §3.8 |
 | Native WASAPI on a USB interface (AI-04: exclusive 48 kHz at 3 ms, shared, monitoring) | HARDWARE VERIFIED; its 44.1 kHz input clock a recorded known failure | §3.10 |
-| Windows virtual audio driver | **HARDWARE VERIFIED in a Hyper-V test VM** (install, enumeration, audio between applications at the level sent, clean uninstall); real-desktop use NOT VERIFIED; production signing **NOT AVAILABLE** | §3.9 |
+| Windows virtual audio driver, several cables | **HARDWARE VERIFIED in a Hyper-V test VM** (two isolated cables, audio between applications at the level sent, add/rename/disable/enable/uninstall from the UI, a cable disappearing under the engine and reopened, clean uninstall); real-desktop use NOT VERIFIED; production signing **NOT AVAILABLE** | §3.9 |
+| Threads, devices that come and go, whole-system loopback, built-in effects in the UI, network (TCP, adaptive jitter, Opus), PortAudio bus routing, plugins from REST/CLI, instruments | VERIFIED; the audio paths HARDWARE VERIFIED (AI-04, WSL2 PulseAudio, the VM) | §3.11 |
 
 The per-item matrix is [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md).
 
 ## 2. What was built
 
-Twelve commits on `windows-native` (not pushed), 159 files, about 33,700 lines added:
+The milestones on `windows-native` (pushed; pull request #1):
 
 | Milestone | Commit | What |
 |---|---|---|
@@ -62,15 +67,23 @@ Twelve commits on `windows-native` (not pushed), 159 files, about 33,700 lines a
 | M10 | `b19bf1d` | UI: diagnostics, plugin browser, insert chains, parameter editor, sample rate; per-channel and per-side meters; strip balance and native channel swap made real; host bypass |
 | M11 | `6727a7b` | Soak test, Corresponding Source packaging, licence texts in the binary, legal documents, architecture/real-time/testing docs, README, this report |
 
-| M12 | this commit | The AI-04 interface on native WASAPI and through FlexASIO; the drift resampler rebuilt (calibration, dead band, proportional-integral); device periods cut into equal engine blocks; the virtual driver verified in a Hyper-V VM, with the VM built and driven by committed scripts, and the driver defects that found; the Store package made MIT-only; docs published by GitHub Actions |
+| M12 | `1ecdb5c`…`11586a6` | The AI-04 interface on native WASAPI and through FlexASIO; the drift resampler rebuilt (calibration, dead band, proportional-integral); device periods cut into equal engine blocks; the virtual driver verified in a Hyper-V VM, with the VM built and driven by committed scripts, and the driver defects that found; the Store package made MIT-only; docs published by GitHub Actions |
+| M13 | `5470caf` | Measured round trip through the AI-04 and a cable, WASAPI and ASIO (`measure_asio`); ASIO4ALL on the AI-04 |
+| M14 | `42e1eb8` | A threaded, thread-safe control plane: one lock per engine object; the UI's engine calls on a worker and a poller; REST handlers in the threadpool |
+| M15 | `c353949` | A device monitor that reopens what changed; every output's loopback a routable source; the built-in effects in the Inserts dialog |
+| M16 | `095207a` | TCP send, an adaptive jitter buffer, Opus through libopus |
+| M17 | `eeaac3a` | Buses forward on the PortAudio host: device → bus → device on Linux and macOS |
+| M18 | `3313881` | Plugins from the REST API and CLI; VST3 instruments played by MIDI |
+| M19 | this series | Several virtual cables, managed from the UI; devices disappearing, proven on the cables; ASIO4ALL in the VM |
+| M20 | this series | The acoustic round trip; documentation |
 
 ## 3. Evidence
 
-Final run on the development machine: `uv run pytest -m "not hardware"` — 836 passed, 2
-skipped (a Linux-only test; `makeappx` validation, which needs the Windows SDK on PATH), 1
-expected failure (the PortAudio host's bus defect, strict); `uv run pytest -m hardware` — 33
-passed, 5 skipped (the virtual-driver tests: the driver is not installed on this machine,
-by rule). `uv run ruff check .` clean. The suite before the migration: 660 passed.
+Final run on the development machine, 2026-10-01: `uv run pytest -m "not hardware"` — 916
+passed, 3 skipped (two Linux-only tests; `makeappx` validation, which needs the Windows SDK
+on PATH). `uv run ruff check .` clean. The hardware tests were run milestone by milestone on
+this machine (the virtual-driver tests skip here by rule: the driver is installed only in the
+VM) and in the VM (§3.9). The suite before the migration: 660 passed.
 
 ### 3.1 Native engine (offline, CI)
 
@@ -109,6 +122,15 @@ switches in 1.5 s, none missed, max 18.2 µs, 0 xruns, input 1 carrying the guit
 through process loopback at exactly the level sent. **No manufacturer's ASIO driver has
 been tested**: the AI-04's maker publishes none.
 
+Against **ASIO4ALL 2.22** (WDM-KS) on the AI-04 with its output cabled to its input: the
+output heard at +0.00 dB from native WASAPI exclusive over the same cable; a measured round
+trip of 15.58 / 18.27 / 23.58 / 34.27 ms at 64 / 128 / 256 / 512 frames, identical to the
+frame over three runs. In the driver VM on ToneSphere's cables: 48 kHz from the buffer switch
+after a 0.4 s start, and the output through a cable at +0.00 dB; its round trip there `--`
+(confidence 2.1, where native WASAPI measured the cable at 12.02 ms). One known failure there,
+recorded in `docs/ASIO.md`: after the cable tests, stopping a WASAPI stream on a cable
+ASIO4ALL is driving never returns. ASIO4ALL was uninstalled from this machine afterwards.
+
 ### 3.4 VST3 (`tests/native/test_vst3.py`, `tests/hardware/test_vst3_third_party.py`)
 
 - ToneSphere Test Gain: output bit-exact to gain × input delayed by the reported 64
@@ -125,15 +147,22 @@ been tested**: the AI-04's maker publishes none.
 ### 3.5 Round trip (`tests/hardware/test_roundtrip.py`)
 
 The digital path (output → its own loopback) measures 61.35–65.35 ms over six starts at
-48 kHz / 480 shared, repeatable within one device period and fixed within a run
-(confidence 26.9 at 62.35 ms; an independent cross-correlation in `test_wasapi.py` agrees
-to the frame). Speaker → microphone: no path above the confidence threshold on this
-laptop, so **the acoustic round trip is `--`**. The engine records a loopback measurement
-as the digital path and never reports it as the round trip. On the AI-04 the digital path
-measures 33.35 or 43.35 ms (a period apart by start phase), identical within a run, 10 of 10
-at one confidence — after the resampler fix in §4; before it, 6 of 10. Through the AI-04
-itself (earphones on its output, a guitar on its input) there is no path: confidence 1.0,
-so `--` until a cable joins output and input.
+48 kHz / 480 shared, repeatable within one device period and fixed within a run (confidence
+26.9 at 62.35 ms; an independent cross-correlation in `test_wasapi.py` agrees to the frame).
+The engine records a loopback measurement as the digital path and never reports it as the
+round trip.
+
+| Path | Measured round trip |
+|---|---|
+| AI-04 output → 6.35 mm cable → input, WASAPI exclusive, 3 ms period | 17.92 ms (860 frames; 15.94 ms in 2 of 10 starts, a USB packet group earlier) |
+| the same, WASAPI shared, 480 frames | 76.9 ms |
+| the same, ASIO4ALL, 64 / 128 / 256 / 512 frames | 15.58 / 18.27 / 23.58 / 34.27 ms |
+| the laptop's speakers → its microphone array (acoustic, raw capture) | 74.60–75.90 ms in 9 of 10 runs, confidence 4.3–5.1 against a threshold of 4.0; the tenth `--` at 3.8 |
+
+The cable path captured the −18 dBFS sweep at about −8 dBFS: no clipping. For the acoustic
+figure the Realtek speakers, found muted, were held unmuted at 60 % for the sweeps only and
+put back exactly (`tests/hardware/endpoint_volume.py`); it is a real figure, only just above
+the threshold.
 
 ### 3.6 End to end (`tests/hardware/test_engine_native_host.py`)
 
@@ -173,35 +202,40 @@ Surge XT Effects then the test plugin (at gain 0, so nothing is audible) on the 
 | Private bytes, first → last sample | 280.3 → 280.5 MB |
 | Restarts | 25 of 25 running; 55–63 ms each; 0 xruns after each; handles 352 → 352 |
 
-Not covered: device removal during the run (not automated), and plugins other than these two.
+Not covered: plugins other than these two. Device removal is covered since M19, on the
+virtual cables in the VM (§3.9).
 
 ### 3.9 Virtual audio driver
 
-Built with the EWDK, test-signed with the WDK test certificate, `InfVerif /w` clean — and on
-2026-09-30 installed and tested in a Hyper-V VM (Windows 11 Enterprise LTSC Evaluation
-10.0.26100, test-signing on in the VM disk's own boot store, Secure Boot off), built by
-`scripts/vm/new_driver_vm.ps1` and driven by `scripts/vm/run_driver_tests.ps1`.
-`tests/hardware/test_virtual_driver.py`, 7 of 7:
+Built with the EWDK, test-signed with the WDK test certificate, `InfVerif /w` clean, and
+tested in a Hyper-V VM (Windows 11 Enterprise LTSC Evaluation 10.0.26100, test-signing on in
+the VM disk's own boot store, Secure Boot off), built by `scripts/vm/new_driver_vm.ps1` and
+driven by `scripts/vm/run_driver_tests.ps1`. Each cable is its own device instance, with its
+own buffer. `tests/hardware/test_virtual_driver.py`, 14 of 14 (2026-10-01):
 
 | | |
 |---|---|
-| Device and endpoints | `ROOT\MEDIA\0000` OK; "Speakers (ToneSphere Virtual Audio Cable)" and "Microphone Array (ToneSphere Virtual Audio Cable)", both 48 kHz stereo |
-| PortAudio process → cable → PortAudio process | 1000.00 Hz, +0.000 to −0.009 dB over three passes |
-| PortAudio → cable → ToneSphere's engine | 1000.00 Hz, +0.000 to −0.009 dB |
-| ToneSphere → Test Gain ×0.5 → cable → PortAudio | 1000.00 Hz, rms 0.07071 = exactly half |
+| Fresh install | "ToneSphere Cable 1" and "ToneSphere Cable 2", `ROOT\MEDIA\0000` and `0001`, four endpoints at 48 kHz stereo |
+| PortAudio process → each cable → PortAudio process | 1000.00 Hz, +0.000 dB on both |
+| Isolation | a tone into cable 1: cable 2's peak exactly 0 |
+| PortAudio → cable → ToneSphere; ToneSphere → Test Gain ×0.5 → cable → PortAudio | −0.009 dB; exactly half |
+| ffmpeg (DirectShow) recording what ToneSphere plays into a cable | 1000.00 Hz, +0.000 dB |
 | Idle; a new capture after the player stopped | exact silence; nothing replayed |
-| `AudioEngine.virtual_device_status()` | installed, by the names Windows gives |
-| Uninstall | device, driver-store package and certificate trust gone; nothing left |
+| Add, rename, uninstall a cable through the app | "Chat" added, carrying audio, renamed "Game" (its endpoints with it), uninstalled; cable 1 unaffected |
+| The Virtual Cables dialog's own buttons | a real disable and enable of cable 2 |
+| A cable disabled under a running engine | reported gone, the engine running on without it (cable 1 carrying 440 Hz), reopened on return with no user action, 1 kHz back at −0.009 dB |
+| A cable in use elsewhere | disabled under a PortAudio recorder; refused cleanly while another native-engine program held it; changed once it let go |
+| Uninstall | every cable, the driver-store package and the certificate trust gone; nothing left |
 
-The first passes found that **the driver had never written into the cable** (the sample's
-render-side writer is gated on data files, which are off), that a new capture replayed the
-last 100 ms of an earlier one, that the tests could not have run (floats passed to
-`Popen`), and that the app looked for names Windows does not show. Also fixed on the way:
-the scripts' certificate import (refused over PowerShell Direct), the build's date check
-(inf2cat against UTC), a read-only file breaking the kit rebuild, and a checkpoint that
-replayed OOBE's restart. Not verified: a real desktop with Discord or OBS, sleep/resume,
-many clients. Custom endpoint names are not implemented (the Windows Driver INF rules
-refuse the registry route).
+The passes found: the driver had never written into the cable; a new capture replayed the
+end of an earlier one; the tests could not have run (floats passed to `Popen`); the app
+looked for names Windows does not show; the sample's one-device guard failed every cable
+after the first (`STATUS_DEVICE_BUSY`); a name set before the driver was installed was
+replaced by the INF's; disabling a cable ToneSphere streamed through left it "pending a
+restart" — Windows' audio engine vetoes taking a device from a native-engine stream — and a
+vetoed persistent disable still recorded one; a cable's two endpoints settle hundreds of
+milliseconds apart. Not verified: a real desktop with Discord or OBS, sleep/resume, many
+clients. Custom pin names are not implemented; the cable's own name is in both endpoint names.
 
 ### 3.10 A USB interface (`tests/hardware/test_interface.py`)
 
@@ -217,6 +251,29 @@ The input carried the guitar pickup's 50 Hz mains hum at −19.9 dBFS; input →
 output gave the output exactly input × 0.01, sample for sample. At 44.1 kHz this device's
 input runs 0.2–0.3 % slow against its own output, and wanders ±0.15 %. Nothing listened to
 the output jack.
+
+### 3.11 Closing the gaps (M14–M18)
+
+- **Threads** (`tests/test_threading.py`): eight threads for five seconds of connects,
+  disconnects, gains, inserts, statistics, bus writes and rebuilds on one engine; without the
+  locks it fails at once (a `KeyError` mid-rebuild), with them a 1 kHz signal still arrives at
+  the expected level afterwards. The Qt event loop keeps turning while an engine call takes
+  two seconds.
+- **Whole-system loopback** (`tests/hardware/test_loopback_source.py`): two other processes
+  played 1 kHz at 0.1 and 440 Hz at 0.05 into the AI-04; its loopback, routed through a bus,
+  read 0.1000 and 0.0500.
+- **Built-in effects in the UI** (`tests/native/test_builtin_effects_ui.py`, driving the
+  dialog's widgets): a 1 kHz high-pass takes 100 Hz down 40.0 dB and 5 kHz 0.01 dB; the
+  compressor's 10.3 dB of reduction matches its 10.31 dB readout; a 100 ms delay set there was
+  heard through the AI-04's cable at 100.000 ms.
+- **Network**: TCP both ways, sample for sample, with backpressure; the adaptive jitter buffer
+  lost 0 of 7,490 packets under ±15 ms of jitter where a fixed 10 ms buffer lost 32 %, and
+  0–0.31 % through a real 0–30 ms relay; Opus 161 bytes per 10 ms at 40.4 dB SNR on a tone.
+- **The PortAudio host's buses**: device → bus → device through a real PulseAudio server in
+  WSL2 (Ubuntu 24.04), 0.1768 rms as expected, 5 of 5, and in the Linux CI job.
+- **Plugins beyond the UI**: REST and CLI load, chain, set and bypass plugins; Surge XT and
+  Dexed played in tune by MIDI from the engine, REST, the on-screen keyboard and through the
+  AI-04's cable.
 
 ## 4. Real defects found and fixed
 
@@ -243,8 +300,19 @@ Found by signal tests during the migration, each now covered by one:
 - the UI drawing one aggregate meter reading as two channels;
 - the diagnostics claiming "shared" and "0 xruns" while stopped, when nothing had been
   measured;
-- in the virtual driver, found in the VM: no audio ever entering the cable, and a new
-  capture replaying the end of an earlier one.
+- in the virtual driver, found in the VM: no audio ever entering the cable, a new capture
+  replaying the end of an earlier one, and a second cable refused by the sample's
+  one-device guard;
+- a network sender that read one block per late timer wake, delivering a third less audio
+  than it was given; outgoing TCP connections closed as they opened;
+- the PortAudio host's buses never forwarding their input;
+- a monitor thread alive at interpreter exit taking the process down (0xC0000409) after
+  every test had passed;
+- WASAPI capture threads draining packets in an unbounded loop that never looked at the stop
+  event (now bounded per wake-up), and an ASIO host that would wait for ever on a driver
+  stuck in `stop()` (now abandoned after 5 s and reported);
+- a disable of a cable in use leaving it "pending a restart", and a device change recorded
+  while the cable's second endpoint had not yet gone.
 
 ## 5. What remains, and what blocks it
 
@@ -252,14 +320,16 @@ Found by signal tests during the migration, each now covered by one:
 |---|---|---|
 | Production-signed driver | EV code-signing certificate and a Partner Center hardware account (attestation signing) | **owner**, cost and identity verification |
 | The driver on a real desktop, with Discord or OBS | the driver is test-signed: only a test-signed machine or VM | **owner** / after signing |
-| A measured round trip through the interface | a cable from the AI-04's output to its input; then `uv run pytest tests/hardware/test_roundtrip.py -m hardware -s -k interface` | **owner** (a cable) |
 | ASIO with a manufacturer's ASIO driver | an interface whose maker ships one (the AI-04 has none) | **owner** |
-| Commercial VST3 plugins | licences for them | **owner** |
-| Legal review of T&C 1.2, ToS 1.3, Privacy 1.2 | a lawyer | **owner** |
-| Store submission | Partner Center identity, and a check of the Store's current licence-terms fields; the package is now MIT-only by decision | **owner** |
+| Commercial VST3 plugins; Neural Amp Modeler | licences; NAM's installer is unsigned | **owner** |
+| MIDI from a hardware keyboard | a MIDI device | **owner** |
+| macOS day to day, and bus routing with real macOS devices | a Mac | whoever owns one |
+| The VM-only hang stopping WASAPI beside ASIO4ALL after the cable tests | not reproduced outside that sequence; `docs/ASIO.md` | project |
+| Plugin isolation (a plugin can still take the process down) | a plugin host process | project |
+| Legal review of T&C, ToS, Privacy | a lawyer | **owner** |
+| Store submission | Partner Center identity; the package is MIT-only by decision | **owner** |
 | The AI-04 at 44.1 kHz | its input clock; a larger satellite cushion would trade latency for the start-up loss | project |
-| Custom endpoint names for the driver | a `KSPROPERTY_PIN_NAME` handler in the driver | project |
-| Plugins from the REST API and CLI; MIDI for instruments; built-in effects in the UI; whole-system loopback in the routing; reopening a device that returns; the PortAudio host's bus defect; presets stored under the user data folder instead of the working directory | engineering time | project |
+| Custom pin names for the driver | a `KSPROPERTY_PIN_NAME` handler in the driver | project |
 | Driver build in CI | unverified whether the hosted runners' WDK builds it | project |
 
 ## 6. Licensing and distribution state
@@ -281,7 +351,7 @@ Found by signal tests during the migration, each now covered by one:
   GitHub releases keep ASIO under GPLv3 with their source. A paid build with ASIO would
   need Steinberg's proprietary ASIO licence signed first. Contributions come in under MIT
   with a DCO sign-off (`CONTRIBUTING.md`).
-- Terms and Conditions 1.2, Terms of Service 1.3 and Privacy Policy 1.2 describe that —
+- Terms and Conditions 1.2, Terms of Service 1.4 and Privacy Policy 1.2 describe that —
   free today, later versions or editions possibly paid, a copy already obtained keeps its
   licence, who would process a payment — as well as the GPLv3 build, and state that nothing
   in them restricts a GPLv3 right. **These are drafted by an engineer, not a lawyer; have

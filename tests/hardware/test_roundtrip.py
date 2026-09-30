@@ -56,6 +56,40 @@ def test_an_acoustic_attempt_either_measures_or_refuses():
           f"confidence {result.confidence:.1f}; {result.note}")
 
 
+def test_the_laptops_own_speaker_to_its_own_microphone():
+    """
+    The acoustic round trip of this machine: its speakers (TONESPHERE_TEST_SPEAKER, default
+    "Realtek") to its microphone array (TONESPHERE_TEST_MICROPHONE, default "Microphone
+    Array"), captured in raw mode so no echo cancellation or noise suppression edits the
+    sweep. The speakers are unmuted at 60 % for the sweeps only, then put back exactly as
+    they were. Ten runs; each is a figure or `--` with its confidence.
+    """
+    from tests.hardware import endpoint_volume
+
+    speaker_name = os.environ.get('TONESPHERE_TEST_SPEAKER', 'Realtek')
+    mic_name = os.environ.get('TONESPHERE_TEST_MICROPHONE', 'Microphone Array')
+    speaker = next((e for e in endpoints() if e.flow == 'render' and speaker_name in e.name), None)
+    mic = next((e for e in endpoints() if e.flow == 'capture' and mic_name in e.name), None)
+    if speaker is None or mic is None:
+        pytest.skip(f"no '{speaker_name}' output or '{mic_name}' input")
+    before = endpoint_volume.get(speaker.id)
+    results = []
+    with endpoint_volume.held_at(speaker.id, 0.6):
+        for _ in range(10):
+            results.append(measure(speaker.id, mic.id, level_db=-12.0))
+    assert endpoint_volume.get(speaker.id) == pytest.approx(before, abs=1e-6), "the volume was not restored"
+    for r in results:
+        figure = f"{r.measured_ms:.2f} ms ({r.measured_frames} frames)" if r.measured_ms is not None else "--"
+        print(f"\n{speaker.name} -> {mic.name}: {figure}, confidence {r.confidence:.1f}, peak "
+              f"{r.peak_dbfs if r.peak_dbfs is None else round(r.peak_dbfs, 1)} dBFS; {r.note}")
+    measured = [r for r in results if r.measured_ms is not None]
+    for r in measured:
+        assert r.confidence > CONFIDENCE_THRESHOLD and r.nominal_ms < r.measured_ms < 500
+    if len(measured) >= 2:
+        spread = max(r.measured_frames for r in measured) - min(r.measured_frames for r in measured)
+        print(f"{len(measured)} of 10 measured; spread {spread} frames")
+
+
 def test_the_engine_keeps_a_loopback_measurement_apart_from_the_round_trip():
     """As the Diagnostics view runs it: the digital path is recorded, never reported as the round trip."""
     from tonesphere.core.engine import AudioEngine

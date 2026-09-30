@@ -2,8 +2,8 @@
 title: Terms of Service
 layout: default
 permalink: /legal/terms-of-service/
-version: "1.3"
-effective_date: "2026-09-30"
+version: "1.4"
+effective_date: "2026-10-01"
 publisher: Neural Nexus Studios
 description: What the ToneSphere application provides and does not provide, how it is distributed, updated and supported, and the terms attaching to its optional network streaming feature.
 ---
@@ -12,8 +12,8 @@ description: What the ToneSphere application provides and does not provide, how 
 
 - **Application:** ToneSphere
 - **Publisher:** Neural Nexus Studios, an individual developer, Kolkata, West Bengal, India
-- **Document version:** 1.3
-- **Effective date:** 30 September 2026
+- **Document version:** 1.4
+- **Effective date:** 1 October 2026
 
 ## 1. What this document covers
 
@@ -43,8 +43,8 @@ own computer. Provided you have working audio hardware and drivers, it offers:
   balance on stereo channel strips, polarity inversion, per-channel trim, mute and solo,
   channel swap, smoothed gain changes, and a limiter on each output.
 - **Built-in effects** — biquad equalisation (peaking and shelving filters, high-pass and
-  low-pass), a compressor with attack, release, knee and makeup gain, and a delay with
-  feedback.
+  low-pass), a compressor with attack, release, knee and makeup gain, a limiter, and a delay
+  with feedback; on Windows, in each device's and bus's insert chain alongside plugins.
 - **A patchbay** in which routes are made by dragging a port to a port, and feedback loops
   are refused rather than created.
 - **Presets** saved as plain YAML and keyed on device names rather than device indices, so
@@ -66,11 +66,14 @@ own computer. Provided you have working audio hardware and drivers, it offers:
   standard folders and yours, each module in a separate process so that a broken one
   cannot take the application down; insert chains on each device's input and output;
   parameters, bypass and the plugin's own editor; and presets that carry the chain and each
-  plugin's state. Proven with the project's own test plugin and one third-party plugin
-  (Surge XT); see section 4.
+  plugin's state; the same from the REST API and the command line. **VST3 instruments**,
+  played by MIDI from a MIDI input port, an on-screen keyboard, the REST API or the command
+  line. Proven with the project's own test plugin and two third-party plugins (Surge XT and
+  Dexed); see section 4.
 - **Per-application audio capture on Windows**, capturing one process's output through the
-  operating system's process-loopback interface, on Windows 10 build 20348 and later. No
-  driver and no virtual cable is required for this.
+  operating system's process-loopback interface, on Windows 10 build 20348 and later, and
+  **whole-system capture** of everything an output plays. No driver and no virtual cable is
+  required for either.
 - **Detection of which applications are currently producing sound.**
 - **A Linux audio sink that other applications can select**, created through PulseAudio or
   PipeWire and bridged into the audio engine as an ordinary output.
@@ -93,33 +96,26 @@ This section exists so that you do not have to discover these by trying them.
   entirely on your machine.
 - **No virtual audio device that other applications can select, on Windows**, in any build
   we distribute. The application's buses are summing points inside its own process;
-  nothing outside ToneSphere can see them. A kernel-mode driver publishing such a device
-  exists in the project for development and testing only: it has not been shown to work
-  on an installed system, and it cannot be offered to users until Microsoft signs it. The
-  [virtual audio driver notes](../VIRTUAL_AUDIO_DRIVER.md) say exactly where it stands.
-- **No plugin hosting outside Windows, and no instrument or AU plugins.** Instrument
-  plugins are not offered, because nothing in ToneSphere sends them notes. Plugins cannot
-  yet be loaded through the REST API or the command line, only the desktop interface. No
-  commercial plugin has been tested, and none is represented as compatible.
-- **No whole-system capture.** Capturing everything a device plays is not implemented;
-  capturing one application's audio (below) is.
+  nothing outside ToneSphere can see them. A kernel-mode driver publishing such devices
+  ("virtual cables", which the application can add, rename, disable and uninstall) exists in
+  the project for development and testing only: it has been shown to work in a test virtual
+  machine, not on an installed system, and it cannot be offered to users until Microsoft
+  signs it. The [virtual audio driver notes](../VIRTUAL_AUDIO_DRIVER.md) say exactly where
+  it stands.
+- **No plugin hosting outside Windows, and no AU plugins.** No commercial plugin has been
+  tested, and none is represented as compatible. Plugins run inside ToneSphere's own
+  process: a plugin that faults while processing audio is bypassed, but a plugin can still
+  bring the application down.
 - **No audio interface's own ASIO driver tested.** ASIO on Windows is provided by a
   component built from Steinberg's ASIO SDK under the GNU GPL version 3, and a build that
   includes it is distributed under that licence (section 3 of the
   [Terms and Conditions](terms-and-conditions.md)). It has been verified with FlexASIO, a
-  genuine but software ASIO driver, including with FlexASIO driving a USB audio interface;
-  no interface manufacturer's ASIO driver has been tested. **The Microsoft Store package
+  genuine but software ASIO driver, and with ASIO4ALL, a third-party driver, both driving a
+  USB audio interface; no interface manufacturer's ASIO driver has been tested. **The Microsoft Store package
   does not include ASIO at all**; it runs on WASAPI, shared and exclusive.
 - **No recording to file.** ToneSphere routes and monitors audio; it does not capture it to
   disk. If you want to record, record in your DAW or recorder of choice, downstream of
   ToneSphere.
-- **No compressed network audio.** The network transport carries uncompressed PCM. A codec
-  identifier is reserved for Opus, and both encoding and decoding refuse it rather than
-  quietly substituting PCM.
-- **No sending over the TCP transport.** The TCP path receives only; its send side refuses
-  with a message saying so. UDP is the direction that is wired.
-- **No adaptive jitter buffering.** The network jitter buffer's target latency is a single
-  fixed setting that you can change, not a value estimated from measured jitter.
 - **No guaranteed latency, dropout-free operation, or plugin compatibility.** These depend
   on your hardware, drivers, buffer size, backend and plugins. See section 8 of the
   [Terms and Conditions](terms-and-conditions.md).
@@ -135,13 +131,16 @@ it away:
 | Audio routing and mixing between devices | Windows, Linux, macOS | Working and covered by automated tests |
 | Routing through an internal bus from one device to another | Windows | Working; covered by automated signal tests of the native engine |
 | Routing through an internal bus from one device to another | Linux, macOS | Works; tested on Linux through a PulseAudio server. On macOS it runs the same code but has not been tested with real devices |
-| Built-in effects | Windows, Linux, macOS | Covered by automated tests; not yet reachable from the interface |
+| Built-in effects | Windows | Working, from the interface; proven by tests that drive the interface's own controls and measure what the effect did to a known signal |
+| Built-in effects | Linux, macOS | Covered by automated tests; not reachable from the interface |
 | Per-application capture | Windows 10 build 20348 and later | Working, proven by a test that captures a known tone and measures it |
+| Whole-system capture of an output | Windows | Working, proven by capturing two known tones played by other programs and measuring their levels |
 | VST3 effect plugins | Windows | Working with the project's test plugin and with Surge XT, proven by tests that measure what the plugin did to a known signal; other plugins untested |
-| ASIO | Windows | Verified against FlexASIO (a software ASIO driver) only |
-| Measured round-trip latency | Windows | The method is proven on a digital path; a figure for your hardware depends on a physical path existing between the output and input you choose |
+| VST3 instruments played by MIDI | Windows | Working with Surge XT and Dexed, proven by tests that play a note and measure its pitch; MIDI from a hardware port untested (no device) |
+| ASIO | Windows | Verified against FlexASIO and ASIO4ALL, third-party ASIO drivers; no interface manufacturer's driver |
+| Measured round-trip latency | Windows | Proven on a digital path, through an interface's cable and acoustically on the project's own hardware; a figure for your hardware depends on a physical path existing between the output and input you choose |
 | Selectable virtual sink | Linux, with PulseAudio or PipeWire running | Working |
-| Selectable virtual device | Windows | Not provided — a development-only driver exists; see section 3 |
+| Selectable virtual device | Windows | Not provided — a development-only driver exists, proven in a test virtual machine only; see section 3 |
 | "ToneSphere Audio" loopback device | macOS | **Proven in continuous integration only.** The plug-in builds, installs and round-trips a measured tone on a macOS CI runner. Its behaviour in day-to-day use — appearing in System Settings and in other applications' device pickers, surviving sleep and wake, and installing past Gatekeeper on an end user's machine — is unverified. Treat it as untested in real use until the project says otherwise. |
 
 Features in that last row are provided on that basis, and no representation is made that
@@ -157,9 +156,10 @@ feature is part of the application, not a service we operate, and these terms ap
 - **We operate no server, relay or intermediary.** The connection is between your machine
   and the peer you nominate. Your audio does not pass through us, is not stored by us, and
   cannot be observed by us.
-- **The transport is unencrypted and unauthenticated.** Audio is carried as PCM in UDP
-  datagrams with a binary header, sequence numbers and a jitter buffer that reorders and
-  paces playout, alongside a TCP receive path for bulk transfer. There is no cipher and no
+- **The transport is unencrypted and unauthenticated.** Audio is carried as PCM, or
+  compressed with Opus, in UDP datagrams with a binary header, sequence numbers and a
+  jitter buffer that sizes itself to the measured network jitter; or over TCP in either
+  direction. There is no cipher and no
   verification of the peer. Anyone who can observe the network path could listen to the
   audio, and anyone who can reach the port you are listening on could send audio into it.
 - **Use it on networks you trust.** It is designed for monitoring across machines you

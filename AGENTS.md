@@ -269,17 +269,21 @@ check it before assuming something works, and update it when you change a status
   `native_host.py` (the Windows host: `AudioHost` over the native engine — enumeration by
   endpoint ID, plan compilation, strips, meters, plugins per device side), `host.py` (the
   PortAudio host: Python callbacks, **not real-time safe**, kept for Linux/macOS), `dsp.py`/`effects.py` (reference implementations of the mixer and DSP
-  formulas), `devices.py`, `wasapi_com.py`/`process_capture.py`/`app_capture.py`
-  (Windows COM via ctypes).
+  formulas), `builtins.py` (the native built-in effects' parameters, as the UI shows them),
+  `device_monitor.py` (Windows' endpoint notifications → reopening what changed),
+  `virtual_cables.py` (the Windows cables: listing, and the elevated `cable-admin` changes),
+  `midi_input.py` (winmm MIDI input → instruments), `devices.py`,
+  `wasapi_com.py`/`process_capture.py`/`app_capture.py` (Windows COM via ctypes).
 - `tonesphere/native` — ctypes bindings to the native DLLs.
 - `tonesphere/plugins` — the Python view of VST3 plugins (info, parameters, state, scan
   cache).
-- `tonesphere/network` — UDP/TCP audio streaming; its threads only touch rings, never
-  the callback.
+- `tonesphere/network` — UDP/TCP audio streaming (`jitter_buffer.py`, adaptive; `opus.py`,
+  libopus through ctypes); its threads only touch rings, never the callback.
 - `tonesphere/api`, `tonesphere/cli`, `tonesphere/ui` — REST/WebSocket, terminal, Qt
-  (`main_window.py`; `plugin_views.py` — browser, insert chains, parameters;
-  `diagnostics_view.py` — timing, latency breakdown, round-trip measurement, virtual-device
-  presence).
+  (`main_window.py`; `tasks.py` — the engine worker and poller; `plugin_views.py` — browser,
+  insert chains, parameters; `keyboard.py` — the on-screen keyboard for instruments;
+  `cables_view.py` — the Virtual Cables dialog; `diagnostics_view.py` — timing, latency
+  breakdown, round-trip measurement, the cables).
 - `native/` — `include/` (the C ABI), `engine/` (plan executor, mixer, meters, rings),
   `windows_audio/` (WASAPI), `asio/` (GPLv3), `vst3/`, `test_plugin/` (a deterministic
   MIT VST3 used by the tests), and `coreaudio-plugin/` (macOS AudioServerPlugIn, proven
