@@ -247,15 +247,15 @@ class NetworkAudioRouter:
 
     def _disconnect_client(self, client_id: str):
         """Disconnect a client"""
-        if client_id in self.clients:
+        # Popped, not checked then deleted: closing the socket ends its receive thread, which
+        # disconnects the same client at the same moment.
+        client = self.clients.pop(client_id, None)
+        if client is not None:
             try:
-                self.clients[client_id].close()
+                client.close()
             except OSError:
                 pass  # already closed or broken; nothing left to clean up
-            del self.clients[client_id]
-
-        if client_id in self.client_info:
-            del self.client_info[client_id]
+        self.client_info.pop(client_id, None)
 
         logger.info(f"Client disconnected: {client_id}")
 
@@ -290,12 +290,12 @@ class NetworkAudioRouter:
 
     def disconnect_from(self, conn_id: str):
         """Disconnect from a remote instance"""
-        if conn_id in self.connections:
+        connection = self.connections.pop(conn_id, None)
+        if connection is not None:
             try:
-                self.connections[conn_id].close()
+                connection.close()
             except OSError:
                 pass  # already closed or broken; nothing left to clean up
-            del self.connections[conn_id]
             logger.info(f"Disconnected from {conn_id}")
 
     def _receive_loop(self, conn_id: str, sock: socket.socket):

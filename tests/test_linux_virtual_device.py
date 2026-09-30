@@ -491,10 +491,16 @@ class TestRealLinuxBusRouting:
             self._pactl("set-default-sink", "ts_b")
             bused = self._through(through_bus=True)
         finally:
-            self._pactl("set-default-sink", previous_sink)
-            self._pactl("set-default-source", previous_source)
             for module in modules:
                 self._pactl("unload-module", module)
+            # PulseAudio's placeholder sink (auto_null, all a CI runner has) goes away while a
+            # real sink is loaded and comes back by itself: a default is restored only if it
+            # still exists to be restored.
+            for kind, previous in (("sink", previous_sink), ("source", previous_source)):
+                listed = [line.split("\t")[1] for line in self._pactl("list", "short", f"{kind}s").splitlines()
+                          if line.strip()]
+                if previous in listed:
+                    self._pactl(f"set-default-{kind}", previous)
 
         level = float(np.sqrt((bused ** 2).mean()))
         expected = 0.5 * 0.5 / np.sqrt(2)   # the tone's rms, times the route gain out of the bus
