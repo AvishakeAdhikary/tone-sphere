@@ -1251,7 +1251,7 @@ NTSTATUS CMiniportWaveRTStream::SetState
             // ToneSphere: a capture starts from an empty cable (cable.cpp, CableFlush).
             if (m_bCapture)
             {
-                CableFlush();
+                CableFlush(static_cast<Cable*>(m_pMiniport->m_DeviceContext));
             }
             // Start DMA
             LARGE_INTEGER ullPerfCounterTemp;
@@ -1419,7 +1419,7 @@ ByteDisplacement - # of bytes to process.
     {
         ULONG runWrite = min(ByteDisplacement, m_ulDmaBufferSize - bufferOffset);
         
-        CableRead(m_pDmaBuffer + bufferOffset, runWrite);  // ToneSphere: the cable, not the test tone
+        CableRead(static_cast<Cable*>(m_pMiniport->m_DeviceContext), m_pDmaBuffer + bufferOffset, runWrite);  // ToneSphere: the cable, not the test tone
            	
         bufferOffset = (bufferOffset + runWrite) % m_ulDmaBufferSize;
         ByteDisplacement -= runWrite;
@@ -1451,7 +1451,7 @@ ByteDisplacement - # of bytes to process.
     while (ByteDisplacement > 0)
     {
         ULONG runWrite = min(ByteDisplacement, m_ulDmaBufferSize - bufferOffset);
-        CableWrite(m_pDmaBuffer + bufferOffset, runWrite);  // ToneSphere: into the cable, not a data file
+        CableWrite(static_cast<Cable*>(m_pMiniport->m_DeviceContext), m_pDmaBuffer + bufferOffset, runWrite);  // ToneSphere: into the cable, not a data file
         bufferOffset = (bufferOffset + runWrite) % m_ulDmaBufferSize;
         ByteDisplacement -= runWrite;
     }

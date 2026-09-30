@@ -36,6 +36,11 @@ namespace ts::wasapi {
 
 namespace {
 
+// A capture thread drains at most this many packets per wake before it looks at the stop
+// event again. Unbounded, a device that keeps reporting a packet it never hands over spun
+// the thread for good — and stop() with it, waiting to join.
+constexpr int kMaxPacketsPerWake = 64;
+
 template <typename T>
 void release(T*& p) {
     if (p) {
@@ -801,7 +806,7 @@ void Backend::master_capture(Stream& s) {
     const uint32_t max_block = engine_.max_block();
     float* staging = s.scratch.get();
     while (wait(s)) {
-        for (;;) {
+        for (int drained = 0; drained < kMaxPacketsPerWake; ++drained) {
             UINT32 packet = 0;
             HRESULT hr = s.capture_client->GetNextPacketSize(&packet);
             if (FAILED(hr)) { s.fail("reading the capture position", hr); return; }
@@ -811,6 +816,8 @@ void Backend::master_capture(Stream& s) {
             DWORD flags = 0;
             hr = s.capture_client->GetBuffer(&data, &frames, &flags, nullptr, nullptr);
             if (FAILED(hr)) { s.fail("getting the capture buffer", hr); return; }
+            if (hr == AUDCLNT_S_BUFFER_EMPTY) break;
+            if (frames == 0) { s.capture_client->ReleaseBuffer(0); break; }
             if (flags & AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY) {
                 add(s.glitches, 1);
                 engine_.add_xruns(1);
@@ -835,7 +842,7 @@ void Backend::satellite_capture(Stream& s) {
     AudioThreadScope scope;
     float* staging = s.convert.get();
     while (wait(s)) {
-        for (;;) {
+        for (int drained = 0; drained < kMaxPacketsPerWake; ++drained) {
             UINT32 packet = 0;
             HRESULT hr = s.capture_client->GetNextPacketSize(&packet);
             if (FAILED(hr)) { s.fail("reading the capture position", hr); return; }
@@ -845,6 +852,8 @@ void Backend::satellite_capture(Stream& s) {
             DWORD flags = 0;
             hr = s.capture_client->GetBuffer(&data, &frames, &flags, nullptr, nullptr);
             if (FAILED(hr)) { s.fail("getting the capture buffer", hr); return; }
+            if (hr == AUDCLNT_S_BUFFER_EMPTY) break;
+            if (frames == 0) { s.capture_client->ReleaseBuffer(0); break; }
             if (flags & AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY) add(s.glitches, 1);
             for (UINT32 done = 0; done < frames;) {
                 const uint32_t n = std::min<uint32_t>(s.buffer_frames, frames - done);

@@ -334,10 +334,24 @@ ts_result Engine::attach_backend(std::unique_ptr<DeviceBackend> backend) {
 
 ts_result Engine::stop_backend() {
     if (!backend_) { fail("no backend is running"); return TS_ERR_STATE; }
+    // A stream that fails in stopping (a driver abandoned in its stop call) is reported, not
+    // swallowed; one that had already failed while running (a device removed) is not news.
+    // The engine is detached from the backend either way.
+    ts_stream_status before[16]{}, after[16]{};
+    const int32_t n_before = backend_->status(before, 16);
     backend_->stop();
+    const int32_t n_after = backend_->status(after, 16);
+    std::string failure;
+    for (int32_t i = 0; i < n_after && failure.empty(); ++i)
+        if (after[i].state == TS_STREAM_STATE_FAILED && !(i < n_before && before[i].state == TS_STREAM_STATE_FAILED))
+            failure = after[i].error;
     backend_.reset();
     set_backend_running(false);
     collect();
+    if (!failure.empty()) {
+        fail("the backend did not stop cleanly: " + failure);
+        return TS_ERR_BACKEND;
+    }
     return TS_OK;
 }
 

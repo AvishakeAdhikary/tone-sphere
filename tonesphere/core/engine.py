@@ -461,9 +461,14 @@ class AudioEngine:
             change = {'arrived': [after[k] for k in arrived], 'left': [before[k] for k in left],
                       'failed': failed, 'reopened': reopened, 'error': None,
                       'still_failed': self.host.failed_streams() if self.host.is_running else {}}
-        serial = (self._device_change or {}).get('serial', 0) + 1
-        self._device_change = {**change, 'serial': serial, 'at': time.time(), 'events': len(events)}
-        return dict(self._device_change)
+        # A reconcile that found nothing (the monitor's echo of a change already handled, say)
+        # leaves the last real change standing, for the status bar and anyone waiting on it.
+        happened = change['arrived'] or change['left'] or change['failed'] or change['reopened'] or change['error']
+        serial = (self._device_change or {}).get('serial', 0) + (1 if happened else 0)
+        record = {**change, 'serial': serial, 'at': time.time(), 'events': len(events)}
+        if happened:
+            self._device_change = record
+        return dict(record)
 
     def last_device_change(self) -> dict[str, Any] | None:
         """What the last reconcile found, with a serial the UI compares to notice a new one."""
@@ -1805,26 +1810,92 @@ class AudioEngine:
 
     # --- The ToneSphere virtual audio driver ---
 
-    # Windows names each endpoint after its pin category and the device, so the driver's two
-    # endpoints are "Speakers (ToneSphere Virtual Audio Cable)" and "Microphone Array
-    # (ToneSphere Virtual Audio Cable)"; the device name is what identifies them.
-    VIRTUAL_CABLE = "ToneSphere Virtual Audio Cable"
-
     def virtual_device_status(self) -> dict[str, Any]:
         """
-        Whether Windows enumerates the ToneSphere driver's endpoints. Presence is all this
-        reports: it is what enumeration shows, not a claim that audio crosses the cable,
-        which only `tests/hardware/test_virtual_driver.py` proves.
+        The ToneSphere cables Windows has (`engine/virtual_cables.py`), each with its state and
+        the two endpoints it publishes. Windows names a cable's endpoints after its pin
+        categories and the cable's own name — "Speakers (ToneSphere Cable 1)" and
+        "Microphone Array (ToneSphere Cable 1)" — so that name is what matches them. Presence
+        is all this reports: that audio crosses a cable only `tests/hardware/test_virtual_driver.py`
+        proves.
         """
-        render = next((d for d in self._devices if d.can_output and self.VIRTUAL_CABLE in d.name), None)
-        capture = next((d for d in self._devices if d.can_input and self.VIRTUAL_CABLE in d.name), None)
+        from tonesphere.engine import virtual_cables
+
         ids = {d.key: i for i, d in self._device_by_id.items()}
+
+        def endpoint(cable_name: str, output: bool):
+            found = next((d for d in self._devices if (d.can_output if output else d.can_input)
+                          and d.name.endswith(f"({cable_name})")), None)
+            return {'name': found.name, 'id': ids.get(found.key)} if found else None
+
+        try:
+            cables = virtual_cables.cables()
+            error = None
+        except virtual_cables.CableError as e:
+            cables, error = [], str(e)
+        listed = [{'instance_id': c.instance_id, 'name': c.name, 'state': c.state, 'enabled': c.enabled,
+                   'render': endpoint(c.name, True), 'capture': endpoint(c.name, False)} for c in cables]
         return {
-            'installed': render is not None and capture is not None,
-            'render': {'name': render.name, 'id': ids.get(render.key)} if render else None,
-            'capture': {'name': capture.name, 'id': ids.get(capture.key)} if capture else None,
-            'platform_supported': __import__('sys').platform == 'win32',
+            'installed': any(c['state'] == 'working' for c in listed),
+            'cables': listed,
+            'error': error,
+            'platform_supported': virtual_cables.supported(),
         }
+
+    def manage_virtual_cable(self, operation: str, *args: str) -> tuple[bool, str]:
+        """
+        Add, rename, disable, enable or remove a cable, or remove the driver. These change the
+        machine's devices, so Windows asks for an administrator's consent (its own prompt);
+        the change then runs in a separate, elevated process. Devices are re-read afterwards.
+
+        Windows will not take a device from a program that has it open, ToneSphere included:
+        if the engine streams through the cable being changed, it lets go first, and starts
+        again afterwards with the devices then present — routes to a cable that went are kept
+        for when it returns.
+        """
+        from tonesphere.engine import virtual_cables
+
+        listed = virtual_cables.cables()
+        touched = {c.name for c in listed
+                   if operation == 'remove-driver' or (operation in ('rename', 'disable', 'remove') and args
+                                                        and c.instance_id == args[0])}
+        used = {node.ref for c in self._build_graph().connections for node in (c.source, c.dest)
+                if node.kind == 'device'}
+        holds = any(d.key in used and any(d.name.endswith(f"({name})") for name in touched) for d in self._devices)
+        released = holds and self.host.is_running
+        if released:
+            self.host.stop()
+        try:
+            result = virtual_cables.elevate(operation, *args)
+            ok, message = True, f"{operation}: {result}"
+        except virtual_cables.ElevationRefused as e:
+            ok, message = False, f"Cancelled: {e}"
+        except virtual_cables.CableError as e:
+            ok, message = False, str(e)
+        if ok and operation in ('disable', 'remove', 'remove-driver'):
+            self._await_cable_endpoints(touched, present=False)
+        elif ok and operation in ('add', 'enable', 'rename'):
+            name = {'add': args[0], 'rename': args[-1]}.get(operation) or \
+                next((c.name for c in listed if c.instance_id == args[0]), '')
+            self._await_cable_endpoints({name}, present=True)
+        self.handle_device_change()
+        if released and not self.host.is_running:
+            self.start_engine()
+        return ok, message
+
+    def _await_cable_endpoints(self, names: set[str], present: bool, timeout_s: float = 5.0):
+        """
+        Windows builds and tears down a cable's two endpoints one after the other, some
+        hundreds of milliseconds after the device itself changed: re-reading devices before
+        they settle would see half a cable. Waits until each named cable has both endpoints,
+        or none.
+        """
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            counts = [sum(1 for d in self._enumerate() if d.name.endswith(f"({n})")) for n in names]
+            if all((c >= 2) if present else (c == 0) for c in counts):
+                return
+            time.sleep(0.1)
 
     def get_ring_statistics(self) -> dict[str, dict]:
         return self.host.ring_statistics()

@@ -1,5 +1,10 @@
 # Install the test-signed ToneSphere virtual audio driver. FOR A TEST VM ONLY.
 #
+# This trusts the test certificate and adds the driver package to the driver store; it does
+# not create cables. Cables are created by ToneSphere itself, the way a user creates them:
+#   uv run python main.py cable-admin install-cables      (the two default cables)
+#   uv run python main.py cable-admin add "Name"           (one more)
+#
 # Run from the vm_kit folder, in an elevated PowerShell, inside a VM whose boot configuration
 # has test-signing on (`bcdedit /set testsigning on`, then reboot; Secure Boot off in the
 # VM's settings). It refuses to run anywhere else: a test-signed kernel driver does not
@@ -28,13 +33,6 @@ foreach ($store in 'Root', 'TrustedPublisher') {
 }
 Write-Host "Trusted the test certificate (Root and TrustedPublisher)."
 
-& (Join-Path $kit 'devcon.exe') install (Join-Path $kit 'SimpleAudioSample.inf') $hardwareId
-if ($LASTEXITCODE -gt 1) { throw "devcon install failed with exit code $LASTEXITCODE" }
-
-Start-Sleep -Seconds 3
-Write-Host "`nDevice:"
-Get-PnpDevice -Class MEDIA | Where-Object { $_.HardwareID -contains $hardwareId } |
-    Format-Table -AutoSize Status, FriendlyName, InstanceId
-Write-Host "Endpoints:"
-Get-PnpDevice -Class AudioEndpoint | Where-Object { $_.FriendlyName -like '*ToneSphere*' } |
-    Format-Table -AutoSize Status, FriendlyName
+pnputil /add-driver (Join-Path $kit 'SimpleAudioSample.inf') | Out-Host
+if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 3010) { throw "pnputil /add-driver failed with exit code $LASTEXITCODE" }
+Write-Host "The driver package is in the driver store ($hardwareId); create cables with ToneSphere."

@@ -6,7 +6,7 @@ default-device change is none, the monitor stops while the engine holds its lock
 engine reopens its streams only when a device its routing uses changed. That audio stops
 when a real device is disabled and resumes when it returns, with no user action, is proved
 against the ToneSphere virtual cable in the driver VM
-(`tests/hardware/test_virtual_driver.py::test_a_device_that_leaves_and_returns_is_reopened`).
+(`tests/hardware/test_virtual_driver.py::test_a_cable_disabled_mid_stream_is_reopened_when_it_returns`).
 """
 
 import threading

@@ -292,9 +292,13 @@ class DiagnosticsDialog(QDialog):
         if not status['platform_supported']:
             v.set('status', tr('diag.virtual_windows_only'))
             v.set('endpoints', UNKNOWN)
-        elif status['installed']:
-            v.set('status', tr('diag.virtual_present'), Colors.OK)
-            v.set('endpoints', f"{status['render']['name']}  ·  {status['capture']['name']}")
+        elif status['cables']:
+            working = [c for c in status['cables'] if c['state'] == 'working']
+            v.set('status', tr('diag.virtual_cables', working=len(working), total=len(status['cables'])),
+                  Colors.OK if working else Colors.WARN)
+            from tonesphere.ui.cables_view import state_text
+
+            v.set('endpoints', '\n'.join(f"{c['name']}: {state_text(c['state'])}" for c in status['cables']))
         else:
             v.set('status', tr('diag.virtual_absent'), Colors.TEXT_MUTED)
             v.set('endpoints', UNKNOWN)

@@ -1,17 +1,23 @@
 # ToneSphere virtual audio driver (Windows)
 
-A kernel-mode audio driver that publishes a virtual audio cable Windows itself enumerates:
+A kernel-mode audio driver that publishes virtual audio cables Windows itself enumerates.
+Each cable is its own device — an instance of the root-enumerated hardware ID
+`ROOT\ToneSphereVirtualAudio` — with two endpoints:
 
-- **Speakers (ToneSphere Virtual Audio Cable)**: a render endpoint. Applications play into
-  it.
-- **Microphone Array (ToneSphere Virtual Audio Cable)**: a capture endpoint. Applications
-  record from it, and hear what was played into the render endpoint.
+- **Speakers (<cable name>)**: a render endpoint. Applications play into it.
+- **Microphone Array (<cable name>)**: a capture endpoint. Applications record from it, and
+  hear what was played into that cable's render endpoint — and nothing from any other cable.
 
-Those are the names Windows gives them: the pin category's generic name, then the device's.
-The INF's "ToneSphere Cable Input/Output" pin names do not reach the endpoint name: that
-takes a `MediaCategories` registration, which the Windows Driver INF rules forbid (InfVerif
-error 1321, registry writes outside HKR), or a `KSPROPERTY_PIN_NAME` handler in the
-driver. Custom endpoint names are **not implemented**.
+A fresh install creates two, "ToneSphere Cable 1" and "ToneSphere Cable 2"; ToneSphere's
+Virtual Cables dialog adds more (up to eight), renames, disables, enables and uninstalls them
+one at a time (`tonesphere/engine/virtual_cables.py`). Because each cable is a device of its
+own, Windows' own disable and uninstall act on exactly one cable.
+
+The endpoint names are Windows' own: the pin category's generic name, then the device's
+friendly name, which is the cable's name. The INF's "ToneSphere Cable Input/Output" pin
+names do not reach the endpoint name: that takes a `MediaCategories` registration, which the
+Windows Driver INF rules forbid (InfVerif error 1321), or a `KSPROPERTY_PIN_NAME` handler in
+the driver.
 
 Both endpoints run one fixed format, 48 kHz, 32-bit PCM, stereo, so the cable copies bytes
 and never converts. ToneSphere uses the endpoints through its ordinary WASAPI backend,
@@ -30,9 +36,10 @@ is a separate binary. Modifications are marked `ToneSphere:` in the source. All 
 
 | File | Change |
 |---|---|
-| `Source/Main/cable.cpp`, `cable.h` | **New.** The cable: a nonpaged ring (100 ms bound, oldest audio dropped first) between the render stream and the capture stream, under a spin lock; `CableFlush` empties it |
-| `Source/Main/minwavertstream.cpp` | Render: the data-file writer is replaced by `CableWrite`, called on every position update (the sample only called its writer when data files were enabled, which left the cable empty). Capture: the test-tone generator is replaced by `CableRead`, and a capture stream entering RUN empties the cable, so a new recording never starts with audio played before it |
-| `Source/Main/adapter.cpp` | The cable is allocated in `DriverEntry` and freed in `DriverUnload`. The `DoNotCreateDataFiles` registry override is removed, so the driver never writes render audio to disk |
+| `Source/Main/cable.cpp`, `cable.h` | **New.** A cable: a nonpaged ring (100 ms bound, oldest audio dropped first) between a render stream and a capture stream, under a spin lock; `CableCreate`/`CableDestroy` make one per device; `CableFlush` empties it |
+| `Source/Main/common.cpp`, `Inc/common.h` | The adapter creates its device's cable in `Init` and destroys it last (`GetCable`). The sample's one-device-per-driver guard is removed — it failed every device after the first with `STATUS_DEVICE_BUSY` — and `CSaveData`'s static state is reference-counted across devices |
+| `Source/Main/minwavertstream.cpp` | Render: the data-file writer is replaced by `CableWrite` on the stream's own device's cable (the miniport's device context), called on every position update (the sample only called its writer when data files were enabled, which left the cable empty). Capture: the test-tone generator is replaced by `CableRead`, and a capture stream entering RUN empties the cable, so a new recording never starts with audio played before it |
+| `Source/Main/adapter.cpp` | Each device's cable is handed to its miniports as their device context. Data files are forced off, whatever the registry says, so the driver never writes render audio to disk and the devices never share a file writer |
 | `Source/Filters/speakerwavtable.h` | The render endpoint moves from 16-bit to 32-bit PCM, matching the capture endpoint |
 | `Source/Main/SimpleAudioSample.inx` | Names: provider and manufacturer "Neural Nexus Studios", device "ToneSphere Virtual Audio Cable", pin names "ToneSphere Cable Input/Output" (which Windows does not show; see above), hardware ID `ROOT\ToneSphereVirtualAudio`, service `ToneSphereVirtualAudio` |
 | `Source/Main/Main.vcxproj` | Binary name `ToneSphereVirtualAudio.sys`; `cable.cpp` added |
@@ -63,9 +70,11 @@ built INF.
    settings.
 2. Inside the VM, in an elevated prompt, run `bcdedit /set testsigning on`, then reboot.
 3. Copy `vm_kit/` into the VM. In an elevated PowerShell, run `.\driver_install.ps1`. It
-   refuses to run if test-signing is off. It then trusts the test certificate, installs the
-   root-enumerated device, and lists the device and endpoints it created.
-4. To remove everything, run `.\driver_uninstall.ps1`. It removes the device, deletes the
+   refuses to run if test-signing is off. It then trusts the test certificate and adds the
+   package to the driver store (`pnputil /add-driver`). The cables themselves are created by
+   ToneSphere: `uv run python main.py cable-admin install-cables` makes the two default
+   ones, and the Virtual Cables dialog manages them from then on.
+4. To remove everything, run `.\driver_uninstall.ps1`. It removes every cable, deletes the
    package from the driver store, stops trusting the test certificate, and checks that
    nothing is left.
 

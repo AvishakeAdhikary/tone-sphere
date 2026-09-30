@@ -82,20 +82,31 @@ def test_the_buffer_switch_runs_the_engine(driver):
         engine.apply_plan(nodes, routes)
         if outs:
             engine.port_write(TONE, tone)
+        started = time.perf_counter()
         asio.start(engine, driver, input_node=ASIO_IN if ins else 0, inputs=ins,
                    output_node=ASIO_OUT if outs else 0, outputs=outs, buffer_frames=info.preferred_buffer)
+        # A driver may take a while to deliver its first buffer switch after start() returns
+        # (ASIO4ALL on a VM's virtual device, about 0.4 s): that is start-up, not the rate.
+        while engine.stats()['blocks'] == 0 and time.perf_counter() - started < 3.0:
+            time.sleep(0.01)
+        first = time.perf_counter() - started
+        blocks_then, then = engine.stats()['blocks'], time.perf_counter()
         time.sleep(1.5)
-        status = engine.stream_status()
         stats = engine.stats()
+        blocks_per_s = (stats['blocks'] - blocks_then) / (time.perf_counter() - then)
+        status = engine.stream_status()
         captured = engine.port_read(CAPTURED, rate * 4) if ins else None
         engine.stop_backend()
 
     assert all(s['state'] == 'running' for s in status), status
-    assert stats['blocks'] > 0.8 * 1.5 * rate / block, f"the buffer switch ran only {stats['blocks']} blocks"
+    assert blocks_per_s * block == pytest.approx(rate, rel=0.02), \
+        f"the buffer switch ran at {blocks_per_s * block:.0f} frames/s against {rate}"
     assert stats['rt_allocations'] == 0
     if ins:
         assert len(captured) > 0.8 * 1.5 * rate, "inputs delivered no frames"
-    print(f"\n{driver}: {stats['blocks']} buffer switches of {status[0]['buffer_frames']} frames at {rate} Hz, "
+    print(f"\n{driver}: first buffer switch {first * 1000:.0f} ms after start, then {blocks_per_s * block:.0f} "
+          f"frames/s")
+    print(f"{driver}: {stats['blocks']} buffer switches of {status[0]['buffer_frames']} frames at {rate} Hz, "
           f"callback mean {stats['callback_ns_mean'] / 1000:.1f} us max {stats['callback_ns_max'] / 1000:.1f} us, "
           f"load {stats['processing_load']:.1%}, xruns {stats['xruns']}, reported latency "
           f"{[s['reported_latency_ms'] for s in status]} ms, {status[0]['message']}")

@@ -14,7 +14,19 @@ param(
     [string]$Name = 'ToneSphereDriverVM',
     [string]$Directory = 'C:\ToneSphereVM',
     [string]$Out = (Join-Path 'C:\ToneSphereVM' ('run-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))),
-    [string]$PytestArgs = '-m hardware -s -v -rA'
+    # One test is left out here, and only here: after the cable tests, with ASIO4ALL holding a
+    # cable through kernel streaming, stopping a WASAPI stream on that same cable never returns
+    # in this VM. A known failure, recorded in docs/ASIO.md; run it alone to reproduce it.
+    [string]$PytestArgs = '-m hardware -s -v -rA -o faulthandler_timeout=120 --deselect "tests/hardware/test_asio.py::test_output_content_where_the_driver_renders_through_wasapi[ASIO4ALL v2]"',
+    [string]$Tests = 'tests/hardware/test_virtual_driver.py tests/hardware/test_asio.py tests/hardware/test_roundtrip.py',
+    # Third-party programs the tests drive, if present here: ASIO4ALL_2_22.exe (installed
+    # silently in the guest, so the ASIO host is tested against it on a cable) and
+    # ffmpeg-bin\ffmpeg.exe (records a cable through DirectShow). Downloaded once, by hand;
+    # nothing here fetches them.
+    [string]$Tools = 'C:\ToneSphereVM\downloads',
+    # A script to run in the guest instead of the test pass, after the tree is staged and the
+    # driver package installed: for investigating the driver. Its output comes back as explore.log.
+    [string]$Explore = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -47,6 +59,11 @@ try {
     Pop-Location
 }
 Copy-Item (Get-Command uv).Source (Join-Path $stage 'uv.exe')
+New-Item -ItemType Directory -Path (Join-Path $stage 'tools') -Force | Out-Null
+foreach ($tool in 'ASIO4ALL_2_22.exe', 'ffmpeg-bin\ffmpeg.exe') {
+    $from = Join-Path $Tools $tool
+    if (Test-Path $from) { Copy-Item $from (Join-Path $stage 'tools') }
+}
 $zip = Join-Path $Directory 'stage.zip'
 if (Test-Path $zip) { Remove-Item $zip }
 Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zip
@@ -68,6 +85,7 @@ try {
         New-Item -ItemType Directory C:\ts, C:\ts-out -Force | Out-Null
     }
     Copy-Item -Path $zip -Destination 'C:\ts-stage.zip' -ToSession $session
+    if ($Explore) { Copy-Item -Path $Explore -Destination 'C:\ts-explore.ps1' -ToSession $session }
     $synced = [int](Invoke-Command -Session $session -ScriptBlock {
         Expand-Archive C:\ts-stage.zip -DestinationPath C:\ts -Force
         Set-Location C:\ts
@@ -86,8 +104,8 @@ try {
         Wait-Guest -Name $Name -Credential $credential -TimeoutMinutes 5
         $session = New-PSSession -VMName $Name -Credential $credential
     }
-    $result = Invoke-Command -Session $session -ArgumentList $PytestArgs, $synced -ScriptBlock {
-        param($PytestArgs, $synced)
+    $result = Invoke-Command -Session $session -ArgumentList $PytestArgs, $synced, ($Explore -ne ''), $Tests -ScriptBlock {
+        param($PytestArgs, $synced, $explore, $tests)
         $ErrorActionPreference = 'Continue'
         $log = 'C:\ts-out'
         Set-Location C:\ts
@@ -98,13 +116,32 @@ try {
         $kit = 'C:\ts\driver\windows_virtual_audio\x64\Release\vm_kit'
         & powershell -NoProfile -ExecutionPolicy Bypass -File "$kit\driver_install.ps1" *>&1 | Out-File -Encoding utf8 "$log\install.log"
         $steps.install = $LASTEXITCODE
+        cmd /c "C:\ts\uv.exe run python main.py cable-admin install-cables > $log\cables.log 2>&1"
+        $steps.cables = $LASTEXITCODE
+        Start-Sleep -Seconds 5
+        if (Test-Path C:\ts\tools\ASIO4ALL_2_22.exe) {
+            # Not -Wait: that also waits for the browser the installer opens when it finishes.
+            $installer = Start-Process C:\ts\tools\ASIO4ALL_2_22.exe -ArgumentList '/S' -PassThru
+            $null = $installer.WaitForExit(120000)
+            Get-Process msedge -ErrorAction SilentlyContinue | Stop-Process -Force
+            $steps.asio4all = [int](Test-Path 'HKLM:\SOFTWARE\ASIO\ASIO4ALL v2')
+        }
+        if ($explore) {
+            & powershell -NoProfile -ExecutionPolicy Bypass -File C:\ts-explore.ps1 *>&1 | Out-File -Encoding utf8 "$log\explore.log"
+            $steps.explore = $LASTEXITCODE
+        }
         Get-PnpDevice -PresentOnly | Where-Object { $_.FriendlyName -like '*ToneSphere*' } |
             Format-Table -AutoSize Status, Class, FriendlyName, InstanceId | Out-String -Width 250 |
             Set-Content "$log\devices_after_install.txt"
 
-        $pytest = "C:\ts\uv.exe run pytest tests/hardware/test_virtual_driver.py $PytestArgs"
-        cmd /c "$pytest > $log\pytest.log 2>&1"
-        $steps.pytest = $LASTEXITCODE
+        $env:TONESPHERE_FFMPEG = 'C:\ts\tools\ffmpeg.exe'
+        $env:TONESPHERE_TEST_INTERFACE = 'ToneSphere Cable 1'
+        $env:TONESPHERE_ARTIFACTS = $log
+        if (-not $explore) {
+            $pytest = "C:\ts\uv.exe run pytest $tests $PytestArgs"
+            cmd /c "$pytest > $log\pytest.log 2>&1"
+            $steps.pytest = $LASTEXITCODE
+        }
 
         & powershell -NoProfile -ExecutionPolicy Bypass -File "$kit\driver_uninstall.ps1" *>&1 | Out-File -Encoding utf8 "$log\uninstall.log"
         $steps.uninstall = $LASTEXITCODE

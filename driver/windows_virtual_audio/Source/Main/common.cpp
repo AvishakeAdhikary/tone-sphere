@@ -18,6 +18,7 @@ Abstract:
 #include "hw.h"
 #include "savedata.h"
 #include "endpoints.h"
+#include "cable.h"
 
 //-----------------------------------------------------------------------------
 // CSaveData statics
@@ -47,9 +48,13 @@ class CAdapterCommon :
         PCSimpleAudioSampleHW   m_pHW;                  // Virtual Simple Audio Sample HW object
         PPORTCLSETWHELPER       m_pPortClsEtwHelper;
 
-        static LONG             m_AdapterInstances;     // # of adapter objects.
+        // ToneSphere: the adapters sharing CSaveData's static work items (one per cable).
+        static LONG             m_SaveDataUsers;
+        BOOL                    m_UsesSaveData;
 
         DWORD                   m_dwIdleRequests;
+
+        Cable*                  m_Cable;                // ToneSphere: this device's cable
 
     public:
         //=====================================================================
@@ -230,6 +235,8 @@ class CAdapterCommon :
 
         STDMETHODIMP_(VOID) Cleanup();
 
+        STDMETHODIMP_(PVOID) GetCable() { return m_Cable; }
+
         //=====================================================================
         // friends
         friend NTSTATUS         NewAdapterCommon
@@ -293,9 +300,11 @@ typedef struct _MINIPAIR_UNKNOWN
 #define MAX_DEVICE_REG_KEY_LENGTH 0x100
 
 //
-// Used to implement the singleton pattern.
+// ToneSphere: the sample was a singleton because CSaveData's members are static. Every cable
+// is its own adapter now, so the work items are created by the first adapter to start and
+// freed by the last to go; data files, their only user, are never created (adapter.cpp).
 //
-LONG  CAdapterCommon::m_AdapterInstances = 0;
+LONG  CAdapterCommon::m_SaveDataUsers = 0;
 
 
 
@@ -375,16 +384,6 @@ Return Value:
 
     NTSTATUS ntStatus;
 
-    //
-    // This sample supports only one instance of this object.
-    // (b/c of CSaveData's static members and Bluetooth HFP logic). 
-    //
-    if (InterlockedCompareExchange(&CAdapterCommon::m_AdapterInstances, 1, 0) != 0)
-    {
-        ntStatus = STATUS_DEVICE_BUSY;
-        DPF(D_ERROR, ("NewAdapterCommon failed, only one instance is allowed"));
-        goto Done;
-    }
     
     //
     // Allocate an adapter object.
@@ -436,8 +435,16 @@ Return Value:
         delete m_pHW;
         m_pHW = NULL;
     }
+
+    // Last: every miniport, and through them every stream, held a reference to this
+    // object, so nothing can still be moving audio through the cable.
+    CableDestroy(m_Cable);
+    m_Cable = NULL;
     
-    CSaveData::DestroyWorkItems();
+    if (m_UsesSaveData && InterlockedDecrement(&CAdapterCommon::m_SaveDataUsers) == 0)
+    {
+        CSaveData::DestroyWorkItems();
+    }
     SAFE_RELEASE(m_pPortClsEtwHelper);
     SAFE_RELEASE(m_pServiceGroupWave);
  
@@ -447,8 +454,6 @@ Return Value:
         m_WdfDevice = NULL;
     }
 
-    InterlockedDecrement(&CAdapterCommon::m_AdapterInstances);
-    ASSERT(CAdapterCommon::m_AdapterInstances == 0);
 } // ~CAdapterCommon  
 
 //=============================================================================
@@ -571,6 +576,12 @@ Return Value:
 
     InitializeListHead(&m_SubdeviceCache);
 
+    m_Cable = CableCreate();
+    if (m_Cable == NULL)
+    {
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+
     //
     // Get the PDO.
     //
@@ -612,9 +623,13 @@ Return Value:
     //
     // Initialize SaveData class.
     //
-    CSaveData::SetDeviceObject(DeviceObject);   //device object is needed by CSaveData
-    ntStatus = CSaveData::InitializeWorkItems(DeviceObject);
-    IF_FAILED_JUMP(ntStatus, Done);
+    m_UsesSaveData = TRUE;
+    if (InterlockedIncrement(&CAdapterCommon::m_SaveDataUsers) == 1)
+    {
+        CSaveData::SetDeviceObject(DeviceObject);   //device object is needed by CSaveData
+        ntStatus = CSaveData::InitializeWorkItems(DeviceObject);
+        IF_FAILED_JUMP(ntStatus, Done);
+    }
 Done:
 
     return ntStatus;

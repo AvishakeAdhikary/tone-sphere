@@ -389,6 +389,10 @@ class MainWindow(QMainWindow):
         diagnostics.triggered.connect(self._show_diagnostics)
         engine_menu.addAction(diagnostics)
 
+        cables = QAction(tr('menu.engine.cables'), self)
+        cables.triggered.connect(self._show_cables)
+        engine_menu.addAction(cables)
+
         engine_menu.addSeparator()
         quit_action = QAction(tr('menu.engine.quit'), self)
         quit_action.setShortcut(QKeySequence.StandardKey.Quit)
@@ -606,6 +610,13 @@ class MainWindow(QMainWindow):
             self._diagnostics.finished.connect(lambda _result: setattr(self, '_diagnostics', None))
         self._diagnostics.show()
         self._diagnostics.raise_()
+
+    def _show_cables(self):
+        from tonesphere.ui.cables_view import CablesDialog
+
+        dialog = CablesDialog(self.engine, self, tasks=self.tasks)
+        dialog.finished.connect(lambda _result: self._run(lambda: None, refresh='all'))
+        dialog.show()
 
     def _show_plugin_browser(self):
         from tonesphere.ui.plugin_views import PluginBrowser

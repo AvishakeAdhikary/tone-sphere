@@ -98,8 +98,6 @@ Environment:
 
     DPF(D_TERSE, ("[DriverUnload]"));
 
-    CableFree();
-
     ReleaseRegistryStringBuffer();
 
     if (DriverObject == NULL)
@@ -237,6 +235,10 @@ Returns:
         //
     }
 
+    // ToneSphere: never, whatever the registry says. Several cables share CSaveData's static
+    // state (common.cpp), which is only safe while nothing writes data files through it.
+    g_DoNotCreateDataFiles = 1;
+
     //
     // Dump settings.
     //
@@ -327,15 +329,6 @@ Return Value:
         Done);
 
     //
-    // ToneSphere: the cable joining the two endpoints, allocated once for the driver's life.
-    //
-    ntStatus = CableInitialize();
-    IF_FAILED_ACTION_JUMP(
-        ntStatus,
-        DPF(D_ERROR, ("Cable allocation failed, 0x%x", ntStatus)),
-        Done);
-
-    //
     // Tell the class driver to initialize the driver.
     //
     ntStatus =  PcInitializeAdapterDriver(DriverObject,
@@ -372,7 +365,6 @@ Done:
         }
 
         ReleaseRegistryStringBuffer();
-        CableFree();
     }
     
     return ntStatus;
@@ -488,10 +480,11 @@ InstallEndpointRenderFilters(
     
     UNREFERENCED_PARAMETER(_pDeviceObject);
 
+    // ToneSphere: the device's cable is the miniports' device context.
     ntStatus = _pAdapterCommon->InstallEndpointFilters(
         _pIrp,
         _pAeMiniports,
-        NULL,
+        _pAdapterCommon->GetCable(),
         &unknownTopology,
         &unknownWave,
         NULL, NULL);
@@ -647,7 +640,7 @@ InstallEndpointCaptureFilters(
     ntStatus = _pAdapterCommon->InstallEndpointFilters(
         _pIrp,
         _pAeMiniports,
-        NULL,
+        _pAdapterCommon->GetCable(),
         NULL,
         NULL,
         NULL, NULL);

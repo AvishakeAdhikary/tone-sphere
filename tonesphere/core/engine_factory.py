@@ -331,6 +331,12 @@ class UnifiedAudioEngine:
     def failed_device_ids(self) -> dict[int, str]:
         return self.engine.failed_device_ids()
 
+    def virtual_device_status(self) -> dict[str, Any]:
+        return self.engine.virtual_device_status()
+
+    def manage_virtual_cable(self, operation: str, *args: str) -> tuple[bool, str]:
+        return self.engine.manage_virtual_cable(operation, *args)
+
     def handle_device_change(self) -> dict[str, Any]:
         return self.engine.handle_device_change()
 

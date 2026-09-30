@@ -743,8 +743,9 @@ class NativeHost:
                 return
             try:
                 self._engine.stop_backend()
-            except NativeError:
-                pass
+            except NativeError as e:
+                # Stopped regardless: the engine is detached. What went wrong is still news.
+                logger.warning(f"Stopping the audio backend: {e}")
             self._running = False
             self._clock = False
             self._stream_set = frozenset()

@@ -39,21 +39,44 @@ endpoint and cannot create one.
 
 [`driver/windows_virtual_audio/`](https://github.com/AvishakeAdhikary/tone-sphere/tree/main/driver/windows_virtual_audio)
 is a kernel-mode PortCls/WaveRT driver derived from Microsoft's **SimpleAudioSample**
-(Microsoft Public License), publishing one virtual cable:
+(Microsoft Public License). It publishes **cables**, each one its own device — an instance of
+the root-enumerated hardware ID `ROOT\ToneSphereVirtualAudio` — with two endpoints:
 
-- **Speakers (ToneSphere Virtual Audio Cable)** — a render endpoint applications play into;
-- **Microphone Array (ToneSphere Virtual Audio Cable)** — a capture endpoint applications
-  record from.
+- **Speakers (<cable>)** — a render endpoint applications play into;
+- **Microphone Array (<cable>)** — a capture endpoint applications record from.
 
-What is played into the render endpoint comes out of the capture endpoint. Both run
-48 kHz, 32-bit PCM, stereo. ToneSphere uses them through its ordinary WASAPI backend:
-render its mix into the cable and Discord records the other end as a microphone; or let an
-application play into the cable and capture the other end into ToneSphere.
+What is played into a cable's render endpoint comes out of that cable's capture endpoint,
+and out of no other. Both run 48 kHz, 32-bit PCM, stereo. A fresh install creates two cables,
+"ToneSphere Cable 1" and "ToneSphere Cable 2". ToneSphere uses them through its ordinary
+WASAPI backend: render its mix into a cable and Discord records the other end as a
+microphone; or let an application play into a cable and capture the other end into
+ToneSphere.
+
+**Managing them from ToneSphere.** Engine → Virtual Cables… lists every cable with its state
+and endpoints, and adds (up to eight), renames, disables, enables and uninstalls them one at a
+time, or removes the driver (`tonesphere/engine/virtual_cables.py`, `tonesphere/ui/cables_view.py`).
+Listing needs no privilege. A change runs in a separate process started through Windows' own
+administrator prompt (`main.py cable-admin`), so nothing else in ToneSphere runs elevated.
+Because each cable is a device of its own, Windows' disable and uninstall act on exactly one:
+the others keep playing.
+
+**A cable in use.** Windows will not take a device away from certain programs using it: its
+audio engine (`audiodg.exe`) vetoes the removal (System log, Kernel-PnP event 225). In the VM
+that happened for every stream ToneSphere's native engine opened — shared or exclusive,
+render or capture, raw or not — and never for a PortAudio program's shared stream, which was
+simply cut off; why, is not established. A plain `pnputil /disable-device` answers a veto by
+leaving the cable "pending a restart": still working, and refusing every later change until
+Windows restarts. So ToneSphere never does that. It lets go of its own streams on a cable
+before changing it and starts them again afterwards, and it asks Windows with the "no UI"
+flags, which turn a veto into a clean refusal — "a program has this cable open…" — with
+nothing changed. The audio engine also opens a cable briefly by itself (when one arrives, or
+becomes the default device because another left), so a veto is retried for ten seconds
+before it counts.
 
 The names are Windows' own: the pin category ("Speakers", "Microphone Array") and the
-device. Naming the endpoints "ToneSphere Cable Input/Output" needs either a
-`MediaCategories` registration, which the Windows Driver INF rules refuse (InfVerif error
-1321), or a pin-name property handler in the driver — **not implemented**.
+device's friendly name, which is the cable's name. Naming the endpoints "ToneSphere Cable
+Input/Output" would need a `MediaCategories` registration, which the Windows Driver INF rules
+refuse (InfVerif error 1321), or a pin-name property handler in the driver.
 
 ### Design, and why this one
 
@@ -82,43 +105,55 @@ render-to-file feature is removed entirely, including its registry override.
 
 | | Level | Evidence |
 |---|---|---|
-| Driver source (SimpleAudioSample + the cable) | IMPLEMENTED | `driver/windows_virtual_audio/`; every change listed in its README |
+| Driver source (SimpleAudioSample + one cable per device) | IMPLEMENTED | `driver/windows_virtual_audio/`; every change listed in its README |
 | Builds, test-signed package (INF, SYS, CAT) with the EWDK | VERIFIED (build) | `scripts/build_driver.py` on the development machine |
 | INF meets Windows Driver requirements | VERIFIED (static) | `InfVerif /w`: no findings |
-| Install, enumeration, cross-application audio, silence, uninstall | **HARDWARE VERIFIED in a Hyper-V test VM** | 2026-09-30, Windows 11 Enterprise LTSC Evaluation 10.0.26100 guest, test-signing on, Secure Boot off; `tests/hardware/test_virtual_driver.py`, 7 of 7 — see below |
+| Install, two cables, enumeration, cross-application audio on each, isolation, silence, uninstall | **HARDWARE VERIFIED in a Hyper-V test VM** | `tests/hardware/test_virtual_driver.py`, 14 of 14 — see below |
+| Add, rename, disable, enable, uninstall a cable from the app and its dialog | **HARDWARE VERIFIED in the VM** | the same file; the dialog's own buttons drive a real disable and enable |
+| A cable disappearing under a running engine, and coming back | **HARDWARE VERIFIED in the VM** | the engine reports it left, carries on without it, and reopens it on return with no user action |
+| Another program's application (ffmpeg, DirectShow) recording a cable | **HARDWARE VERIFIED in the VM** | 1 kHz at +0.000 dB |
+| The ASIO host through ASIO4ALL on a cable | **HARDWARE VERIFIED in the VM** (output at +0.00 dB from native WASAPI; its round trip `--`) | `tests/hardware/test_asio.py`, `test_roundtrip.py` with `TONESPHERE_TEST_INTERFACE='ToneSphere Cable 1'`; see `docs/ASIO.md` |
+| Measured round trip through a cable | **HARDWARE VERIFIED in the VM** | native WASAPI exclusive, 144-frame period: 12.02 ms, twice, confidence 79; shared: 63.35 / 73.35 ms |
 | Loads again after the guest reboots | observed | a guest restart mid-run left the device and both endpoints present and working |
-| Custom endpoint names ("ToneSphere Cable Input/Output") | **NOT IMPLEMENTED** | see above |
-| On a real desktop, with a real communications app (Discord, OBS) | NOT VERIFIED | the tests ran in the VM's PowerShell Direct session, with PortAudio processes as "other applications" |
+| Custom pin names ("ToneSphere Cable Input/Output") | NOT IMPLEMENTED | see above; the cable's own name does appear in both endpoint names |
+| On a real desktop, with a real communications app (Discord, OBS) | NOT VERIFIED | the tests ran in the VM's PowerShell Direct session (session 0), with PortAudio processes and ffmpeg as "other applications" |
 | Production-signed deployment | **NOT AVAILABLE** | attestation signing needs an EV certificate and a Partner Center account; see below |
 | Sleep/resume, format changes, many simultaneous clients | NOT VERIFIED | |
 
-### What the VM run showed
+### What the VM runs showed
 
 `scripts/vm/run_driver_tests.ps1`, from the VM's `deps` checkpoint (a guest that has never
-had the driver), 2026-09-30; the logs of the final run are in
-`driver/windows_virtual_audio/test-results/`:
+had the driver), 2026-09-30 and 2026-10-01, Windows 11 Enterprise LTSC Evaluation 10.0.26100;
+the logs of the final runs are in `driver/windows_virtual_audio/test-results/`:
 
-- **Install:** `driver_install.ps1` trusted the test certificate and `devcon` created
-  `ROOT\MEDIA\0000`, "ToneSphere Virtual Audio Cable", status OK, with both endpoints OK.
-- **Enumeration:** Windows enumerates both endpoints, 48 kHz stereo each.
-- **One application to another** (two PortAudio processes, neither of them ToneSphere):
-  a 1 kHz tone at 0.2 peak arrived at 1000.00 Hz, rms 0.14142 against 0.14142 sent
-  (+0.000 dB; −0.009 dB in another pass).
-- **An application into ToneSphere** (PortAudio plays, the native engine captures):
-  1000.00 Hz, rms 0.14142 (+0.000 dB; −0.009 dB in another pass).
-- **ToneSphere through a VST3 plugin into another application** (the engine renders
-  through the Test Gain plugin at ×0.5; PortAudio records): 1000.00 Hz, rms 0.07071, exactly
-  half (+0.000 dB against 0.07071).
-- **Idle is exact silence**, and **a new capture does not replay** audio played before it
-  started.
-- **The engine finds it:** `AudioEngine.virtual_device_status()` reports it installed, by the
-  names above.
-- **Uninstall:** device removed, driver-store package deleted, certificate no longer trusted,
-  no ToneSphere device or endpoint left.
+- **Install:** `driver_install.ps1` trusted the test certificate and added the package;
+  `main.py cable-admin install-cables` created `ROOT\MEDIA\0000` "ToneSphere Cable 1" and
+  `ROOT\MEDIA\0001` "ToneSphere Cable 2", both working, four endpoints at 48 kHz stereo.
+- **One application to another, on each cable** (two PortAudio processes): 1 kHz at rms
+  0.14142 against 0.14142 sent, +0.000 dB, on both.
+- **Isolation:** a tone into cable 1 arrived at 0.14128; cable 2 read a peak of exactly 0.
+- **An application into ToneSphere:** 1000.00 Hz, −0.009 dB. **ToneSphere through the Test
+  Gain plugin at ×0.5 into cable 2, recorded by PortAudio:** rms 0.07071, exactly half.
+- **ffmpeg** recording cable 1 through DirectShow what ToneSphere played into it: 1000.00 Hz,
+  +0.000 dB (it took 14.2 s to record 3 s in the VM's non-interactive session — the reason an
+  earlier version of the test, whose tone lasted 5 s, heard silence).
+- **Idle is exact silence**, and **a new capture does not replay** audio played before it.
+- **Managed through the app** (the calls the dialog makes): a cable "Chat" added
+  (`ROOT\MEDIA\0002`), carrying audio, renamed "Game" — its endpoints renamed with it —
+  and uninstalled, with cable 1 still carrying audio; the dialog's own Disable and Enable
+  buttons disabling and re-enabling cable 2.
+- **Disappearing under a running engine:** ToneSphere captured cable 2 and played into
+  cable 1; cable 2 was disabled. The engine reported both of its endpoints gone, started
+  again without them, and cable 1 went on carrying a 440 Hz tone. Cable 2 was enabled: the
+  engine reported it back and reopened it, and a tone another program then played into it
+  reached ToneSphere at 1000.00 Hz, −0.009 dB — with no user action.
+- **A cable in use elsewhere:** disabled under a PortAudio recorder; refused cleanly while a
+  second native-engine program held it, the cable still working; disabled and enabled once
+  that program let go.
+- **Uninstall:** every cable removed, driver-store package deleted, certificate no longer
+  trusted, no ToneSphere device or endpoint left.
 
-The final driver passed three times in a row, twice on a VM built from scratch by
-`new_driver_vm.ps1`. Getting there took seven passes before those, and each fixed something
-real that nothing else would have found:
+Earlier passes each found something real that nothing else would have:
 
 1. `Import-Certificate` is refused ("access denied") over PowerShell Direct even with an
    administrator token; the scripts use `certutil`.
@@ -136,6 +171,20 @@ real that nothing else would have found:
 7. OOBE restarts a new guest once, about a quarter of an hour after first logon, and a
    checkpoint taken earlier replays that restart; `new_driver_vm.ps1` now waits it out, and
    switches Windows Update off in the guest.
+8. **A second cable failed to start** (`STATUS_DEVICE_BUSY`, code 10): the sample allows one
+   device per driver. The guard is gone, and each device has its own cable.
+9. A name set before the driver was installed was replaced by the INF's; cables are named
+   after installing, then restarted so the endpoints are built under the name.
+10. **Disabling a cable ToneSphere was streaming through left it "pending a restart"**, and
+    every later change to it failed; see "A cable in use" above.
+11. A disable that Windows vetoed with the persist flag still recorded the disable for the
+    next restart, and the cable then refused to be enabled; the persistent disable is now
+    asked for only once the device has stopped.
+12. The two endpoints of a cable leave and arrive some hundreds of milliseconds apart, so a
+    re-read straight after a change saw half a cable; the app waits for both.
+13. ASIO4ALL, after asking for a reset, never returned from `stop()`, and the host's control
+    thread waited on it for ever; the host now gives a driver five seconds, then abandons it
+    and says so (`docs/ASIO.md`).
 
 ### Testing it
 
@@ -154,17 +203,15 @@ answer file, and creates a Generation 2 VM with Secure Boot off. It was built fr
 Windows 11 Enterprise LTSC 90-day evaluation ISO (SHA-256
 `67cec5865eaa037a72ddc633a717a10a2bed50778862267223ddb9c60ef5da68`). The host's
 boot configuration is never touched. `run_driver_tests.ps1` restores a checkpoint, copies in
-the tree and the built binaries, installs, runs `tests/hardware/test_virtual_driver.py`,
-uninstalls, checks nothing is left, and brings every log back (including `setupapi.dev.log`
-and any crash dump).
+the tree, the built binaries and the third-party tools it finds in `-Tools` (ASIO4ALL and
+ffmpeg, downloaded once by hand), installs the driver and the two default cables, installs
+ASIO4ALL silently, runs `tests/hardware/test_virtual_driver.py`, `test_asio.py` and
+`test_roundtrip.py` against the cables, uninstalls, checks nothing is left, and brings every
+log back (including `setupapi.dev.log` and any crash dump).
 
-`driver_install.ps1` refuses to run with test-signing off. The tests check that Windows
-enumerates both endpoints at one format; that a tone played by one PortAudio process
-arrives at another through the cable; that audio crosses in both directions with ToneSphere
-as one side, including through a VST3 plugin; that an idle cable is exact silence and a new
-capture starts empty; and that the engine reports the cable. `driver_uninstall.ps1` removes
-the device, the driver-store package and the certificate trust, and fails if anything is
-left.
+`driver_install.ps1` refuses to run with test-signing off. `driver_uninstall.ps1` stops each
+cable first (retrying while the audio engine has it open for a moment), removes every cable,
+the driver-store package and the certificate trust, and fails if anything is left.
 
 ### Signing, and what it costs
 
@@ -209,8 +256,9 @@ Linux is to use the platform rather than fight it.
 1. **Per-process WASAPI loopback capture** — done (no driver).
 2. **macOS AudioServerPlugIn** — proven in CI only.
 3. **Linux via PipeWire/JACK** — done (configuration, not code).
-4. **Windows kernel driver** — installs, enumerates and carries audio between applications
-   in a Hyper-V test VM, at the level sent, and uninstalls cleanly; untested on a real
+4. **Windows kernel driver** — installs two cables, each carrying audio between applications
+   at the level sent and isolated from the other; cables are added, renamed, disabled,
+   enabled and uninstalled from ToneSphere; all in a Hyper-V test VM; untested on a real
    desktop with a real communications app; production signing not available.
 
 ToneSphere says exactly that, and nothing more, until a signing route exists.

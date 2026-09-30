@@ -211,6 +211,11 @@ def main():
     if len(sys.argv) > 2 and sys.argv[1] == "scan-plugin":
         from tonesphere.plugins.scan import scan_one_cli
         return scan_one_cli(sys.argv[2])
+    # One virtual-cable change, run elevated through Windows' administrator prompt
+    # (engine/virtual_cables.py); it does that and exits, nothing else.
+    if len(sys.argv) > 2 and sys.argv[1] == "cable-admin":
+        from tonesphere.engine.virtual_cables import admin_main
+        return admin_main(sys.argv[2:])
 
     setup_console_encoding()
 

@@ -7,9 +7,14 @@ SimpleAudioSample and distributed under the same Microsoft Public License (see L
 driver/windows_virtual_audio).
 
 This is the only component of the driver that is not Microsoft's sample. It joins the two
-endpoints: what applications render into the cable's render endpoint is what applications
-capturing its capture endpoint receive. Both endpoints run the same format (48 kHz,
-32-bit PCM, stereo), so this copies bytes and never converts.
+endpoints of one device: what applications render into the cable's render endpoint is what
+applications capturing its capture endpoint receive. Both endpoints run the same format
+(48 kHz, 32-bit PCM, stereo), so this copies bytes and never converts.
+
+Each device instance — each cable the user adds — owns one Cable, created with its adapter
+object and freed with it. The adapter is reference-counted by the miniports, and the
+miniports by their streams, so a cable outlives every stream that writes or reads it, even
+across a surprise removal.
 
 It does nothing else, deliberately: no mixing, no resampling, no DSP. All of that belongs in
 user mode, in ToneSphere.
@@ -36,42 +41,51 @@ constexpr ULONG kMaxQueuedBytes = 4800 * 8;
 
 constexpr ULONG kPoolTag = 'bCsT';
 
-UCHAR* g_buffer = nullptr;
-ULONG g_read = 0;
-ULONG g_fill = 0;
-KSPIN_LOCK g_lock;
-
 }  // namespace
 
+struct Cable
+{
+    UCHAR* buffer;
+    ULONG read;
+    ULONG fill;
+    KSPIN_LOCK lock;
+};
+
 #pragma code_seg("PAGE")
-NTSTATUS CableInitialize()
+Cable* CableCreate()
 {
     PAGED_CODE();
-    g_buffer = static_cast<UCHAR*>(ExAllocatePool2(POOL_FLAG_NON_PAGED, kCableBytes, kPoolTag));
-    if (g_buffer == nullptr)
+    Cable* cable = static_cast<Cable*>(ExAllocatePool2(POOL_FLAG_NON_PAGED, sizeof(Cable), kPoolTag));
+    if (cable == nullptr)
     {
-        return STATUS_INSUFFICIENT_RESOURCES;
+        return nullptr;
     }
-    KeInitializeSpinLock(&g_lock);
-    g_read = 0;
-    g_fill = 0;
-    return STATUS_SUCCESS;
+    cable->buffer = static_cast<UCHAR*>(ExAllocatePool2(POOL_FLAG_NON_PAGED, kCableBytes, kPoolTag));
+    if (cable->buffer == nullptr)
+    {
+        ExFreePoolWithTag(cable, kPoolTag);
+        return nullptr;
+    }
+    KeInitializeSpinLock(&cable->lock);
+    cable->read = 0;
+    cable->fill = 0;
+    return cable;
 }
 
-VOID CableFree()
+VOID CableDestroy(_In_opt_ Cable* cable)
 {
     PAGED_CODE();
-    if (g_buffer != nullptr)
+    if (cable != nullptr)
     {
-        ExFreePoolWithTag(g_buffer, kPoolTag);
-        g_buffer = nullptr;
+        ExFreePoolWithTag(cable->buffer, kPoolTag);
+        ExFreePoolWithTag(cable, kPoolTag);
     }
 }
 
 #pragma code_seg()
-VOID CableWrite(_In_reads_bytes_(Bytes) const UCHAR* Source, _In_ ULONG Bytes)
+VOID CableWrite(_In_opt_ Cable* cable, _In_reads_bytes_(Bytes) const UCHAR* Source, _In_ ULONG Bytes)
 {
-    if (g_buffer == nullptr || Bytes == 0)
+    if (cable == nullptr || Bytes == 0)
     {
         return;
     }
@@ -82,55 +96,55 @@ VOID CableWrite(_In_reads_bytes_(Bytes) const UCHAR* Source, _In_ ULONG Bytes)
     }
 
     KIRQL irql;
-    KeAcquireSpinLock(&g_lock, &irql);
+    KeAcquireSpinLock(&cable->lock, &irql);
 
     // Over the bound: drop the oldest queued audio, never the newest.
-    if (g_fill + Bytes > kMaxQueuedBytes)
+    if (cable->fill + Bytes > kMaxQueuedBytes)
     {
-        const ULONG drop = g_fill + Bytes - kMaxQueuedBytes;
-        g_read = (g_read + drop) % kCableBytes;
-        g_fill -= drop;
+        const ULONG drop = cable->fill + Bytes - kMaxQueuedBytes;
+        cable->read = (cable->read + drop) % kCableBytes;
+        cable->fill -= drop;
     }
 
-    ULONG write = (g_read + g_fill) % kCableBytes;
+    ULONG write = (cable->read + cable->fill) % kCableBytes;
     ULONG remaining = Bytes;
     while (remaining > 0)
     {
         const ULONG run = min(remaining, kCableBytes - write);
-        RtlCopyMemory(g_buffer + write, Source, run);
+        RtlCopyMemory(cable->buffer + write, Source, run);
         Source += run;
         remaining -= run;
         write = (write + run) % kCableBytes;
     }
-    g_fill += Bytes;
+    cable->fill += Bytes;
 
-    KeReleaseSpinLock(&g_lock, irql);
+    KeReleaseSpinLock(&cable->lock, irql);
 }
 
-VOID CableRead(_Out_writes_bytes_(Bytes) UCHAR* Destination, _In_ ULONG Bytes)
+VOID CableRead(_In_opt_ Cable* cable, _Out_writes_bytes_(Bytes) UCHAR* Destination, _In_ ULONG Bytes)
 {
-    if (g_buffer == nullptr)
+    if (cable == nullptr)
     {
         RtlZeroMemory(Destination, Bytes);
         return;
     }
 
     KIRQL irql;
-    KeAcquireSpinLock(&g_lock, &irql);
+    KeAcquireSpinLock(&cable->lock, &irql);
 
-    const ULONG available = min(Bytes, g_fill);
+    const ULONG available = min(Bytes, cable->fill);
     ULONG remaining = available;
     while (remaining > 0)
     {
-        const ULONG run = min(remaining, kCableBytes - g_read);
-        RtlCopyMemory(Destination, g_buffer + g_read, run);
+        const ULONG run = min(remaining, kCableBytes - cable->read);
+        RtlCopyMemory(Destination, cable->buffer + cable->read, run);
         Destination += run;
         remaining -= run;
-        g_read = (g_read + run) % kCableBytes;
+        cable->read = (cable->read + run) % kCableBytes;
     }
-    g_fill -= available;
+    cable->fill -= available;
 
-    KeReleaseSpinLock(&g_lock, irql);
+    KeReleaseSpinLock(&cable->lock, irql);
 
     // An empty cable is silence: nothing is rendering into the input.
     if (available < Bytes)
@@ -142,15 +156,15 @@ VOID CableRead(_Out_writes_bytes_(Bytes) UCHAR* Destination, _In_ ULONG Bytes)
 // A capture that starts begins with an empty cable: whatever is queued was rendered before
 // anyone was listening, and replaying it would put a previous application's audio into a new
 // recording (up to kMaxQueuedBytes of it).
-VOID CableFlush()
+VOID CableFlush(_In_opt_ Cable* cable)
 {
-    if (g_buffer == nullptr)
+    if (cable == nullptr)
     {
         return;
     }
     KIRQL irql;
-    KeAcquireSpinLock(&g_lock, &irql);
-    g_read = 0;
-    g_fill = 0;
-    KeReleaseSpinLock(&g_lock, irql);
+    KeAcquireSpinLock(&cable->lock, &irql);
+    cable->read = 0;
+    cable->fill = 0;
+    KeReleaseSpinLock(&cable->lock, irql);
 }

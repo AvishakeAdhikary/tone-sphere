@@ -210,19 +210,23 @@ public:
 
     HWND window() const { return window_; }
 
-    // Run `fn` on this thread and wait for it. Control plane only.
-    void call(std::function<void()> fn) {
+    // Run `fn` on this thread and wait for it, or for `timeout_ms`. Control plane only.
+    // Returns false if `fn` had not returned by then: it still owns this thread, which must
+    // then be abandoned (never destroyed), since it is inside the driver.
+    bool call(std::function<void()> fn, DWORD timeout_ms = INFINITE) {
+        auto task = std::make_shared<std::function<void()>>(std::move(fn));
         HANDLE done = CreateEventW(nullptr, TRUE, FALSE, nullptr);
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            queue_.push_back([&fn, done] {
-                fn();
+            queue_.push_back([task, done] {
+                (*task)();
                 SetEvent(done);
             });
         }
         SetEvent(wake_);
-        WaitForSingleObject(done, INFINITE);
+        if (WaitForSingleObject(done, timeout_ms) != WAIT_OBJECT_0) return false;  // `done` goes with the thread
         CloseHandle(done);
+        return true;
     }
 
 private:
@@ -315,6 +319,22 @@ IASIO* load(StaThread& thread, const char* name) {
 struct AsioStream;
 std::atomic<AsioStream*> g_active{nullptr};
 
+// How long a driver's stop/disposeBuffers/Release may take before it is given up on.
+constexpr DWORD kDriverStopTimeoutMs = 5000;
+
+// Set once a driver has been abandoned inside its own stop(). ASIO drivers are in-process
+// and often single-instance: loading one again beside the stuck one took the process down
+// (0xC0000409), so none is loaded again until the process restarts.
+std::atomic<bool> g_abandoned{false};
+std::string g_abandoned_name;  // written once, before g_abandoned is set
+
+bool refuse_after_abandonment() {
+    if (!g_abandoned.load(std::memory_order_acquire)) return false;
+    set_error("the ASIO driver \"" + g_abandoned_name + "\" hung in stop() and was abandoned in this process; " +
+              "restart ToneSphere to use ASIO again");
+    return true;
+}
+
 struct AsioStream {
     ts_engine* engine = nullptr;
     std::unique_ptr<StaThread> thread;
@@ -345,6 +365,7 @@ struct AsioStream {
     std::atomic<uint32_t> reset_requested{0};
     std::atomic<uint32_t> latencies_changed{0};
     std::atomic<double> rate_changed_to{0.0};
+    std::atomic<bool> abandoned{false};
     bool stopped = false;
 
     void process(long index) noexcept {
@@ -389,14 +410,27 @@ struct AsioStream {
     void stop() {
         if (stopped) return;
         stopped = true;
-        thread->call([this] {
+        // A driver that never returns from stop() must not take the control plane with it:
+        // ASIO4ALL on a VM's virtual device, after asking for a reset, spun in stop() for
+        // good. Past the timeout the driver, its thread and this stream are abandoned —
+        // leaked, never freed, since the thread is still inside the driver and holds `this` —
+        // and the stream reports why.
+        const bool returned = thread->call([this] {
             driver->stop();
             driver->disposeBuffers();
             driver->Release();
             driver = nullptr;
-        });
+        }, kDriverStopTimeoutMs);
         g_active.store(nullptr);
         ts_engine_set_backend_running(engine, 0);
+        if (!returned) {
+            g_abandoned_name = driver_name;
+            g_abandoned.store(true, std::memory_order_release);
+            abandoned.store(true);
+            (void)thread.release();
+            state.store(TS_STREAM_STATE_FAILED);
+            return;
+        }
         state.store(TS_STREAM_STATE_STOPPED);
     }
 
@@ -423,6 +457,9 @@ struct AsioStream {
             s.glitches = overloads.load() + resyncs.load();
             s.drift_ratio = 1.0;
             std::string message = "ASIO: " + driver_name;
+            if (abandoned.load())
+                message += "; the driver did not return from stop() within " +
+                           std::to_string(kDriverStopTimeoutMs / 1000) + " s and was abandoned, its thread still in it";
             if (reset_requested.load()) message += "; the driver requested a reset: restart the stream";
             if (latencies_changed.load()) message += "; the driver reports its latencies changed";
             if (const double r = rate_changed_to.load(); r > 0)
@@ -488,7 +525,10 @@ void op_stop(void* context) { static_cast<AsioStream*>(context)->stop(); }
 int32_t op_status(void* context, ts_stream_status* out, int32_t capacity) {
     return static_cast<AsioStream*>(context)->status(out, capacity);
 }
-void op_destroy(void* context) { delete static_cast<AsioStream*>(context); }
+void op_destroy(void* context) {
+    auto* s = static_cast<AsioStream*>(context);
+    if (!s->abandoned.load()) delete s;
+}
 
 }  // namespace
 
@@ -513,6 +553,7 @@ TS_ASIO_API int32_t ts_asio_list(ts_asio_driver* out, int32_t capacity) {
 
 TS_ASIO_API ts_result ts_asio_query(const char* name, ts_asio_info* out) {
     if (!name || !out) return TS_ERR_INVALID;
+    if (refuse_after_abandonment()) return TS_ERR_STATE;
     if (g_active.load()) {
         set_error("an ASIO stream is running; ASIO allows one driver per process");
         return TS_ERR_STATE;
@@ -563,6 +604,7 @@ TS_ASIO_API ts_result ts_asio_query(const char* name, ts_asio_info* out) {
 
 TS_ASIO_API ts_result ts_asio_start(ts_engine* engine, const ts_asio_config* config) {
     if (!engine || !config) return TS_ERR_INVALID;
+    if (refuse_after_abandonment()) return TS_ERR_STATE;
     if (config->input_count > TS_ASIO_MAX_CHANNELS || config->output_count > TS_ASIO_MAX_CHANNELS ||
         (config->input_count == 0 && config->output_count == 0)) {
         set_error("an ASIO stream needs between 1 and 64 input or output channels");

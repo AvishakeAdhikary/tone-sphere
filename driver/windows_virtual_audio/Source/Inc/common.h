@@ -458,6 +458,9 @@ DECLARE_INTERFACE_(IAdapterCommon, IUnknown)
 
     STDMETHOD_(VOID, Cleanup)();
 
+    // ToneSphere: this device's cable (Main/cable.h), handed to its endpoints' miniports.
+    STDMETHOD_(PVOID, GetCable)(THIS) PURE;
+
 };
 
 typedef IAdapterCommon *PADAPTERCOMMON;
