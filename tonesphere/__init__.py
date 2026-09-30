@@ -1,6 +1,6 @@
 """ToneSphere - Professional Audio Routing Engine"""
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 from tonesphere.core.engine import AudioEngine
 from tonesphere.core.engine_factory import UnifiedAudioEngine, create_audio_engine

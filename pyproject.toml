@@ -1,6 +1,6 @@
 [project]
 name = "tone-sphere"
-version = "0.1.0"
+version = "0.2.0"
 # Describes what this is, not what it aspires to. The previous description claimed a
 # "complete audio routing system"; it passes no audio yet. See the Roadmap in README.md.
 description = "Low-latency audio routing and mixing for Windows, Linux and macOS."

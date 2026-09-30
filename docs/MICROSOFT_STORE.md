@@ -56,7 +56,7 @@ identity**. That page shows exactly these strings; copy them verbatim.
 |---|---|---|
 | `Identity/@Name` | `NeuralNexusStudios.ToneSphere` | **Package/Identity/Name** from Product identity — a Store-assigned string, typically `<12 digits>.ToneSphere` |
 | `Identity/@Publisher` | `CN=Neural Nexus Studios` | **Package/Identity/Publisher** from Product identity — a `CN=<guid>` string, *not* the display name |
-| `Identity/@Version` | `0.1.0.0` | Nothing by hand. `build_msix.ps1` stamps it from `pyproject.toml` at pack time (see [Versioning](#5-versioning)) |
+| `Identity/@Version` | `0.2.0.0` | Nothing by hand. `build_msix.ps1` stamps it from `pyproject.toml` at pack time (see [Versioning](#5-versioning)) |
 
 `Package/Identity/Publisher Display Name` on that same page must equal
 `<PublisherDisplayName>` in the manifest, which is already `Neural Nexus Studios`.
@@ -179,7 +179,7 @@ Import-PfxCertificate -FilePath .\ToneSphereTest.pfx `
 
 # 4. build + sign, then install
 pwsh -File packaging/msix/build_msix.ps1 -CertificatePath .\ToneSphereTest.pfx -CertificatePassword "<pick one>"
-Add-AppxPackage -Path .\build\msix\ToneSphere-0.1.0.0-x64.msix
+Add-AppxPackage -Path .\build\msix\ToneSphere-0.2.0.0-x64.msix
 ```
 
 The certificate subject must match `Identity/@Publisher` **exactly**. `build_msix.ps1`
@@ -249,10 +249,10 @@ first.
 
 The version now lives in three places, and MSIX has its own rules:
 
-1. `pyproject.toml` → `version = "0.1.0"` — the source of truth. CI's auto-tag job releases
+1. `pyproject.toml` → `version = "0.2.0"` — the source of truth. CI's auto-tag job releases
    on a change here (`.github/workflows/ci.yml`).
-2. `tonesphere/__init__.py` → `__version__ = "0.1.0"`.
-3. `packaging/msix/AppxManifest.xml` → `Version="0.1.0.0"`.
+2. `tonesphere/__init__.py` → `__version__ = "0.2.0"`.
+3. `packaging/msix/AppxManifest.xml` → `Version="0.2.0.0"`.
 
 `build_msix.ps1` reads (1) and (2), refuses to build if they disagree, converts to the
 four-part MSIX form with a **zero fourth part** (the Store rejects a non-zero one), and
