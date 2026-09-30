@@ -62,5 +62,39 @@ class PerformanceStats(BaseModel):
     buffer_underruns: int
     nominal_latency_ms: float          # buffer_size / sample_rate — arithmetic, not measured
     cpu_usage: float | None = None
-    measured_latency_ms: float | None = None
+    reported_latency_ms: float | None = None      # what the driver reports, not timed
+    measured_round_trip_ms: float | None = None   # a real emitted-and-captured signal
     audio_path_active: bool = False
+
+
+class AddPluginRequest(BaseModel):
+    """A scanned VST3 class, by its module path and (for a module with several) class UID."""
+    path: str
+    uid: str | None = None
+    side: str = 'output'   # 'input' or 'output' of a device; ignored for a bus
+
+
+class AddBuiltinRequest(BaseModel):
+    type: str              # 'eq', 'compressor', 'limiter' or 'delay'
+    side: str = 'output'
+    values: list[float] | None = None
+
+
+class CreateInstrumentRequest(BaseModel):
+    path: str
+    uid: str | None = None
+    name: str | None = None
+    channels: int = 2
+
+
+class NoteRequest(BaseModel):
+    note: int              # MIDI note number, 60 = middle C
+    velocity: int = 100
+    on: bool = True
+    channel: int = 0
+
+
+class MidiRequest(BaseModel):
+    status: int
+    data1: int
+    data2: int = 0

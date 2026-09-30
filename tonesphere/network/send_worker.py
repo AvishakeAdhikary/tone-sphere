@@ -182,8 +182,15 @@ class NetworkSendWorker:
         sample_rate: int = 48000,
         frames_per_read: int = 256,
         quality: NetworkQuality | None = None,
+        packet_frames: int | None = None,
+        name: str = 'udp-audio-send',
     ):
+        # `transport` is anything with `send_block(device, block, target, quality)` and a
+        # `quality`: the UDP transport, or the TCP router. `packet_frames` fixes the packet
+        # size where the transport has no datagram limit to fit (TCP frames its own).
         self.transport = transport
+        self.packet_frames = packet_frames
+        self.name = name
         self.reader = reader
         self.sample_rate = sample_rate
         self.frames_per_read = frames_per_read
@@ -242,7 +249,7 @@ class NetworkSendWorker:
                 return
             self._stop.clear()
             self._thread = threading.Thread(
-                target=self._run, name='udp-audio-send', daemon=True
+                target=self._run, name=self.name, daemon=True
             )
             self._thread.start()
         logger.info(f"Network send worker running every {self.interval * 1000:.1f} ms")
@@ -298,7 +305,10 @@ class NetworkSendWorker:
 
     def _service(self, route: SendRoute):
         try:
-            block = self.reader(route.source_key, route.dest_key, self.frames_per_read)
+            # Everything queued, up to 100 ms: a late wake has more than one block waiting,
+            # and reading only one per tick sent a third less audio than the source made
+            # whenever the timer ran late (measured: 202 packets a second of the 329 due).
+            block = self.reader(route.source_key, route.dest_key, max(self.frames_per_read, self.sample_rate // 10))
         except Exception as e:
             self._stats.reader_errors += 1
             route.last_error = f"read failed: {e}"
@@ -326,7 +336,14 @@ class NetworkSendWorker:
             channels = block.shape[1]
             codec, _level = codec_for_quality(self._quality())
             route.accumulator = PacketAccumulator(channels)
-            route.frames_per_packet = frames_per_packet(codec, channels)
+            try:
+                route.frames_per_packet = self.packet_frames or frames_per_packet(
+                    codec, channels, sample_rate=self.sample_rate)
+            except Exception as e:   # noqa: BLE001 - e.g. Opus at a rate it does not run at
+                route.encode_errors += 1
+                route.last_error = f"cannot packetise: {e}"
+                route.accumulator = None
+                return
 
         route.frames_read += route.accumulator.push(block)
 

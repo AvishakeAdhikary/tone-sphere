@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from tonesphere.core.engine_factory import UnifiedAudioEngine
 from tonesphere.utils.config import ConfigManager
 from tonesphere.utils.formatting import format_measurement
@@ -123,8 +125,9 @@ class AudioEngineCLI:
         print("\nPerformance Statistics:")
         print(f"CPU Usage: {format_measurement(stats.get('cpu_usage'), '%')}")
         print(f"Buffer Underruns: {stats['buffer_underruns']}")
-        print(f"Latency (measured): {format_measurement(stats.get('measured_latency_ms'), 'ms')}")
-        print(f"Latency (nominal):  {format_measurement(stats.get('nominal_latency_ms'), 'ms')}")
+        print(f"Latency (reported):   {format_measurement(stats.get('reported_latency_ms'), 'ms')}")
+        print(f"Latency (nominal):    {format_measurement(stats.get('nominal_latency_ms'), 'ms')}")
+        print(f"Round trip (measured): {format_measurement(stats.get('measured_round_trip_ms'), 'ms')}")
         if not stats.get('audio_path_active', False):
             print("Audio path: INACTIVE - no audio is being processed")
 
@@ -570,7 +573,7 @@ class AudioEngineCLI:
         print(f"\nPer-Application Capture ({status['platform']})")
         print(f"  Platform supports it: {status['process_loopback_supported']}")
         print(f"  Implemented here:     {status['process_loopback_implemented']}")
-        print(f"  Whole-system loopback available: {status['system_loopback_available']}")
+        print(f"  Whole-system loopback implemented: {status['system_loopback_implemented']}")
 
         if not status['process_loopback_implemented']:
             print(f"\n  {status['note']}")
@@ -713,6 +716,134 @@ class AudioEngineCLI:
         print(f"Active loggers: {stats['active_loggers']}")
         print(f"Structured logging: {stats['structured_logging']}")
 
+    # --- Plugins, effect chains, instruments ---
+
+    def _ready_for_chains(self) -> bool:
+        if not self.engine:
+            print("Engine not initialized")
+            return False
+        if not self.engine.hosts_plugins():
+            print("Effect chains and plugins need the native engine (Windows)")
+            return False
+        return True
+
+    def list_plugins(self):
+        """Every VST3 module found, each scanned in its own process, with why any is unusable."""
+        if not self._ready_for_chains():
+            return
+        print("\nScanning VST3 folders (each module in a separate process)...")
+        for result in self.engine.scan_plugins():
+            if not result.effects:
+                print(f"  ✗ {Path(result.path).name}: {result.status} — {result.detail}")
+            for c in result.effects:
+                kind = "instrument" if c.is_instrument else "effect"
+                print(f"  {c.name:<32} {kind:<11} {c.vendor[:20]:<20} {result.path}  [{c.uid}]")
+
+    def _ask_int(self, prompt: str) -> int | None:
+        try:
+            return int(input(prompt).strip())
+        except ValueError:
+            print("Not a number")
+            return None
+
+    def _ask_side(self) -> bool:
+        return input("Side (input/output) [output]: ").strip().lower() == 'input'
+
+    def show_chain(self, device_id: int | None = None, is_input: bool | None = None):
+        if not self._ready_for_chains():
+            return
+        device_id = self._ask_int("Device or bus ID: ") if device_id is None else device_id
+        if device_id is None:
+            return
+        is_input = self._ask_side() if is_input is None else is_input
+        chain = self.engine.list_inserts(device_id, is_input)
+        if not chain:
+            print("  (no effects)")
+        for e in chain:
+            state = "bypassed" if e['bypassed'] else ("CRASHED: " + e['fault'] if e['crashed'] else "active")
+            print(f"  [{e['index']}] {e['name']} ({e['kind']}) — {state}")
+
+    def add_effect(self):
+        """A built-in (eq, compressor, limiter, delay) or a VST3 by module path."""
+        if not self._ready_for_chains():
+            return
+        device_id = self._ask_int("Device or bus ID: ")
+        if device_id is None:
+            return
+        is_input = self._ask_side()
+        what = input("Built-in (eq/compressor/limiter/delay) or a .vst3 path: ").strip()
+        if what.lower() in ('eq', 'compressor', 'limiter', 'delay'):
+            ok, message = self.engine.add_builtin(device_id, what.lower(), is_input)
+        else:
+            info = self.engine.find_plugin(what, input("Class UID (blank for the first): ").strip() or None)
+            ok, message = (False, f"No usable VST3 class at {what}") if info is None else \
+                self.engine.add_plugin(device_id, info, is_input)
+        print(("✓ " if ok else "✗ ") + message)
+        if ok:
+            self.show_chain(device_id, is_input)
+
+    def set_effect_parameter(self):
+        if not self._ready_for_chains():
+            return
+        device_id = self._ask_int("Device or bus ID: ")
+        index = self._ask_int("Effect index: ") if device_id is not None else None
+        if index is None:
+            return
+        is_input = self._ask_side()
+        entry = self.engine.insert_instance(device_id, index, is_input)
+        if entry is None:
+            print("✗ No effect there")
+            return
+        for p in entry.parameters():
+            print(f"  {p.id:>6}  {p.title:<32} {p.display} {p.units}")
+        param_id = self._ask_int("Parameter ID: ")
+        if param_id is None:
+            return
+        try:
+            value = float(input("Value, normalised 0..1: ").strip())
+        except ValueError:
+            print("Not a number")
+            return
+        if not self.engine.set_insert_parameter(device_id, index, param_id, value, is_input):
+            print("✗ Not set")
+            return
+        now = next((p for p in entry.parameters() if p.id == param_id), None)
+        print(f"✓ {now.title} = {now.display} {now.units}" if now else "✗ No such parameter")
+
+    def add_instrument(self):
+        if not self._ready_for_chains():
+            return
+        path = input(".vst3 path: ").strip()
+        info = self.engine.find_plugin(path, input("Class UID (blank for the first): ").strip() or None)
+        if info is None:
+            print(f"✗ No usable VST3 class at {path}")
+            return
+        ok, message, bus = self.engine.create_instrument(info, input("Bus name (blank for the plugin's): ").strip()
+                                                         or None)
+        print(("✓ " if ok else "✗ ") + message + (f" — route bus {bus} to an output, then 'note'" if ok else ""))
+
+    def play_note(self):
+        """Hold a note for a while on an instrument's bus."""
+        import time
+
+        if not self._ready_for_chains():
+            return
+        device_id = self._ask_int("Instrument bus ID: ")
+        note = self._ask_int("MIDI note (60 = middle C): ") if device_id is not None else None
+        if note is None:
+            return
+        try:
+            seconds = float(input("Seconds [1]: ").strip() or 1)
+        except ValueError:
+            seconds = 1.0
+        ok, message = self.engine.note_on(device_id, note)
+        if not ok:
+            print("✗ " + message)
+            return
+        time.sleep(seconds)
+        self.engine.note_off(device_id, note)
+        print(f"✓ Played note {note} for {seconds:g} s")
+
     def run_interactive_mode(self):
         """Run interactive CLI mode"""
         if not self.initialize_engine():
@@ -767,6 +898,18 @@ class AudioEngineCLI:
                     self.enable_logging()
                 elif command == "logstats":
                     self.show_log_stats()
+                elif command == "plugins":
+                    self.list_plugins()
+                elif command == "chain":
+                    self.show_chain()
+                elif command == "effect":
+                    self.add_effect()
+                elif command == "param":
+                    self.set_effect_parameter()
+                elif command == "instrument":
+                    self.add_instrument()
+                elif command == "note":
+                    self.play_note()
                 elif command == "help":
                     print("\n" + "="*60)
                     print("ToneSphere CLI Commands")
@@ -792,6 +935,13 @@ class AudioEngineCLI:
                     print("  connect      - Connect to remote instance (TCP)")
                     print("  netsend      - Stream a device/bus to the network")
                     print("  netudp       - Realtime UDP transport, peers and receive")
+                    print("\nPlugins and Effects (Windows):")
+                    print("  plugins      - List VST3 plugins, with why any is unusable")
+                    print("  chain        - Show a device's or bus's effects")
+                    print("  effect       - Add a built-in effect or a VST3 plugin")
+                    print("  param        - Set an effect's parameter")
+                    print("  instrument   - Add a VST3 instrument on a bus of its own")
+                    print("  note         - Play a note on an instrument")
                     print("\nMonitoring:")
                     print("  performance  - Show performance stats")
                     print("  logging      - Enable file logging")

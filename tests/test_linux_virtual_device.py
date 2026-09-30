@@ -23,35 +23,25 @@ Track 1:
   to prove the OS-level behaviour anywhere but there.
 """
 
-import math
 import subprocess
 import sys
 
 import numpy as np
 import pytest
 
+from tests.signals import dominant_frequency, sine
+
 RATE = 48000
 BLOCK = 256
 
 
-def sine(frames: int, freq: float = 1000.0, rate: int = RATE,
-         amplitude: float = 0.5, channels: int = 2, phase: float = 0.0) -> np.ndarray:
-    """Same tone helper as `tests/test_engine_audio.py` and `tests/test_process_capture.py`."""
-    t = (np.arange(frames, dtype=np.float64) + phase) / rate
-    wave = (amplitude * np.sin(2.0 * math.pi * freq * t)).astype(np.float32)
-    return np.repeat(wave.reshape(-1, 1), channels, axis=1)
-
-
-def dominant_frequency(block: np.ndarray, rate: int = RATE) -> float:
-    mono = block[:, 0] if block.ndim > 1 else block
-    spectrum = np.abs(np.fft.rfft(mono * np.hanning(len(mono))))
-    return float(np.fft.rfftfreq(len(mono), 1.0 / rate)[int(np.argmax(spectrum))])
-
-
-def _run(coroutine):
-    """Call a REST endpoint function directly, the same shortcut `test_process_capture.py` uses."""
-    import asyncio
-    return asyncio.run(coroutine)
+def _run(result):
+    """
+    An endpoint called directly. The endpoints are plain functions FastAPI runs in its
+    threadpool, so the call has already happened; calling them directly skips the lifespan
+    hook, which would open real streams on a machine that may not have any.
+    """
+    return result
 
 
 class TestPlatformGuardIsHonest:
@@ -227,8 +217,14 @@ class TestOriginLabelling:
         if not devices:
             pytest.skip("no enumerated devices on this machine")
 
+        from tonesphere.core.engine import LOOPBACK_ID_BASE
+
         for entry in devices:
-            if entry["id"] not in engine._system_virtual_devices:
+            if entry["id"] >= LOOPBACK_ID_BASE:
+                # An output's whole-system loopback: a source ToneSphere derives from the
+                # hardware, and labelled as that, not as another piece of hardware.
+                assert entry["origin"] == "loopback" and entry["name"].endswith("(loopback)")
+            elif entry["id"] not in engine._system_virtual_devices:
                 assert entry["origin"] == "hardware"
 
 
@@ -412,3 +408,103 @@ class TestRealLinuxSink:
         assert handle.sink_name not in self._pactl_sink_names(), (
             "pactl still lists the sink after teardown"
         )
+
+
+@pytest.mark.linux_virtual_sink
+@pytest.mark.skipif(sys.platform != "linux", reason="needs Linux with a PulseAudio/PipeWire server")
+class TestRealLinuxBusRouting:
+    """
+    Device -> bus -> device on the PortAudio host, through a real sound server.
+
+    Two null sinks, A and B. PulseAudio's default source is A's monitor and its default
+    sink is B, so PortAudio's `pulse` device reads A and plays into B. Another program
+    (`pacat`) plays 1 kHz into A, and `parec` records B's monitor. ToneSphere routes the
+    `pulse` input through a bus as wide as the device to its output, at a route gain of
+    0.5: the tone must come out of B at its frequency and at exactly half its level. (A bus
+    narrower than the device would lose the channels PulseAudio up-mixed the stereo source
+    into, and its down-mix would read that as a level change.) One engine per process: the
+    ALSA bridge to PulseAudio under WSL stalls a second stream opened on `pulse` by the same
+    process for about two seconds, whichever route it carries. Before the PortAudio host's
+    buses rendered, this route was silent.
+    """
+
+    def _pactl(self, *args: str) -> str:
+        result = subprocess.run(["pactl", *args], capture_output=True, text=True, timeout=10)
+        assert result.returncode == 0, f"pactl {' '.join(args)}: {result.stderr}"
+        return result.stdout.strip()
+
+    def _through(self, through_bus: bool) -> np.ndarray:
+        import threading
+        import time
+
+        from tonesphere.core.engine import AudioEngine
+
+        engine = AudioEngine(sample_rate=RATE, buffer_size=BLOCK, exclusive=False, host_backend='portaudio')
+        engine.initialize()
+        recorder = None
+        recorded: list[bytes] = []
+        try:
+            pulse = [d for d in engine.get_devices() if d['name'] in ('pulse', 'pulse (In)', 'pulse (Out)')]
+            if len({d['direction'] for d in pulse}) < 2:
+                pytest.skip("PortAudio has no duplex 'pulse' device here (libasound2-plugins missing?)")
+            pulse_id = pulse[0]['id']
+            if through_bus:
+                # As wide as the device: the bus then changes nothing PulseAudio up- or down-mixes.
+                bus = engine.create_virtual_input("through", channels=min(pulse[0]['channels'], 8))
+                assert engine.create_routing(pulse_id, bus)[0]
+                assert engine.create_routing(bus, pulse_id, 0.5)[0]
+            else:
+                assert engine.create_routing(pulse_id, pulse_id, 0.5)[0]
+            engine.start_engine()
+            assert engine.host.is_running, engine.get_performance_stats()['problems']
+
+            raw = ["--format=float32le", "--rate=48000", "--channels=2", "--raw"]
+            recorder = subprocess.Popen(["parec", "--device=ts_b.monitor", *raw], stdout=subprocess.PIPE)
+            # Read as it records: a pipe holds 64 KB, about 8000 frames, and a recorder
+            # blocked on a full pipe stops recording.
+            reader = threading.Thread(target=lambda: recorded.extend(iter(lambda: recorder.stdout.read(8192), b'')),
+                                      daemon=True)
+            reader.start()
+            player = subprocess.Popen(["pacat", "--playback", "--device=ts_a", *raw], stdin=subprocess.PIPE)
+            player.stdin.write(sine(RATE * 3, amplitude=0.5).astype('<f4').tobytes())
+            player.stdin.close()
+            player.wait(timeout=10)
+            time.sleep(0.5)
+        finally:
+            if recorder is not None:
+                recorder.terminate()
+            engine.cleanup()
+        reader.join(5)
+        data = b''.join(recorded)
+        audio = np.frombuffer(data[:len(data) // 8 * 8], dtype='<f4').reshape(-1, 2)
+        loud = np.nonzero(np.abs(audio[:, 0]) > 0.005)[0]
+        assert len(loud) > RATE, f"B carried {len(loud)} loud frames: nothing came through"
+        return audio[loud[0] + RATE // 4: loud[0] + RATE // 4 + 8192, 0]
+
+    def test_a_device_through_a_bus_to_a_device(self):
+        previous_sink = self._pactl("get-default-sink")
+        previous_source = self._pactl("get-default-source")
+        modules = [self._pactl("load-module", "module-null-sink", f"sink_name=ts_{n}",
+                               f"sink_properties=device.description=ts_{n}") for n in ("a", "b")]
+        try:
+            self._pactl("set-default-source", "ts_a.monitor")
+            self._pactl("set-default-sink", "ts_b")
+            bused = self._through(through_bus=True)
+        finally:
+            for module in modules:
+                self._pactl("unload-module", module)
+            # PulseAudio's placeholder sink (auto_null, all a CI runner has) goes away while a
+            # real sink is loaded and comes back by itself: a default is restored only if it
+            # still exists to be restored.
+            for kind, previous in (("sink", previous_sink), ("source", previous_source)):
+                listed = [line.split("\t")[1] for line in self._pactl("list", "short", f"{kind}s").splitlines()
+                          if line.strip()]
+                if previous in listed:
+                    self._pactl(f"set-default-{kind}", previous)
+
+        level = float(np.sqrt((bused ** 2).mean()))
+        expected = 0.5 * 0.5 / np.sqrt(2)   # the tone's rms, times the route gain out of the bus
+        print(f"\npulse -> bus -> pulse: {dominant_frequency(bused):.1f} Hz, rms {level:.4f} "
+              f"({20 * np.log10(level / expected):+.2f} dB from the {expected:.4f} expected)")
+        assert dominant_frequency(bused) == pytest.approx(1000.0, abs=30.0)
+        assert abs(20 * np.log10(level / expected)) < 0.5

@@ -10,18 +10,13 @@ import math
 import numpy as np
 import pytest
 
+from tests.signals import sine
 from tonesphere.engine.devices import DeviceInfo, HostApi
 from tonesphere.engine.graph import Connection, RoutingGraph, bus_node
 from tonesphere.engine.host import AudioHost, StreamConfig, _DeviceStream
 
 BLOCK = 256
 RATE = 48000
-
-
-def sine(frames, freq=1000.0, amplitude=0.5, channels=2, phase=0.0):
-    t = (np.arange(frames, dtype=np.float64) + phase) / RATE
-    wave = (amplitude * np.sin(2.0 * math.pi * freq * t)).astype(np.float32)
-    return np.repeat(wave.reshape(-1, 1), channels, axis=1)
 
 
 def fake_device(name="test", inputs=0, outputs=2):
@@ -288,3 +283,103 @@ class TestDriftResamplingIsWiredUp:
         host._rebuild_routes()
 
         assert not host._routes.resamplers, "a single clock needs no drift correction"
+
+
+def _bus_rig(*routes, buses=('B',)):
+    """A host with a capture stream 'mic', an output 'spk', and the buses and routes given."""
+    from tonesphere.engine.graph import device_node
+
+    host = AudioHost(samplerate=RATE, blocksize=BLOCK)
+    for name in buses:
+        host.create_bus(name, channels=2)
+    mic = _DeviceStream(StreamConfig(
+        device=fake_device('mic', inputs=2, outputs=0),
+        samplerate=RATE, blocksize=BLOCK, input_channels=2,
+    ))
+    mic.node = device_node('mic')
+    # Registered, as start() registers a stream: its width is how the host sizes its rings.
+    host._streams['mic'] = mic
+    speaker = sink_stream(2, node=device_node('spk'))
+    host.graph_holder.commit(RoutingGraph(connections=tuple(routes)))
+    host._rebuild_routes()
+    return host, mic, speaker
+
+
+def _run(host, mic, speaker, blocks=20, tone=None):
+    out = np.zeros((BLOCK, 2), dtype=np.float32)
+    captured = []
+    for i in range(blocks):
+        block = sine(BLOCK, phase=i * BLOCK) if tone is None else tone(i)
+        host._publish_capture(str(mic.node), block, mic)
+        host._mix_into(speaker, out, BLOCK)
+        captured.append(out.copy())
+    return np.concatenate(captured[4:])
+
+
+def test_device_to_bus_to_device_carries_the_signal():
+    """
+    Was a strict xfail: the PortAudio host had no bus render stage, so a device's audio
+    went into a bus's ring and nothing ever took it out. The output that consumes a bus is
+    now its clock, and renders it when its ring is short.
+    """
+    from tests.signals import dominant_frequency, rms
+    from tonesphere.engine.graph import device_node
+
+    host, mic, speaker = _bus_rig(Connection(device_node('mic'), bus_node('B')),
+                                  Connection(bus_node('B'), device_node('spk')))
+    received = _run(host, mic, speaker)
+
+    assert rms(received) == pytest.approx(rms(sine(BLOCK)), rel=0.01)
+    assert dominant_frequency(received) == pytest.approx(1000.0, abs=20.0)
+
+
+def test_a_chain_of_buses_carries_the_signal_with_each_routes_gain():
+    from tests.signals import dominant_frequency, rms
+    from tonesphere.engine.graph import device_node
+
+    host, mic, speaker = _bus_rig(Connection(device_node('mic'), bus_node('A')),
+                                  Connection(bus_node('A'), bus_node('B'), gain=0.5),
+                                  Connection(bus_node('B'), device_node('spk')), buses=('A', 'B'))
+    received = _run(host, mic, speaker)
+
+    assert rms(received) == pytest.approx(0.5 * rms(sine(BLOCK)), rel=0.01)
+    assert dominant_frequency(received) == pytest.approx(1000.0, abs=20.0)
+
+
+def test_a_bus_sums_a_device_and_a_python_producer():
+    """The mic at 1 kHz and a tone written into the same bus at 440 Hz: both come out, summed."""
+    from tests.signals import dominant_frequency
+    from tonesphere.engine.graph import device_node
+
+    host, mic, speaker = _bus_rig(Connection(device_node('mic'), bus_node('B')),
+                                  Connection(bus_node('B'), device_node('spk')))
+    out = np.zeros((BLOCK, 2), dtype=np.float32)
+    captured = []
+    for i in range(24):
+        host.write_bus('B', sine(BLOCK, freq=440.0, phase=i * BLOCK, amplitude=0.3))
+        host._publish_capture(str(mic.node), sine(BLOCK, phase=i * BLOCK, amplitude=0.3), mic)
+        host._mix_into(speaker, out, BLOCK)
+        captured.append(out.copy())
+    received = np.concatenate(captured[4:])[:, 0]
+    spectrum = np.abs(np.fft.rfft(received * np.hanning(len(received))))
+    freqs = np.fft.rfftfreq(len(received), 1 / RATE)
+    near = lambda f: spectrum[np.argmin(np.abs(freqs - f))]   # noqa: E731
+    assert near(440.0) > 0.5 * near(1000.0) and near(1000.0) > 0.5 * near(440.0), "both sources, summed"
+    assert dominant_frequency(received) in (pytest.approx(440.0, abs=20.0), pytest.approx(1000.0, abs=20.0))
+
+
+def test_a_bus_nothing_clocks_still_forwards_what_is_written():
+    """Bus to bus with no device at all: pushed through as it arrives, as before."""
+    host = AudioHost(samplerate=RATE, blocksize=BLOCK)
+    host.create_bus('A', channels=2)
+    host.create_bus('B', channels=2)
+    host.create_bus('C', channels=2)
+    host.graph_holder.commit(RoutingGraph(connections=(
+        Connection(bus_node('A'), bus_node('B')),
+        Connection(bus_node('B'), bus_node('C')),
+    )))
+    host._rebuild_routes()
+    tone = sine(BLOCK)
+    assert host.write_bus('A', tone) == BLOCK
+    out = host.read_route(str(bus_node('B')), str(bus_node('C')), BLOCK)
+    np.testing.assert_allclose(out, tone, atol=1e-6)

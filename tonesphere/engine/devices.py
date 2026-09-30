@@ -85,10 +85,24 @@ class DeviceInfo:
     is_default_input: bool = False
     is_default_output: bool = False
     supported_samplerates: tuple[int, ...] = field(default_factory=tuple)
+    # The MMDevice endpoint ID (or ASIO driver name) when the native engine enumerated
+    # this device: stable across reboots, renames and replugging, unlike a name.
+    endpoint_id: str | None = None
 
     @property
     def key(self) -> str:
-        """Stable-ish identifier for configs: survives reindexing, not renaming."""
+        """
+        Identifier for configs. With an endpoint ID it survives renaming too; without one
+        (PortAudio on Linux/macOS) it is the host-API-qualified name, which survives
+        reindexing but not renaming.
+        """
+        if self.endpoint_id:
+            return f"{self.host_api_name}::{self.endpoint_id}"
+        return self.name_key
+
+    @property
+    def name_key(self) -> str:
+        """The name-based key every earlier version persisted, kept so old presets still resolve."""
         return f"{self.host_api_name}::{self.name}"
 
     @property
@@ -282,7 +296,7 @@ def find_device(key_or_index, devices: list[DeviceInfo] | None = None) -> Device
         return None
 
     for device in devices:
-        if device.key == key_or_index:
+        if device.key == key_or_index or device.name_key == key_or_index:
             return device
 
     # Fall back to a name match so a config survives the host API being renamed.

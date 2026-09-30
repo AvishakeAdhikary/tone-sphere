@@ -33,11 +33,13 @@ import pytest
 PLUGIN_SOURCE = Path(__file__).resolve().parents[1] / "native" / "coreaudio-plugin"
 
 
-def _run(coroutine):
-    """Call a REST endpoint function directly, the same shortcut the sibling tests use."""
-    import asyncio
-
-    return asyncio.run(coroutine)
+def _run(result):
+    """
+    An endpoint called directly. The endpoints are plain functions FastAPI runs in its
+    threadpool, so the call has already happened; calling them directly skips the lifespan
+    hook, which would open real streams on a machine that may not have any.
+    """
+    return result
 
 
 class TestConstantsMatchTheCPlugin:
@@ -289,8 +291,11 @@ class TestOriginLabelling:
         if not devices:
             pytest.skip("no enumerated devices on this machine")
 
-        assert all(d["origin"] == "hardware" for d in devices
+        # Loopback sources (Windows) are derived from hardware and say so; they are not ours either.
+        assert all(d["origin"] in ("hardware", "loopback") for d in devices
                    if d["id"] not in engine._system_virtual_devices)
+        assert not any(d["origin"] == "os_virtual_endpoint" for d in devices
+                       if d["id"] not in engine._system_virtual_devices)
 
 
 class TestExposureIsActuallyWired:

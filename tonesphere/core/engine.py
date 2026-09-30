@@ -29,7 +29,6 @@ from tonesphere.core.models import DeviceType
 from tonesphere.core.routing import AudioRoutingMatrix
 from tonesphere.engine import (
     AudioBackendUnavailable,
-    AudioHost,
     Connection,
     DeviceInfo,
     HostApi,
@@ -39,14 +38,18 @@ from tonesphere.engine import (
     device_node,
     enumerate_devices,
     linear_to_db,
+    loopback_node,
     network_node,
     preferred_host_api,
 )
+from tonesphere.engine.native_host import make_host
+from tonesphere.native import NativeError
 from tonesphere.network.audio_router import NetworkAudioRouter, NetworkQuality
 from tonesphere.network.jitter_buffer import JitterBuffer
 from tonesphere.network.send_worker import NetworkSendWorker
-from tonesphere.network.udp_transport import MalformedPacket, UdpAudioTransport
+from tonesphere.network.udp_transport import CODEC_OPUS, MalformedPacket, UdpAudioTransport
 from tonesphere.utils.logger import get_logger
+from tonesphere.utils.threads import synchronized
 
 logger = get_logger(__name__)
 
@@ -58,13 +61,27 @@ BUS_ID_BASE = 10000
 # pointing at a different kind of thing than it did.
 NETWORK_ID_BASE = 20000
 
+# Whole-system loopback sources: the loopback of output device N is LOOPBACK_ID_BASE + N, so
+# it follows its device's id and never collides with the other ranges.
+LOOPBACK_ID_BASE = 30000
+
 # Default port for the UDP transport. One above the TCP router's 9001, so the two can run
 # side by side on one machine without either having to be reconfigured.
 DEFAULT_UDP_PORT = 9002
 
 
+# write_to_bus is the data path of network playout and process-capture threads, which are
+# joined under the control lock when they stop; it reaches only the host, whose own lock
+# covers it.
+@synchronized(unlocked=('write_to_bus',))
 class AudioEngine:
-    """Routing engine over real audio hardware."""
+    """
+    Routing engine over real audio hardware.
+
+    Thread-safe: every public method runs under one control lock (`utils.threads`), so the
+    UI's worker thread, the REST API's threadpool, the CLI and the network threads can all
+    call it at once. None of them is the audio thread.
+    """
 
     def __init__(
         self,
@@ -74,24 +91,22 @@ class AudioEngine:
         max_virtual_inputs: int = 10,
         max_virtual_outputs: int = 10,
         exclusive: bool = True,
+        host_backend: str | None = None,
     ):
         self.sample_rate = sample_rate
         self.buffer_size = buffer_size
         self.max_virtual_inputs = max_virtual_inputs
         self.max_virtual_outputs = max_virtual_outputs
 
-        self.host = AudioHost(
-            samplerate=sample_rate,
-            blocksize=buffer_size,
-            host_api=preferred_driver,
-            exclusive=exclusive,
-        )
+        # The native engine on Windows (no Python on the audio thread), the PortAudio host
+        # elsewhere; `get_performance_stats()['backend']` says which.
+        self.host = make_host(sample_rate, buffer_size, preferred_driver, exclusive, host_backend)
 
         # Kept from the previous implementation: these state models were always sound,
         # they were simply never connected to any audio.
         self.routing_matrix = AudioRoutingMatrix()
         self.channel_control_manager = ChannelControlManager()
-        self.network_router = NetworkAudioRouter(quality=NetworkQuality.HIGH)
+        self.network_router = NetworkAudioRouter(quality=NetworkQuality.HIGH, sample_rate=sample_rate)
 
         # Both transports live at once rather than one replacing the other: TCP is right
         # for a bulk feed that must not lose a sample and can afford buffering, UDP for
@@ -103,6 +118,7 @@ class AudioEngine:
 
         # Id bookkeeping.
         self._devices: list[DeviceInfo] = []
+        self._round_trip: dict[str, Any] | None = None
         self._id_to_node: dict[int, Any] = {}
         self._node_to_id: dict[str, int] = {}
         self._device_by_id: dict[int, DeviceInfo] = {}
@@ -115,7 +131,9 @@ class AudioEngine:
         self._network_sinks: dict[int, dict[str, Any]] = {}
         self._next_network_id = NETWORK_ID_BASE
         self._send_worker: NetworkSendWorker | None = None
+        self._tcp_send_worker: NetworkSendWorker | None = None
         self._udp_receives: dict[int, dict[str, Any]] = {}
+        self._tcp_receives: dict[int, dict[str, int]] = {}
 
         # OS-level virtual endpoints: Linux null-sinks (Track 2) and the macOS CoreAudio
         # HAL device (Track 3). Both are, once they exist, ordinary PortAudio devices —
@@ -132,6 +150,9 @@ class AudioEngine:
         self._system_virtual_devices: dict[int, dict[str, Any]] = {}
 
         self._lock = threading.RLock()
+        self._monitor = None
+        self._midi_inputs: dict[int, Any] = {}
+        self._device_change: dict[str, Any] | None = None
         self._initialized = False
         self._started = False
         self._backend_error: str | None = None
@@ -145,9 +166,9 @@ class AudioEngine:
         """Enumerate hardware and pick a backend. Does not open any stream."""
         with self._lock:
             try:
-                self._devices = enumerate_devices()
+                self._devices = self._enumerate()
                 self._backend_error = None
-            except AudioBackendUnavailable as e:
+            except (AudioBackendUnavailable, NativeError) as e:
                 # A missing PortAudio is a real, reportable condition, not something to
                 # paper over with an empty device list that looks like "no hardware".
                 self._backend_error = str(e)
@@ -166,6 +187,7 @@ class AudioEngine:
                 channels = max(device.max_input_channels, device.max_output_channels)
                 self.channel_control_manager.add_device(device_id, channels)
 
+            self._start_device_monitor()
             self._initialized = True
             api = self.host.host_api.value if self.host.host_api else 'none'
             logger.info(f"Engine initialized: {len(self._devices)} devices, {api}")
@@ -198,7 +220,7 @@ class AudioEngine:
 
             graph = self._build_graph()
 
-            if not any(node.kind == 'device' for node in graph.nodes()):
+            if not self._needs_host(graph):
                 self._problems = []
                 logger.info("Engine started with no hardware routes — nothing to open")
                 return
@@ -259,8 +281,8 @@ class AudioEngine:
             return True, f"{source.name} -> {dest.name}{suffix}"
 
     def stop_engine(self):
-        # Outside the lock: stopping a capture joins its thread, and no other caller
-        # should be blocked behind that.
+        # A capture thread writes through `write_to_bus`, which never takes this lock, so
+        # joining it here cannot wait on anything this thread holds.
         self._stop_all_process_captures()
 
         with self._lock:
@@ -272,7 +294,14 @@ class AudioEngine:
         return self.host.is_running
 
     def cleanup(self):
+        if self._monitor is not None:
+            # It waits for this lock in short attempts that watch for stop, so stopping it
+            # while holding the lock ends it rather than deadlocking with it.
+            self._monitor.stop()
+            self._monitor = None
         self._stop_all_process_captures()
+        for port in list(self._midi_inputs):
+            self.disconnect_midi_input(port)
 
         with self._lock:
             # Network threads are torn down here rather than in `stop_engine()`, because
@@ -280,6 +309,8 @@ class AudioEngine:
             # have its stream dropped by one. `cleanup()` is the terminal call, so nothing
             # is left running past it.
             self.stop_udp_transport()
+            if self._tcp_send_worker is not None:
+                self._tcp_send_worker.stop()
             self.network_router.stop_server()
 
             # Same reasoning as the network transports: a Linux virtual sink is an
@@ -324,6 +355,17 @@ class AudioEngine:
             self._node_to_id[node_key] = device_id
             self._device_by_id[device_id] = device
 
+            if device.can_output and getattr(self.host, 'supports_loopback', False):
+                loop = loopback_node(device.key)
+                self._id_to_node[LOOPBACK_ID_BASE + device_id] = loop
+                self._node_to_id[str(loop)] = LOOPBACK_ID_BASE + device_id
+
+    def _enumerate(self) -> list[DeviceInfo]:
+        """The host's own device list: MMDevice/ASIO for the native host, PortAudio otherwise."""
+        if hasattr(self.host, 'enumerate'):
+            return self.host.enumerate()
+        return enumerate_devices()
+
     def _node_for(self, device_id: int):
         return self._id_to_node.get(device_id)
 
@@ -341,8 +383,8 @@ class AudioEngine:
         """
         with self._lock:
             try:
-                self._devices = enumerate_devices()
-            except AudioBackendUnavailable as e:
+                self._devices = self._enumerate()
+            except (AudioBackendUnavailable, NativeError) as e:
                 self._backend_error = str(e)
                 return False
 
@@ -367,6 +409,71 @@ class AudioEngine:
             logger.info(f"Refreshed: {len(self._devices)} devices")
             return True
 
+    # --- Devices that come and go ---
+
+    def _start_device_monitor(self):
+        """Windows' endpoint notifications, on the native WASAPI host; nothing elsewhere."""
+        if self._monitor is not None or getattr(self.host, 'backend', None) != 'native':
+            return
+        from tonesphere.engine.device_monitor import DeviceMonitor
+
+        monitor = DeviceMonitor(self._reconcile_devices, self._lock)
+        try:
+            monitor.start()
+        except NativeError as e:
+            logger.warning(f"Device notifications unavailable; changes need a manual Rescan: {e}")
+            return
+        self._monitor = monitor
+
+    def handle_device_change(self) -> dict[str, Any]:
+        """Re-enumerate now and reopen what changed, as the monitor does on a notification."""
+        return self._reconcile_devices([])
+
+    def _reconcile_devices(self, events: list[dict]) -> dict[str, Any]:
+        """
+        Called with the lock held, after Windows reported devices arriving, leaving or
+        changing state. Re-enumerates; then, if the engine was started and a device its
+        routing uses left, arrived, or has a failed stream, restarts it with the devices
+        present now. A route to a missing device is kept, not deleted: when the device
+        returns, the restart picks it up under the same id.
+
+        The native backend opens and closes its streams together, so a restart is a gap of
+        a few blocks on every device, not only the one that changed.
+        """
+        before = {d.key: d.name for d in self._devices}
+        failed = self.host.failed_streams() if self.host.is_running else {}
+        if not self.refresh_devices():
+            change = {'arrived': [], 'left': [], 'failed': failed, 'reopened': False,
+                      'error': self._backend_error}
+        else:
+            after = {d.key: d.name for d in self._devices}
+            used = {node.ref for c in self._build_graph().connections for node in (c.source, c.dest)
+                    if node.kind == 'device'}
+            arrived = sorted(after.keys() - before.keys())
+            left = sorted(before.keys() - after.keys())
+            touched = used & (set(arrived) | set(left) | set(failed))
+            reopened = False
+            if self._started and touched:
+                self.host.stop()
+                self.start_engine()
+                reopened = True
+                logger.info(f"Reopened after a device change: {sorted(touched)}")
+            change = {'arrived': [after[k] for k in arrived], 'left': [before[k] for k in left],
+                      'failed': failed, 'reopened': reopened, 'error': None,
+                      'still_failed': self.host.failed_streams() if self.host.is_running else {}}
+        # A reconcile that found nothing (the monitor's echo of a change already handled, say)
+        # leaves the last real change standing, for the status bar and anyone waiting on it.
+        happened = change['arrived'] or change['left'] or change['failed'] or change['reopened'] or change['error']
+        serial = (self._device_change or {}).get('serial', 0) + (1 if happened else 0)
+        record = {**change, 'serial': serial, 'at': time.time(), 'events': len(events)}
+        if happened:
+            self._device_change = record
+        return dict(record)
+
+    def last_device_change(self) -> dict[str, Any] | None:
+        """What the last reconcile found, with a serial the UI compares to notice a new one."""
+        return dict(self._device_change) if self._device_change else None
+
     def get_devices(self, include_all_backends: bool = False) -> list[dict]:
         """
         Routable endpoints on the active backend.
@@ -378,9 +485,10 @@ class AudioEngine:
         audio application picks a driver first, then its devices; `include_all_backends`
         is there for a settings screen that wants to offer the choice.
 
-        `latency_ms` is what the driver reports for the device. It is not
-        `measured_latency_ms` from the engine statistics — that is what the open stream
-        actually achieved, and the two differ substantially.
+        `latency_ms` is what the driver reports for the device before a stream is open.
+        It is not `reported_latency_ms` from the engine statistics — that is what the
+        open stream reports once running, plus plugin latency — and neither is a
+        measurement.
 
         `origin` says what actually put this endpoint here — `'hardware'`, an in-process
         `'in_process_bus'`, or an OS-level `'os_virtual_endpoint'` (a Linux sink from
@@ -434,6 +542,26 @@ class AudioEngine:
                         'supports_exclusive': device.supports_exclusive,
                         'direction': 'output',
                         'origin': origin,
+                    })
+
+            if getattr(self.host, 'supports_loopback', False):
+                for device_id, device in sorted(self._device_by_id.items()):
+                    if not device.can_output or (not include_all_backends and active_api is not None
+                                                 and device.host_api != active_api):
+                        continue
+                    devices.append({
+                        'id': LOOPBACK_ID_BASE + device_id,
+                        'name': f"{device.name} (loopback)",
+                        'type': DeviceType.PHYSICAL_INPUT.value,
+                        'channels': device.max_output_channels,
+                        'sample_rate': device.default_samplerate,
+                        'is_asio': False,
+                        'is_active': self.host.is_running,
+                        'latency_ms': device.default_low_output_latency_ms,
+                        'host_api': device.host_api_name,
+                        'supports_exclusive': False,
+                        'direction': 'input',
+                        'origin': 'loopback',
                     })
 
             for bus_id, meta in sorted(self._bus_meta.items()):
@@ -1030,6 +1158,8 @@ class AudioEngine:
                 return False, f"Unknown source device {source_id}"
             if dest is None:
                 return False, f"Unknown destination device {destination_id}"
+            if dest.kind == 'loopback':
+                return False, "A loopback is a source: it records what its output plays"
 
             if self.host.graph_holder.current().would_feedback(source, dest):
                 return False, "Refused: this would create a feedback loop"
@@ -1053,6 +1183,17 @@ class AudioEngine:
                 return True, f"{message} ({problems[0]})"
 
             return True, message
+
+    def _needs_host(self, graph: RoutingGraph) -> bool:
+        """
+        Whether this routing needs the host running. The PortAudio host moves bus and
+        network audio without any stream, because Python writes straight into its rings;
+        only a device needs one. The native engine runs nothing unless something clocks
+        it, so any route at all needs it running (from a device, or from its own timer).
+        """
+        if getattr(self.host, 'backend', 'portaudio') == 'native':
+            return bool(graph.connections)
+        return any(node.kind == 'device' for node in graph.nodes())
 
     def _route_is_dead(self, source, dest) -> bool:
         """Whether either end of a route failed to open a stream."""
@@ -1121,9 +1262,7 @@ class AudioEngine:
         # and network sinks is a complete, working configuration — it moves audio through
         # ring buffers and a socket — and trying to open streams for it would report
         # "route something to a device first" about a route that already exists.
-        needs_streams = self._started and any(
-            node.kind == 'device' for node in graph.nodes()
-        )
+        needs_streams = self._started and self._needs_host(graph)
         must_reconfigure = bool(problems) and self.host.is_running
 
         if needs_streams and (must_reconfigure or not self.host.is_running):
@@ -1216,6 +1355,11 @@ class AudioEngine:
         self.channel_control_manager.swap_device_channels(device_id)
         self.apply_channel_controls(device_id)
 
+    def set_master_volume(self, volume: float) -> list[str]:
+        """The master gain, published to the running graph at once."""
+        self.master_volume = max(0.0, float(volume))
+        return self._publish_graph()
+
     def set_device_master_volume(self, device_id: int, volume: float):
         self.channel_control_manager.set_device_master_volume(device_id, volume)
         self.apply_channel_controls(device_id)
@@ -1224,69 +1368,261 @@ class AudioEngine:
         self.channel_control_manager.set_device_master_mute(device_id, muted)
         self.apply_channel_controls(device_id)
 
-    # --- Inserts (EQ, dynamics, plugins) ---
+    # --- Inserts (EQ, dynamics) ---
 
     def get_inserts(self, device_id: int, is_input: bool = True):
         """
-        The insert chain for a device, or None if it has no open stream.
-
-        None is normal while stopped. Inserts belong to a stream, so they exist only once
-        that stream is open; configuration should be reapplied after a restart.
+        The PortAudio host's Python effect chain for a device side, or None. On the native
+        host the chain is `list_inserts`.
         """
         node = self._node_for(device_id)
-        if node is None or node.kind != 'device':
+        if node is None or node.kind != 'device' or not hasattr(self.host, 'inserts_for'):
             return None
         return self.host.inserts_for(node.ref, is_input)
 
-    def load_plugin(self, device_id: int, path: str, is_input: bool = True) -> tuple[bool, str]:
-        """
-        Load a VST3/AU plugin onto a device's insert chain.
+    # --- Insert chains: built-in effects and VST3 plugins (the native engine) ---
 
-        This is the feature the project exists for: rather than paying for a separate
-        router to get a guitar into Guitar Rig, load Guitar Rig here and monitor through it
-        on the same low-latency path.
-        """
-        inserts = self.get_inserts(device_id, is_input)
-        if inserts is None:
-            return False, "Device has no open stream — start the engine and patch it first"
+    def _chain_node(self, device_id: int):
+        """The graph node whose chain `device_id` names, or (None, why not)."""
+        node = self._node_for(device_id)
+        if node is None or node.kind not in ('device', 'bus'):
+            return None, f"Unknown device or bus {device_id}"
+        if not hasattr(self.host, 'chain_for'):
+            return None, "Effect chains need the native engine (Windows)"
+        return node, ""
 
+    def _chain(self, device_id: int, is_input: bool) -> list:
+        node, _ = self._chain_node(device_id)
+        return self.host.chain_for(node, is_input) if node is not None else []
+
+    def scan_plugins(self, paths: list[str] | None = None) -> list:
+        """
+        Scan VST3 folders (the standard ones by default), each module in a subprocess, with
+        results cached by file size and time. Returns `plugins.scan.ScanResult`s, broken
+        and incompatible modules included, each with its reason.
+        """
+        from tonesphere.plugins import scan
+        from tonesphere.utils.paths import app_data_dir
+
+        cache = scan.ScanCache(app_data_dir() / 'plugin_cache.json')
+        return scan.scan(paths, cache)
+
+    def add_plugin(self, device_id: int, info, is_input: bool = True) -> tuple[bool, str]:
+        """Open a scanned plugin (`plugins.PluginInfo`) at the end of a device side's or bus's chain."""
+        from tonesphere.plugins import PluginError
+
+        node, problem = self._chain_node(device_id)
+        if node is None:
+            return False, problem
         try:
-            if inserts.plugins is None:
-                inserts.enable_plugins()
-            index = inserts.plugins.load(path)
-        except Exception as e:
+            index = self.host.add_plugin(node, is_input, info)
+        except (PluginError, ValueError, NativeError) as e:
             return False, str(e)
+        latency = self.host.chain_for(node, is_input)[index].latency_samples
+        note = f" (+{latency} samples latency, reported by the plugin)" if latency else ""
+        return True, f"Loaded {info.name}{note}"
 
-        latency = self.host.total_plugin_latency_ms()
-        note = f" (+{latency:.1f} ms plugin latency)" if latency > 0.05 else ""
-        return True, f"Loaded {inserts.plugins.names[index]}{note}"
+    def find_plugin(self, path: str, uid: str | None = None):
+        """
+        The scanned class at `path` (and `uid`, when the module has several): scanned in a
+        subprocess like every scan, from the cache when unchanged. None if absent or broken.
+        """
+        from pathlib import Path
 
-    def list_plugins(self, device_id: int, is_input: bool = True) -> list[dict[str, Any]]:
-        inserts = self.get_inserts(device_id, is_input)
-        if inserts is None or inserts.plugins is None:
-            return []
-        return inserts.plugins.describe()
+        for result in self.scan_plugins([str(Path(path).parent)]):
+            if Path(result.path).resolve() != Path(path).resolve():
+                continue
+            for info in result.effects:
+                if uid is None or info.uid.upper() == uid.upper():
+                    return info
+        return None
 
-    def remove_plugin(self, device_id: int, index: int, is_input: bool = True) -> bool:
-        inserts = self.get_inserts(device_id, is_input)
-        if inserts is None or inserts.plugins is None:
+    # --- Instruments and MIDI ---
+
+    def create_instrument(self, info, name: str | None = None, channels: int = 2) -> tuple[bool, str, int | None]:
+        """
+        A new bus with the instrument as its first effect: a source the patchbay routes like
+        any other, playing whatever notes it is sent. Returns (ok, message, bus id).
+        """
+        bus = self.create_virtual_input(name or info.name, channels=channels)
+        if bus is None:
+            return False, "No bus available for the instrument (limit reached)", None
+        ok, message = self.add_plugin(bus, info, is_input=False)
+        if not ok:
+            self.remove_virtual_device(bus)
+            return False, message, None
+        instance = self.insert_instance(bus, 0, False)
+        if not instance.event_inputs:
+            self.remove_virtual_device(bus)
+            return False, f"{info.name} has no event input: it does not play notes", None
+        return True, f"{info.name} is playing on bus {bus}", bus
+
+    def _instrument(self, device_id: int):
+        for is_input in (False, True):
+            for entry in self._chain(device_id, is_input):
+                if not getattr(entry, 'is_builtin', False) and entry.event_inputs > 0:
+                    return entry
+        return None
+
+    def instruments(self) -> list[dict[str, Any]]:
+        """Every bus or device side carrying an instrument, and which one."""
+        out = []
+        for device_id in list(self._bus_meta) + list(self._device_by_id):
+            entry = self._instrument(device_id)
+            if entry is not None:
+                name = self._bus_meta[device_id]['name'] if device_id in self._bus_meta else \
+                    self._device_by_id[device_id].name
+                out.append({'id': device_id, 'name': name, 'instrument': entry.info.name,
+                            'vendor': entry.info.vendor})
+        return out
+
+    def send_midi(self, device_id: int, status: int, data1: int, data2: int = 0) -> tuple[bool, str]:
+        """One MIDI message to the first instrument in a bus's or device's chain."""
+        from tonesphere.plugins import PluginError
+
+        entry = self._instrument(device_id)
+        if entry is None:
+            return False, f"No instrument on {device_id}"
+        try:
+            entry.send_midi(status, data1, data2)
+        except PluginError as e:
+            return False, str(e)
+        return True, "sent"
+
+    def midi_inputs(self) -> list[str]:
+        """The MIDI input ports Windows lists; an index here is what `connect_midi_input` takes."""
+        from tonesphere.engine import midi_input
+
+        return midi_input.inputs()
+
+    def connect_midi_input(self, port: int, device_id: int) -> tuple[bool, str]:
+        """
+        Play the instrument on `device_id` from a MIDI port. The port's messages go straight
+        to that instrument's native queue, never through this lock, so closing the port
+        under it cannot wait on its own forwarding thread.
+        """
+        from tonesphere.engine import midi_input
+
+        entry = self._instrument(device_id)
+        if entry is None:
+            return False, f"No instrument on {device_id}"
+        self.disconnect_midi_input(port)
+        try:
+            self._midi_inputs[port] = midi_input.MidiInput(port, entry.send_midi)
+        except (OSError, IndexError) as e:
+            return False, str(e)
+        return True, f"MIDI port {port} ({self._midi_inputs[port].name}) plays {entry.info.name}"
+
+    def disconnect_midi_input(self, port: int) -> bool:
+        connection = self._midi_inputs.pop(port, None)
+        if connection is not None:
+            connection.close()
+        return connection is not None
+
+    def note_on(self, device_id: int, note: int, velocity: int = 100, channel: int = 0) -> tuple[bool, str]:
+        return self.send_midi(device_id, 0x90 | (channel & 0x0F), note, velocity)
+
+    def note_off(self, device_id: int, note: int, channel: int = 0) -> tuple[bool, str]:
+        return self.send_midi(device_id, 0x80 | (channel & 0x0F), note, 0)
+
+    def add_builtin(self, device_id: int, kind: str, is_input: bool = True,
+                    values: list[float] | None = None) -> tuple[bool, str]:
+        """Append a built-in effect ('eq', 'compressor', 'limiter', 'delay') to a chain."""
+        node, problem = self._chain_node(device_id)
+        if node is None:
+            return False, problem
+        try:
+            self.host.add_builtin(node, is_input, kind, values)
+        except (ValueError, NativeError) as e:
+            return False, str(e)
+        return True, f"Added {kind}"
+
+    def list_inserts(self, device_id: int, is_input: bool = True) -> list[dict[str, Any]]:
+        """The whole chain, in processing order: built-ins and plugins alike."""
+        out = []
+        node, _ = self._chain_node(device_id)
+        for index, entry in enumerate(self._chain(device_id, is_input)):
+            if getattr(entry, 'is_builtin', False):
+                out.append({'index': index, 'kind': 'builtin', 'type': entry.kind, 'name': entry.name,
+                            'vendor': 'ToneSphere', 'version': '', 'path': '', 'latency_samples': 0,
+                            'crashed': False, 'fault': '', 'has_editor': False, 'bypassed': entry.bypassed,
+                            'gain_reduction_db': self.host.insert_readout(node, is_input, index), 'instrument': False})
+                continue
+            status = entry.status()
+            out.append({'index': index, 'kind': 'vst3', 'type': 'vst3', 'name': entry.info.name,
+                        'vendor': entry.info.vendor, 'version': entry.info.version, 'path': entry.info.path,
+                        'latency_samples': status.latency_samples, 'crashed': status.crashed,
+                        'fault': status.fault, 'has_editor': entry.has_editor(), 'bypassed': entry.bypassed,
+                        'gain_reduction_db': None, 'instrument': entry.event_inputs > 0})
+        return out
+
+    def insert_instance(self, device_id: int, index: int, is_input: bool = True):
+        """The entry at `index`: a `BuiltinInsert` or a `PluginInstance`, each with `parameters()`."""
+        chain = self._chain(device_id, is_input)
+        return chain[index] if 0 <= index < len(chain) else None
+
+    def remove_insert(self, device_id: int, index: int, is_input: bool = True) -> bool:
+        node, _ = self._chain_node(device_id)
+        return node is not None and self.host.remove_insert(node, is_input, index)
+
+    def move_insert(self, device_id: int, index: int, to: int, is_input: bool = True) -> bool:
+        node, _ = self._chain_node(device_id)
+        return node is not None and self.host.move_insert(node, is_input, index, to)
+
+    def set_insert_bypassed(self, device_id: int, index: int, bypassed: bool, is_input: bool = True) -> bool:
+        node, _ = self._chain_node(device_id)
+        return node is not None and self.host.set_insert_bypassed(node, is_input, index, bypassed)
+
+    def set_insert_parameter(self, device_id: int, index: int, param_id: int, normalized: float,
+                             is_input: bool = True) -> bool:
+        """A normalized 0..1 value, for a built-in or a plugin alike."""
+        entry = self.insert_instance(device_id, index, is_input)
+        if entry is None:
             return False
-        inserts.plugins.remove(index)
+        if getattr(entry, 'is_builtin', False):
+            spec = entry.specs[param_id]
+            node, _ = self._chain_node(device_id)
+            self.host.set_builtin_value(node, is_input, index, param_id, spec.from_normalized(normalized))
+        else:
+            entry.set_parameter(param_id, normalized)
         return True
 
-    @staticmethod
-    def discover_plugins(paths: list[str] | None = None) -> list[str]:
-        from tonesphere.engine.effects import PluginChain
+    def set_builtin_value(self, device_id: int, index: int, param: int, value: float,
+                          is_input: bool = True) -> float | None:
+        """A built-in's parameter in its own unit (Hz, dB, ms...); the value applied, after clamping."""
+        node, _ = self._chain_node(device_id)
+        if node is None:
+            return None
+        return self.host.set_builtin_value(node, is_input, index, param, value)
 
-        return PluginChain.discover(paths)
+    # The VST3-only view the earlier API offered: indices count plugins, not built-ins.
 
-    @staticmethod
-    def plugin_hosting_available() -> bool:
-        from tonesphere.engine.effects import PluginChain
+    def _plugin_positions(self, device_id: int, is_input: bool) -> list[int]:
+        return [i for i, e in enumerate(self._chain(device_id, is_input)) if not getattr(e, 'is_builtin', False)]
 
-        return PluginChain.is_available()
+    def remove_plugin(self, device_id: int, index: int, is_input: bool = True) -> bool:
+        positions = self._plugin_positions(device_id, is_input)
+        return 0 <= index < len(positions) and self.remove_insert(device_id, positions[index], is_input)
 
-    # --- Route parameters ---
+    def plugin_instances(self, device_id: int, is_input: bool = True) -> list:
+        return [e for e in self._chain(device_id, is_input) if not getattr(e, 'is_builtin', False)]
+
+    def list_plugins(self, device_id: int, is_input: bool = True) -> list[dict[str, Any]]:
+        plugins = [e for e in self.list_inserts(device_id, is_input) if e['kind'] == 'vst3']
+        return [{**e, 'index': i} for i, e in enumerate(plugins)]
+
+    def set_plugin_bypassed(self, device_id: int, index: int, bypassed: bool, is_input: bool = True) -> bool:
+        positions = self._plugin_positions(device_id, is_input)
+        return 0 <= index < len(positions) and self.set_insert_bypassed(device_id, positions[index], bypassed,
+                                                                          is_input)
+
+    def set_plugin_parameter(self, device_id: int, index: int, param_id: int, normalized: float,
+                             is_input: bool = True) -> bool:
+        instances = self.plugin_instances(device_id, is_input)
+        if not 0 <= index < len(instances):
+            return False
+        instances[index].set_parameter(param_id, normalized)
+        return True
 
     def set_routing_pan(self, source_id: int, destination_id: int, pan: float):
         """
@@ -1310,9 +1646,30 @@ class AudioEngine:
 
     # --- Metering ---
 
-    def get_meters(self) -> dict[int, dict[str, float]]:
+    def failed_device_ids(self) -> dict[int, str]:
+        """Each device (or loopback) whose stream failed, by id, with the reason the backend gave."""
+        failed = self.host.failed_streams()
+        out = {device_id: failed[device.key] for device_id, device in self._device_by_id.items()
+               if device.key in failed}
+        for key, reason in failed.items():
+            if key.startswith('loopback::'):
+                loop_id = self._node_to_id.get(f"loopback:{key[len('loopback::'):]}")
+                if loop_id is not None:
+                    out[loop_id] = reason
+        return out
+
+    def hosts_plugins(self) -> bool:
+        """Whether this backend hosts VST3 plugins (the native one does)."""
+        return hasattr(self.host, 'add_plugin')
+
+    def get_meters(self) -> dict[int, dict[str, Any]]:
         """
         Current levels per device id, in dBFS.
+
+        A duplex device (an ASIO driver) is one id with two sides, metered separately:
+        `sides` holds 'input' and/or 'output', each with per-channel lists where the host
+        measured each channel on its own. The top-level fields are the louder side, for a
+        single-meter display.
 
         Returns nothing when stopped rather than zeros: a meter reading of 0.0 while no
         audio is running would suggest silence was measured, when nothing was.
@@ -1320,28 +1677,49 @@ class AudioEngine:
         if not self.host.is_running:
             return {}
 
-        meters: dict[int, dict[str, float]] = {}
+        meters: dict[int, dict[str, Any]] = {}
 
         for key, reading in self.host.meters.read_summaries().items():
-            device_id = self._meter_key_to_id(key)
-            if device_id is None:
+            located = self._meter_key_to_side(key)
+            if located is None:
                 continue
+            device_id, side = located
 
-            meters[device_id] = {
+            channels = reading.channel_db()
+            entry = meters.setdefault(device_id, {'sides': {}})
+            entry['sides'][side] = {
                 'peak_db': reading.peak_db,
                 'rms_db': reading.rms_db,
                 'peak_hold_db': reading.peak_hold_db,
                 'clipped': reading.clipped,
+                'channel_peak_db': channels['peak_db'],
+                'channel_rms_db': channels['rms_db'],
+                'channel_peak_hold_db': channels['peak_hold_db'],
             }
+
+        for entry in meters.values():
+            loudest = max(entry['sides'].values(), key=lambda s: s['peak_db'])
+            entry.update({k: loudest[k] for k in ('peak_db', 'rms_db', 'peak_hold_db')})
+            entry['clipped'] = any(s['clipped'] for s in entry['sides'].values())
 
         return meters
 
-    def _meter_key_to_id(self, key: str) -> int | None:
+    def _meter_key_to_side(self, key: str) -> tuple[int, str] | None:
         if key.startswith('bus::'):
-            return self._node_to_id.get(f"bus:{key[5:]}")
+            bus_id = self._node_to_id.get(f"bus:{key[5:]}")
+            if bus_id is None:
+                return None
+            return bus_id, self._bus_meta.get(bus_id, {}).get('direction', 'output')
 
-        device_key = key.rsplit('::', 1)[0]
-        return self._node_to_id.get(f"device:{device_key}")
+        if key.startswith('loopback::'):
+            loop_id = self._node_to_id.get(f"loopback:{key[len('loopback::'):]}")
+            return (loop_id, 'input') if loop_id is not None else None
+
+        device_key, _, role = key.rpartition('::')
+        device_id = self._node_to_id.get(f"device:{device_key}")
+        if device_id is None:
+            return None
+        return device_id, 'input' if role == 'in' else 'output'
 
     def clear_clip_indicators(self):
         self.host.meters.clear_clips()
@@ -1366,7 +1744,158 @@ class AudioEngine:
         stats['backend_error'] = self._backend_error
         stats['problems'] = list(self._problems)
 
+        if hasattr(self.host, 'plugin_latency_samples'):
+            samples = self.host.plugin_latency_samples()
+            stats['plugin_latency_samples'] = samples
+            stats['plugin_latency_ms'] = samples / self.sample_rate * 1000
+        else:
+            stats['plugin_latency_samples'] = stats['plugin_latency_ms'] = None
+
+        # Only a measurement taken at the current rate and block describes the current
+        # configuration, and only an acoustic or cabled path is a round trip; a loopback
+        # measurement is the digital path alone and is reported only as itself.
+        trip = self._round_trip
+        stats['round_trip'] = trip
+        current = (trip is not None and trip['sample_rate'] == self.sample_rate
+                   and trip['block'] == self.buffer_size)
+        if current and trip['path'] == 'capture':
+            stats['measured_round_trip_ms'] = trip['measured_ms']
+
         return stats
+
+    # --- Measured round trip ---
+
+    def measure_round_trip(self, output_id: int, input_id: int | None = None) -> dict:
+        """
+        Play a sweep out of `output_id` and time its return on `input_id`: through a
+        loopback cable, or a microphone that hears the speaker. With no input, listen to
+        the output endpoint's own loopback: the digital path only, which checks the method
+        but is not the latency anyone hears.
+
+        The engine must be stopped (the measurement opens the devices itself), and the
+        sweep is audible at -24 dBFS. The result is None — `--` — unless the returning
+        signal was found with confidence; the note says why not.
+        """
+        from tonesphere.native import roundtrip
+
+        if getattr(self.host, 'backend', 'portaudio') != 'native' or self.host.host_api != HostApi.WASAPI:
+            raise ValueError("round-trip measurement needs the native engine on WASAPI")
+        if self.host.is_running:
+            raise ValueError("stop the engine first: the measurement opens the devices itself")
+        out_dev = self._device_by_id.get(output_id)
+        in_dev = self._device_by_id.get(input_id) if input_id is not None else None
+        if out_dev is None or not out_dev.can_output or not out_dev.endpoint_id:
+            raise ValueError(f"device {output_id} is not an output endpoint")
+        if input_id is not None and (in_dev is None or not in_dev.can_input or not in_dev.endpoint_id):
+            raise ValueError(f"device {input_id} is not an input endpoint")
+
+        loopback = in_dev is None
+        result = roundtrip.measure(out_dev.endpoint_id, out_dev.endpoint_id if loopback else in_dev.endpoint_id,
+                                   input_kind='loopback' if loopback else 'capture',
+                                   sample_rate=self.sample_rate, block=self.buffer_size, exclusive=self.host.exclusive)
+        self._round_trip = {
+            'path': 'loopback' if loopback else 'capture',
+            'measured_ms': result.measured_ms,
+            'measured_frames': result.measured_frames,
+            'confidence': result.confidence,
+            'nominal_ms': result.nominal_ms,
+            'reported_ms': result.reported_ms,
+            'sample_rate': result.sample_rate,
+            'block': result.block,
+            'output': result.output,
+            'input': result.input,
+            'note': result.note,
+        }
+        return dict(self._round_trip)
+
+    # --- The ToneSphere virtual audio driver ---
+
+    def virtual_device_status(self) -> dict[str, Any]:
+        """
+        The ToneSphere cables Windows has (`engine/virtual_cables.py`), each with its state and
+        the two endpoints it publishes. Windows names a cable's endpoints after its pin
+        categories and the cable's own name — "Speakers (ToneSphere Cable 1)" and
+        "Microphone Array (ToneSphere Cable 1)" — so that name is what matches them. Presence
+        is all this reports: that audio crosses a cable only `tests/hardware/test_virtual_driver.py`
+        proves.
+        """
+        from tonesphere.engine import virtual_cables
+
+        ids = {d.key: i for i, d in self._device_by_id.items()}
+
+        def endpoint(cable_name: str, output: bool):
+            found = next((d for d in self._devices if (d.can_output if output else d.can_input)
+                          and d.name.endswith(f"({cable_name})")), None)
+            return {'name': found.name, 'id': ids.get(found.key)} if found else None
+
+        try:
+            cables = virtual_cables.cables()
+            error = None
+        except virtual_cables.CableError as e:
+            cables, error = [], str(e)
+        listed = [{'instance_id': c.instance_id, 'name': c.name, 'state': c.state, 'enabled': c.enabled,
+                   'render': endpoint(c.name, True), 'capture': endpoint(c.name, False)} for c in cables]
+        return {
+            'installed': any(c['state'] == 'working' for c in listed),
+            'cables': listed,
+            'error': error,
+            'platform_supported': virtual_cables.supported(),
+        }
+
+    def manage_virtual_cable(self, operation: str, *args: str) -> tuple[bool, str]:
+        """
+        Add, rename, disable, enable or remove a cable, or remove the driver. These change the
+        machine's devices, so Windows asks for an administrator's consent (its own prompt);
+        the change then runs in a separate, elevated process. Devices are re-read afterwards.
+
+        Windows will not take a device from a program that has it open, ToneSphere included:
+        if the engine streams through the cable being changed, it lets go first, and starts
+        again afterwards with the devices then present — routes to a cable that went are kept
+        for when it returns.
+        """
+        from tonesphere.engine import virtual_cables
+
+        listed = virtual_cables.cables()
+        touched = {c.name for c in listed
+                   if operation == 'remove-driver' or (operation in ('rename', 'disable', 'remove') and args
+                                                        and c.instance_id == args[0])}
+        used = {node.ref for c in self._build_graph().connections for node in (c.source, c.dest)
+                if node.kind == 'device'}
+        holds = any(d.key in used and any(d.name.endswith(f"({name})") for name in touched) for d in self._devices)
+        released = holds and self.host.is_running
+        if released:
+            self.host.stop()
+        try:
+            result = virtual_cables.elevate(operation, *args)
+            ok, message = True, f"{operation}: {result}"
+        except virtual_cables.ElevationRefused as e:
+            ok, message = False, f"Cancelled: {e}"
+        except virtual_cables.CableError as e:
+            ok, message = False, str(e)
+        if ok and operation in ('disable', 'remove', 'remove-driver'):
+            self._await_cable_endpoints(touched, present=False)
+        elif ok and operation in ('add', 'enable', 'rename'):
+            name = {'add': args[0], 'rename': args[-1]}.get(operation) or \
+                next((c.name for c in listed if c.instance_id == args[0]), '')
+            self._await_cable_endpoints({name}, present=True)
+        self.handle_device_change()
+        if released and not self.host.is_running:
+            self.start_engine()
+        return ok, message
+
+    def _await_cable_endpoints(self, names: set[str], present: bool, timeout_s: float = 5.0):
+        """
+        Windows builds and tears down a cable's two endpoints one after the other, some
+        hundreds of milliseconds after the device itself changed: re-reading devices before
+        they settle would see half a cable. Waits until each named cable has both endpoints,
+        or none.
+        """
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            counts = [sum(1 for d in self._enumerate() if d.name.endswith(f"({n})")) for n in names]
+            if all((c >= 2) if present else (c == 0) for c in counts):
+                return
+            time.sleep(0.1)
 
     def get_ring_statistics(self) -> dict[str, dict]:
         return self.host.ring_statistics()
@@ -1376,7 +1905,7 @@ class AudioEngine:
     def get_driver_info(self) -> dict[str, Any]:
         from tonesphere.engine.devices import describe_backend
 
-        info = describe_backend()
+        info = self.host.describe() if hasattr(self.host, 'describe') else describe_backend()
         info['active_driver'] = self.host.host_api.value if self.host.host_api else None
         info['exclusive_mode'] = self.host.exclusive
         info['platform'] = __import__('platform').system()
@@ -1385,12 +1914,7 @@ class AudioEngine:
         return info
 
     def get_available_drivers(self) -> list[str]:
-        from tonesphere.engine.devices import available_host_apis
-
-        try:
-            return [api.value for api in available_host_apis()]
-        except AudioBackendUnavailable:
-            return []
+        return [api.value for api in self.get_available_drivers_enum()]
 
     def switch_driver(self, driver_type: str) -> bool:
         """
@@ -1430,6 +1954,8 @@ class AudioEngine:
     def get_available_drivers_enum(self) -> list[HostApi]:
         from tonesphere.engine.devices import available_host_apis
 
+        if hasattr(self.host, 'available_host_apis'):
+            return self.host.available_host_apis()
         try:
             return available_host_apis()
         except AudioBackendUnavailable:
@@ -1463,8 +1989,10 @@ class AudioEngine:
             # The network side paces itself from the rate, so leaving it on the old one
             # would send at the wrong speed and slowly under- or overrun the peer.
             self.udp_transport.sample_rate = sample_rate
-            if self._send_worker is not None:
-                self._send_worker.sample_rate = sample_rate
+            self.network_router.sample_rate = sample_rate
+            for worker in (self._send_worker, self._tcp_send_worker):
+                if worker is not None:
+                    worker.sample_rate = sample_rate
 
             if was_running:
                 self.start_engine()
@@ -1482,8 +2010,11 @@ class AudioEngine:
             self.buffer_size = buffer_size
             self.host.blocksize = buffer_size
 
-            if self._send_worker is not None:
-                self._send_worker.frames_per_read = buffer_size
+            for worker in (self._send_worker, self._tcp_send_worker):
+                if worker is not None:
+                    worker.frames_per_read = buffer_size
+            if self._tcp_send_worker is not None:
+                self._tcp_send_worker.packet_frames = buffer_size
 
             if was_running:
                 self.start_engine()
@@ -1562,8 +2093,16 @@ class AudioEngine:
             return False, f"Unknown quality '{quality}' — choose one of: {options}"
 
         with self._lock:
-            self.network_router.quality = preset
             self.udp_transport.quality = preset
+            if preset == NetworkQuality.OPUS:
+                from tonesphere.network import opus
+
+                if not opus.available():
+                    self.udp_transport.quality = NetworkQuality.HIGH
+                    return False, f"Opus is unavailable here: {opus.unavailable_reason()}"
+                return True, (f"UDP quality set to Opus ({opus.version()}); TCP keeps "
+                              f"{self.network_router.quality.value}, since Opus is carried over UDP only")
+            self.network_router.quality = preset
         return True, f"Network quality set to {preset.value}"
 
     # --- Network send (the direction that was never wired) ---
@@ -1584,15 +2123,14 @@ class AudioEngine:
 
         Once it is a graph node, the host allocates it a ring like any other route and the
         send worker is an ordinary consumer of that ring.
+
+        `transport='udp'` is the realtime path (datagrams, a jitter buffer at the far end);
+        `'tcp'` sends the same ring through the TCP router, one engine block per packet, to
+        every connected client and connection (or `target`, a connection id): nothing is
+        lost, and the far end is as late as TCP makes it.
         """
-        if transport != 'udp':
-            # The TCP path has a working receive side and no send side, and this is not
-            # the change that gives it one. Refused rather than logged-and-ignored, which
-            # is what this method did before.
-            return False, (
-                "TCP send is still not wired to the audio path — only its receive side is. "
-                "Use transport='udp' for the realtime path."
-            )
+        if transport not in ('udp', 'tcp'):
+            return False, f"Unknown transport '{transport}' — use 'udp' or 'tcp'"
 
         with self._lock:
             source = self._node_for(device_id)
@@ -1606,7 +2144,7 @@ class AudioEngine:
                     f"(sink {existing}); disable it first to change the target"
                 )
 
-            if not self.udp_transport.is_running:
+            if transport == 'udp' and not self.udp_transport.is_running:
                 # Port 0: a send-only peer does not need a predictable port, and asking
                 # for one it does not need is one more thing that can already be in use.
                 started, message = self.start_udp_transport(bind_port=0)
@@ -1631,15 +2169,21 @@ class AudioEngine:
                 'source': str(source),
                 'dest': str(node),
                 'target': target,
-                'transport': 'udp',
+                'transport': transport,
             }
 
-            worker = self._ensure_send_worker()
+            worker = self._ensure_send_worker() if transport == 'udp' else self._ensure_tcp_send_worker()
             worker.add_route(
                 sink_id=sink_id, device_id=device_id,
                 source_key=str(source), dest_key=str(node), target=target,
             )
             worker.start()
+
+            if transport == 'tcp':
+                peers = len(self.network_router.clients) + len(self.network_router.connections)
+                where = f"connection '{target}'" if target else f"{peers} TCP peer(s)"
+                note = "" if peers else " — nothing is connected yet, so nothing is leaving this machine"
+                return True, f"Device {device_id} is sending over TCP to {where}{note}"
 
             peers = len(self.udp_transport.peers())
             where = f"peer '{target}'" if target else f"{peers} peer(s)"
@@ -1655,10 +2199,11 @@ class AudioEngine:
 
             self.remove_routing(device_id, sink_id)
 
-            if self._send_worker is not None:
-                self._send_worker.remove_route(sink_id)
-                if self._send_worker.route_count == 0:
-                    self._send_worker.stop()
+            worker = self._tcp_send_worker if self._network_sinks[sink_id]['transport'] == 'tcp' else self._send_worker
+            if worker is not None:
+                worker.remove_route(sink_id)
+                if worker.route_count == 0:
+                    worker.stop()
 
             node = self._id_to_node.pop(sink_id, None)
             if node is not None:
@@ -1693,6 +2238,15 @@ class AudioEngine:
             )
         return self._send_worker
 
+    def _ensure_tcp_send_worker(self) -> NetworkSendWorker:
+        if self._tcp_send_worker is None:
+            self._tcp_send_worker = NetworkSendWorker(
+                transport=self.network_router, reader=self.host.read_available,
+                sample_rate=self.sample_rate, frames_per_read=self.buffer_size,
+                packet_frames=self.buffer_size, name='tcp-audio-send',
+            )
+        return self._tcp_send_worker
+
     # --- Network receive ---
 
     def register_network_receive(
@@ -1701,6 +2255,7 @@ class AudioEngine:
         transport: str = 'tcp',
         target_latency_ms: float = 40.0,
         conceal: str = 'silence',
+        jitter_mode: str = 'adaptive',
     ) -> tuple[bool, str]:
         """
         Feed audio arriving from the network into a bus.
@@ -1713,10 +2268,37 @@ class AudioEngine:
         packets go into a `JitterBuffer` and a paced thread drains it. The buffer's
         geometry is taken from the first packet that actually arrives rather than assumed,
         because the sender's channel count and packet size are its choice, not ours.
+        `jitter_mode` 'adaptive' (the default) sizes the buffer to the jitter it measures,
+        starting from `target_latency_ms`; 'fixed' holds `target_latency_ms`.
         """
         if transport == 'tcp':
+            stats = self._tcp_receives.setdefault(device_id, {'packets': 0, 'frames_written': 0,
+                                                              'frames_dropped': 0, 'wrong_rate': 0})
+
             def receive_callback(audio_data: np.ndarray, packet):
-                self.write_to_bus(device_id, audio_data)
+                stats['packets'] += 1
+                if packet.sample_rate != self.sample_rate:
+                    # Played at this engine's rate it would be the wrong pitch; counted, not played.
+                    stats['wrong_rate'] += 1
+                    return
+                # TCP must not lose what it carried, so a full bus is waited on rather than
+                # dropped: this receive thread stops reading, the socket's window fills, and
+                # the sender slows to the rate the engine consumes. Only a bus that takes
+                # nothing for a second (nothing routed out of it) drops the rest.
+                remaining, stalled_since = audio_data, None
+                while len(remaining):
+                    written = self.write_to_bus(device_id, remaining)
+                    stats['frames_written'] += written
+                    remaining = remaining[written:]
+                    if written:
+                        stalled_since = None
+                    elif stalled_since is None:
+                        stalled_since = time.monotonic()
+                    elif time.monotonic() - stalled_since > 1.0:
+                        stats['frames_dropped'] += len(remaining)
+                        return
+                    if len(remaining):
+                        time.sleep(0.002)
 
             self.network_router.register_receive_callback(device_id, receive_callback)
             return True, f"Device {device_id} will receive TCP audio"
@@ -1744,8 +2326,10 @@ class AudioEngine:
                 'buffer': None,
                 'target_latency_ms': target_latency_ms,
                 'conceal': conceal,
+                'jitter_mode': jitter_mode,
                 'packets_received': 0,
                 'packets_rejected': 0,
+                'packets_wrong_rate': 0,
                 'frames_written': 0,
                 'writes_refused': 0,
                 'late_wakes': 0,
@@ -1793,10 +2377,19 @@ class AudioEngine:
         """
         def handler(packet):
             try:
-                audio = packet.decode()
+                # Opus is decoded at playout, in sequence, so a lost packet is concealed by
+                # Opus itself: the jitter buffer holds its encoded payloads.
+                audio = packet.payload if packet.codec == CODEC_OPUS else packet.decode()
             except MalformedPacket as e:
                 state['packets_rejected'] += 1
                 state['error'] = f"undecodable packet: {e}"
+                return
+
+            if packet.sample_rate != self.sample_rate:
+                # Played at this engine's rate it would be the wrong pitch and speed; refused
+                # and counted, where an earlier version played it anyway.
+                state['packets_wrong_rate'] += 1
+                state['error'] = f"sender at {packet.sample_rate} Hz, this engine at {self.sample_rate} Hz"
                 return
 
             buffer = state['buffer']
@@ -1806,17 +2399,24 @@ class AudioEngine:
                 # First packet, or a sender that changed its geometry mid-stream. Either
                 # way the buffer's existing contents describe a different signal, so it is
                 # rebuilt and re-primed rather than fed blocks it cannot align.
+                decoder = None
+                if packet.codec == CODEC_OPUS:
+                    from tonesphere.network import opus
+
+                    decoder = opus.Decoder(packet.sample_rate, packet.channels)
                 buffer = JitterBuffer(
                     frames_per_packet=packet.frame_count,
                     channels=packet.channels,
                     sample_rate=self.sample_rate,
                     target_latency_ms=state['target_latency_ms'],
                     conceal=state['conceal'],
+                    mode=state['jitter_mode'],
+                    decoder=decoder,
                 )
                 state['buffer'] = buffer
 
             state['packets_received'] += 1
-            buffer.push(packet.sequence, audio)
+            buffer.push(packet.sequence, audio, timestamp_us=packet.timestamp_us)
 
         return handler
 
@@ -1922,6 +2522,7 @@ class AudioEngine:
                 'device_id': device_id,
                 'packets_received': state['packets_received'],
                 'packets_rejected': state['packets_rejected'],
+                'packets_wrong_rate': state['packets_wrong_rate'],
                 'frames_written': state['frames_written'],
                 'writes_refused': state['writes_refused'],
                 'late_wakes': state['late_wakes'],
@@ -1931,6 +2532,10 @@ class AudioEngine:
                 # no buffer and therefore nothing measured about one.
                 'jitter_buffer': buffer.statistics() if buffer is not None else None,
             }
+
+        stats['tcp_send'] = (self._tcp_send_worker.statistics() if self._tcp_send_worker is not None
+                             else {'running': False, 'routes': {}})
+        stats['tcp_receive'] = {str(k): dict(v) for k, v in self._tcp_receives.items()}
 
         send = (
             self._send_worker.statistics() if self._send_worker is not None

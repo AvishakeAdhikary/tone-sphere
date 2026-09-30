@@ -38,6 +38,16 @@ def load_catalog(code: str) -> dict:
     return json.loads((LOCALE_DIR / f"{code}.json").read_text(encoding="utf-8"))
 
 
+def builtin_keys() -> set[str]:
+    """Every key the built-in effects look up, built the way `engine/builtins.py` builds them."""
+    from tonesphere.engine.builtins import EQ_TYPES, KINDS
+
+    keys = {'builtin.band'} | {f'builtin.{kind}' for kind in KINDS}
+    keys |= {f'builtin.param.{spec.key}' for _type, specs in KINDS.values() for spec in specs}
+    keys |= {f'builtin.eq_type.{name}' for name in EQ_TYPES}
+    return keys
+
+
 def all_locale_codes() -> list[str]:
     return sorted(p.stem for p in LOCALE_DIR.glob("*.json"))
 
@@ -162,9 +172,16 @@ class TestEveryUiKeyExistsInEnglish:
         dynamic = {"device.direction.input", "device.direction.output"}
         for prefix in ("patchbay.fit", "patchbay.zoom_reset", "patchbay.auto_arrange"):
             dynamic.add(prefix)  # looked up via a dict keyed by these literals
+        dynamic |= builtin_keys()  # built from the built-in effects' parameter specs
 
         unused = base_keys - used - dynamic
         assert not unused, f"en.json has keys nothing under tonesphere/ui renders: {sorted(unused)}"
+
+
+class TestBuiltinEffectKeys:
+    def test_every_key_the_built_in_effects_look_up_exists(self):
+        missing = builtin_keys() - set(load_catalog("en")["strings"])
+        assert not missing, f"built-in effects look up keys en.json lacks: {sorted(missing)}"
 
 
 class TestNoUnwrappedUserFacingLiteral:

@@ -319,33 +319,12 @@ def process_loopback_supported() -> bool:
     return build >= _PROCESS_LOOPBACK_MIN_BUILD
 
 
-def system_loopback_devices() -> list[str]:
-    """
-    Loopback devices PortAudio can already capture from — whole-system output capture.
+def _native_loopback_available() -> bool:
+    if platform.system() != 'Windows':
+        return False
+    from tonesphere.native import available
 
-    WASAPI exposes each render endpoint as a capture device for loopback, which records
-    everything playing rather than one application. That works today, unlike per-process
-    capture, so the two are reported separately instead of being conflated.
-    """
-    try:
-        import sounddevice as sd
-    except (ImportError, OSError):
-        return []
-
-    if platform.system() != "Windows":
-        return []
-
-    found = []
-    try:
-        host_apis = sd.query_hostapis()
-        for device in sd.query_devices():
-            api_name = host_apis[device['hostapi']]['name']
-            if 'WASAPI' in api_name and device['max_output_channels'] > 0:
-                found.append(str(device['name']))
-    except Exception as e:
-        logger.debug(f"Could not enumerate loopback devices: {e}")
-
-    return found
+    return available()
 
 
 def capture_status() -> dict:
@@ -360,6 +339,7 @@ def capture_status() -> dict:
     """
     sessions = list_audio_sessions()
     supported = process_loopback_supported()
+    system_loopback = _native_loopback_available()
 
     return {
         'platform': platform.system(),
@@ -368,13 +348,16 @@ def capture_status() -> dict:
             for s in sessions
         ],
         'session_count': len(sessions),
-        'system_loopback_available': bool(system_loopback_devices()),
+        # The native engine opens it: every WASAPI output is also offered as a routable
+        # '(loopback)' source. Only there - the PortAudio host has no loopback path.
+        'system_loopback_implemented': system_loopback,
         'process_loopback_supported': supported,
         'process_loopback_implemented': supported,
         'note': (
             "Per-application capture uses ActivateAudioInterfaceAsync with "
             "VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK (Windows 10 build 20348+). "
-            "Whole-system loopback works through PortAudio on any Windows."
+            + ("Whole-system loopback: route any output's '(loopback)' source." if system_loopback
+               else "Whole-system loopback needs the native engine, which is not loaded.")
             if supported else
             "Per-application capture needs ActivateAudioInterfaceAsync with "
             "VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK, which exists only on Windows 10 "

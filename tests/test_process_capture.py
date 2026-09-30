@@ -13,8 +13,6 @@ Marked `hardware` because it needs a real output device to render to; skipped en
 where the platform cannot do process loopback at all.
 """
 
-import asyncio
-import math
 import os
 import subprocess
 import sys
@@ -23,6 +21,7 @@ import time
 import numpy as np
 import pytest
 
+from tests.signals import dominant_frequency, sine
 from tonesphere.engine.app_capture import process_loopback_supported
 
 RATE = 48000
@@ -34,20 +33,6 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def sine(frames: int, freq: float = 1000.0, rate: int = RATE,
-         amplitude: float = 0.5, channels: int = 2, phase: float = 0.0) -> np.ndarray:
-    """Same tone helper as `tests/test_engine_audio.py`, for the same reasons."""
-    t = (np.arange(frames, dtype=np.float64) + phase) / rate
-    wave = (amplitude * np.sin(2.0 * math.pi * freq * t)).astype(np.float32)
-    return np.repeat(wave.reshape(-1, 1), channels, axis=1)
-
-
-def dominant_frequency(block: np.ndarray, rate: int = RATE) -> float:
-    mono = block[:, 0] if block.ndim > 1 else block
-    spectrum = np.abs(np.fft.rfft(mono * np.hanning(len(mono))))
-    return float(np.fft.rfftfreq(len(mono), 1.0 / rate)[int(np.argmax(spectrum))])
-
-
 def dead_pid() -> int:
     """A process id that genuinely existed and genuinely does not any more."""
     process = subprocess.Popen([sys.executable, '-c', 'pass'])
@@ -55,14 +40,13 @@ def dead_pid() -> int:
     return process.pid
 
 
-def _run(coroutine):
+def _run(result):
     """
-    Call a REST endpoint directly.
-
-    The endpoints are plain async functions, so this skips FastAPI's lifespan hook, which
-    would open real streams on a machine that may not have any.
+    An endpoint called directly. The endpoints are plain functions FastAPI runs in its
+    threadpool, so the call has already happened; calling them directly skips the lifespan
+    hook, which would open real streams on a machine that may not have any.
     """
-    return asyncio.run(coroutine)
+    return result
 
 
 def playing_engine():

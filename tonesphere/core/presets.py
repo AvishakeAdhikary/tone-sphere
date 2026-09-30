@@ -22,7 +22,8 @@ from tonesphere.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-PRESET_VERSION = 1
+# 2: adds `plugins` — per device side, each VST3 plugin's module, class and its own state.
+PRESET_VERSION = 2
 
 
 @dataclass
@@ -32,11 +33,13 @@ class RecallResult:
     missing_devices: list[str] = field(default_factory=list)
     restored_routes: int = 0
     skipped_routes: int = 0
+    restored_plugins: int = 0
+    missing_plugins: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
     @property
     def is_complete(self) -> bool:
-        return self.applied and not self.missing_devices and not self.skipped_routes
+        return self.applied and not self.missing_devices and not self.skipped_routes and not self.missing_plugins
 
     def summary(self) -> str:
         if not self.applied:
@@ -45,8 +48,12 @@ class RecallResult:
         parts = [f"{self.restored_routes} route(s) restored"]
         if self.skipped_routes:
             parts.append(f"{self.skipped_routes} skipped")
+        if self.restored_plugins:
+            parts.append(f"{self.restored_plugins} plugin(s) restored")
         if self.missing_devices:
             parts.append(f"missing: {', '.join(self.missing_devices[:3])}")
+        if self.missing_plugins:
+            parts.append(f"plugins not restored: {', '.join(self.missing_plugins[:3])}")
         return ", ".join(parts)
 
 
@@ -117,6 +124,34 @@ class PresetManager:
                 ],
             }
 
+        plugins = {}
+        for device_id in list(engine._device_by_id) + list(engine._bus_meta):
+            reference = self._reference(device_id)
+            sides = {}
+            for side, is_input in (('input', True), ('output', False)):
+                entries = []
+                for index in range(len(engine.list_inserts(device_id, is_input))):
+                    instance = engine.insert_instance(device_id, index, is_input)
+                    if getattr(instance, 'is_builtin', False):
+                        entries.append(instance.to_dict())
+                        continue
+                    if instance.status().crashed:
+                        continue  # its state cannot be trusted, and it cannot be reopened as it was
+                    entries.append({
+                        'kind': 'vst3',
+                        'path': instance.info.path,
+                        'uid': instance.info.uid,
+                        'name': instance.info.name,
+                        'vendor': instance.info.vendor,
+                        'version': instance.info.version,
+                        'bypassed': instance.bypassed,
+                        'state': instance.state().to_dict(),
+                    })
+                if entries:
+                    sides[side] = entries
+            if sides and reference:
+                plugins[reference] = sides
+
         return {
             'version': PRESET_VERSION,
             'name': name,
@@ -131,6 +166,7 @@ class PresetManager:
             'buses': buses,
             'routes': routes,
             'channels': channels,
+            'plugins': plugins,
         }
 
     def _reference(self, device_id: int) -> str | None:
@@ -180,6 +216,7 @@ class PresetManager:
 
         self._apply_routes(preset.get('routes', []), reference_to_id, result)
         self._apply_channels(preset.get('channels', {}), reference_to_id, result)
+        self._apply_plugins(preset.get('plugins', {}), reference_to_id, result)
 
         master = preset.get('engine', {}).get('master_volume')
         if master is not None:
@@ -241,10 +278,16 @@ class PresetManager:
         return mapping
 
     def _map_devices(self) -> dict[str, int]:
-        return {
-            f"device:{device.key}": device_id
-            for device_id, device in self.engine._device_by_id.items()
-        }
+        """
+        Saved device reference -> current id. A preset written before devices had endpoint
+        IDs refers to them by name; both forms resolve, the stable one taking precedence.
+        """
+        mapping = {}
+        for device_id, device in self.engine._device_by_id.items():
+            mapping.setdefault(f"device:{device.name_key}", device_id)
+        for device_id, device in self.engine._device_by_id.items():
+            mapping[f"device:{device.key}"] = device_id
+        return mapping
 
     def _apply_routes(self, routes: list[dict[str, Any]],
                       mapping: dict[str, int], result: RecallResult):
@@ -313,6 +356,52 @@ class PresetManager:
                 config.inverted = bool(entry.get('inverted', False))
 
             engine.apply_channel_controls(device_id)
+
+    def _apply_plugins(self, plugins: dict[str, Any], mapping: dict[str, int], result: RecallResult):
+        """
+        Reopen each plugin and hand it back its own saved state. A plugin that is no longer
+        installed, will not open, or rejects its state is reported by name; the rest of the
+        chain is still restored.
+        """
+        from tonesphere.plugins import PluginError, PluginInfo, PluginState
+
+        engine = self.engine
+        for reference, sides in plugins.items():
+            device_id = mapping.get(reference)
+            for side, entries in sides.items():
+                is_input = side == 'input'
+                if device_id is None:
+                    result.missing_plugins.extend(f"{e.get('name', '?')} (device absent)" for e in entries)
+                    continue
+                while engine.list_inserts(device_id, is_input):
+                    engine.remove_insert(device_id, 0, is_input)
+                for entry in entries:
+                    if entry.get('kind') == 'builtin':
+                        ok, message = engine.add_builtin(device_id, entry['type'], is_input, entry.get('values'))
+                        if not ok:
+                            result.warnings.append(f"built-in {entry.get('type')}: {message}")
+                            continue
+                        if entry.get('bypassed'):
+                            engine.set_insert_bypassed(device_id, len(engine.list_inserts(device_id, is_input)) - 1,
+                                                       True, is_input)
+                        continue
+                    info = PluginInfo(path=entry['path'], uid=entry['uid'], name=entry.get('name', ''),
+                                      vendor=entry.get('vendor', ''), version=entry.get('version', ''),
+                                      category='Audio Module Class', subcategories='', sdk_version='',
+                                      is_audio_effect=True)
+                    ok, message = engine.add_plugin(device_id, info, is_input)
+                    if not ok:
+                        result.missing_plugins.append(f"{info.name}: {message}")
+                        continue
+                    index = len(engine.list_inserts(device_id, is_input)) - 1
+                    instance = engine.insert_instance(device_id, index, is_input)
+                    try:
+                        instance.restore(PluginState.from_dict(entry.get('state', {})))
+                    except PluginError as e:
+                        result.warnings.append(f"{info.name} opened but kept its defaults: {e}")
+                    if entry.get('bypassed'):
+                        engine.set_insert_bypassed(device_id, index, True, is_input)
+                    result.restored_plugins += 1
 
     # --- Files ---
 

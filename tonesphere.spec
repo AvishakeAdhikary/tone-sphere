@@ -1,9 +1,9 @@
 # PyInstaller spec for ToneSphere.
 #
 # Replaces pyinstaller_to_program.sh, which was two lines and produced a binary that could
-# not start: PyInstaller does not find PortAudio's shared library or pedalboard's plugin
-# host by itself, because neither is imported as Python code — they are native libraries
-# loaded at runtime through cffi and a compiled extension.
+# not start: PyInstaller does not find PortAudio's shared library by itself, because it is
+# not imported as Python code — it is a native library loaded at runtime through cffi. The
+# same goes for ToneSphere's own native DLLs, loaded through ctypes (see native_bin below).
 #
 # Build:   uv run pyinstaller tonesphere.spec
 # Output:  dist/ToneSphere/ToneSphere.exe  (or the platform equivalent)
@@ -42,12 +42,13 @@ project_root = Path(SPECPATH)
 binaries = collect_dynamic_libs('_sounddevice_data')
 binaries += collect_data_files('_sounddevice_data')
 
-# pedalboard bundles a compiled VST3 host. Missing it means plugin loading fails at
-# runtime with an import error rather than at build time.
-try:
-    binaries += collect_dynamic_libs('pedalboard')
-except Exception:
-    pass
+# The native engine (scripts/build_native.py). tonesphere/native looks for it under
+# sys._MEIPASS/tonesphere/native/_bin. Collected when present rather than required, so the
+# Linux/macOS builds — which have no native engine yet — still freeze; on Windows the CI
+# builds it first, and a frozen app without it reports the engine as unavailable.
+native_bin = project_root / 'tonesphere' / 'native' / '_bin'
+if native_bin.is_dir():
+    binaries += [(str(dll), 'tonesphere/native/_bin') for dll in native_bin.glob('*.dll')]
 
 datas = [
     (str(project_root / 'config'), 'config'),
@@ -56,7 +57,20 @@ datas = [
     # frozen build; without this a frozen build ships with no catalogs at all, since a
     # .py package's own directory does not survive freezing the way this data does.
     (str(project_root / 'tonesphere' / 'locale'), 'tonesphere/locale'),
+    (str(project_root / 'LICENSE'), 'licenses/tonesphere'),
 ]
+
+# Licence texts that have to travel with the binary. The MIT notices are the one condition
+# of those licences; the GPLv3 text is required because a build that bundles
+# tonesphere_asio.dll is distributed under GPLv3 as a whole (docs/ASIO.md).
+if (native_bin / 'tonesphere_asio.dll').is_file():
+    datas += [(str(project_root / 'native' / 'asio' / 'LICENSE'), 'licenses/gpl-3.0'),
+              (str(project_root / 'sdks' / 'asiosdk' / 'LICENSE.txt'), 'licenses/asio-sdk')]
+if (native_bin / 'tonesphere_native.dll').is_file():
+    datas += [(str(project_root / 'sdks' / 'vst3sdk' / 'LICENSE.txt'), 'licenses/vst3-sdk')]
+if (native_bin / 'opus.dll').is_file():
+    # libopus, BSD 3-clause: its notice travels with the binary.
+    datas += [(str(project_root / 'sdks' / 'opus' / 'COPYING'), 'licenses/opus')]
 
 hiddenimports = [
     # sounddevice reaches PortAudio through cffi, which PyInstaller cannot see statically.

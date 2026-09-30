@@ -1,0 +1,9 @@
+﻿ROOT\MEDIA\0000                                             : Removed
+ROOT\MEDIA\0001                                             : Removed
+2 device(s) were removed.
+Microsoft PnP Utility
+
+Ignoring /force when used with /uninstall to delete driver package.
+Driver package uninstalled.
+Driver package deleted successfully.
+Removed: no ToneSphere device or endpoint remains, and the test certificate is no longer trusted.

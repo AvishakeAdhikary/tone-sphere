@@ -12,7 +12,6 @@ Everything binds `127.0.0.1` explicitly. Binding `0.0.0.0` raises a Windows fire
 prompt, which is not a thing a test run should do to somebody.
 """
 
-import math
 import socket
 import struct
 import time
@@ -20,6 +19,7 @@ import time
 import numpy as np
 import pytest
 
+from tests.signals import dominant_frequency, sine
 from tonesphere.network.audio_router import NetworkQuality
 from tonesphere.network.send_worker import PacketAccumulator
 from tonesphere.network.udp_transport import (
@@ -44,20 +44,6 @@ from tonesphere.network.udp_transport import (
 )
 
 RATE = 48000
-
-
-def sine(frames: int, freq: float = 1000.0, rate: int = RATE,
-         amplitude: float = 0.5, channels: int = 2, phase: float = 0.0) -> np.ndarray:
-    """The same test tone the rest of the suite uses, so results are comparable."""
-    t = (np.arange(frames, dtype=np.float64) + phase) / rate
-    wave = (amplitude * np.sin(2.0 * math.pi * freq * t)).astype(np.float32)
-    return np.repeat(wave.reshape(-1, 1), channels, axis=1)
-
-
-def dominant_frequency(block: np.ndarray, rate: int = RATE) -> float:
-    mono = block[:, 0] if block.ndim > 1 else block
-    spectrum = np.abs(np.fft.rfft(mono * np.hanning(len(mono))))
-    return float(np.fft.rfftfreq(len(mono), 1.0 / rate)[int(np.argmax(spectrum))])
 
 
 def receiver() -> socket.socket:
@@ -215,39 +201,42 @@ class TestMalformedInput:
             UdpPacket.unpack(packet.pack()).decode()
 
 
-class TestOpusIsRefusedNotFaked:
+class TestOpusIsNeverFaked:
     """
-    Opus is not implemented, so nothing may behave as though it were.
-
-    A silent fallback to PCM would be the exact failure this project's honesty rule is
-    about: the caller asked for Opus, got PCM, and was told it worked.
+    Opus where libopus is present, a refusal with the reason where it is not — and never
+    PCM passed off as Opus. The codec's audio is proved in `tests/test_opus.py`.
     """
 
-    def test_availability_is_reported_as_false(self):
-        assert opus_available() is False
+    def test_availability_is_whether_libopus_loads(self):
+        from tonesphere.network import opus
 
-    def test_encoding_with_opus_raises_rather_than_substituting_pcm(self):
-        audio = sine(64)
+        assert opus_available() is opus.available()
 
-        with pytest.raises(CodecUnavailable, match="not implemented"):
-            encode_block(1, audio, RATE, 0, NetworkQuality.HIGH, codec=CODEC_OPUS)
+    def test_the_stateless_encoder_refuses_opus_rather_than_substituting_pcm(self):
+        with pytest.raises(CodecUnavailable, match="stateful"):
+            encode_block(1, sine(480), RATE, 0, NetworkQuality.HIGH, codec=CODEC_OPUS)
 
-    def test_an_opus_datagram_from_a_peer_is_refused(self):
+    def test_an_opus_datagram_is_accepted_only_where_it_can_be_decoded(self):
         header = struct.pack(
-            HEADER_FORMAT, PROTOCOL_VERSION, CODEC_OPUS, 2, 0, RATE, 1, 0, 0, 960, 8,
+            HEADER_FORMAT, PROTOCOL_VERSION, CODEC_OPUS, 2, 0, RATE, 1, 0, 0, 480, 8,
         )
+        if opus_available():
+            packet = UdpPacket.unpack(header + b"x" * 8)
+            with pytest.raises(CodecUnavailable, match="stream order"):
+                packet.decode()
+        else:
+            with pytest.raises(MalformedPacket, match="Opus"):
+                UdpPacket.unpack(header + b"x" * 8)
 
-        with pytest.raises(MalformedPacket, match="Opus"):
-            UdpPacket.unpack(header + b"x" * 8)
-
-    def test_no_quality_preset_selects_opus(self):
+    def test_only_the_opus_preset_selects_opus(self):
         for quality in NetworkQuality:
             codec, _level = codec_for_quality(quality)
-            assert codec != CODEC_OPUS
+            assert (codec == CODEC_OPUS) == (quality == NetworkQuality.OPUS)
 
 
 class TestCodecRoundTrip:
-    @pytest.mark.parametrize("quality", list(NetworkQuality))
+    # The PCM presets; Opus is lossy and stateful, and has its own tests (tests/test_opus.py).
+    @pytest.mark.parametrize("quality", [q for q in NetworkQuality if q != NetworkQuality.OPUS])
     @pytest.mark.parametrize("channels", [1, 2, 4])
     def test_audio_survives_encode_and_decode(self, quality, channels):
         codec, _level = codec_for_quality(quality)

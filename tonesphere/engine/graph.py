@@ -46,8 +46,8 @@ class NodeId:
     differently: a device by PortAudio index, a bus by name, a network sink by the
     registration the send worker holds for it.
     """
-    kind: str   # 'device' | 'bus' | 'network'
-    ref: str    # device key, bus name, or network sink reference
+    kind: str   # 'device' | 'bus' | 'network' | 'loopback'
+    ref: str    # device key, bus name, or network sink reference; for a loopback, the output's device key
 
     def __str__(self) -> str:
         return f"{self.kind}:{self.ref}"
@@ -59,6 +59,14 @@ def device_node(key: str) -> NodeId:
 
 def bus_node(name: str) -> NodeId:
     return NodeId('bus', name)
+
+
+def loopback_node(device_key: str) -> NodeId:
+    """
+    Whatever an output device is playing, from every application on the system: WASAPI's
+    loopback of that endpoint. A source only.
+    """
+    return NodeId('loopback', device_key)
 
 
 def network_node(ref: str) -> NodeId:
@@ -250,11 +258,26 @@ class RoutingGraph:
 
         A cycle in an audio graph is not a subtle bug; it is a runaway howl through the
         user's headphones at whatever volume they had set. Refuse it before it happens.
+
+        Only a bus both receives and sends inside the graph. A device node is two separate
+        endpoints — routing into it means its output, routing from it means its input —
+        and nothing inside the graph carries its output back to its input. So a device's
+        input to its own output is the monitoring path (a guitar into the interface, out
+        of its headphones), not a loop; an earlier version refused it as one. (A network
+        node is the same: what is sent and what is received are separate streams.)
+
+        A loopback is the exception that does close a loop outside the graph: it hears
+        what its output device plays, so loopback X reaching output X — directly or through
+        buses — feeds that output back into itself.
         """
+        if self._loops_through_a_loopback(source, dest):
+            return True
+        if source.kind != 'bus' or dest.kind != 'bus':
+            return False
         if source == dest:
             return True
 
-        # Walk forward from dest: if we can reach source, adding the edge closes a loop.
+        # Walk forward from dest through buses: reaching source means the edge closes a loop.
         stack = [dest]
         seen = set()
 
@@ -267,9 +290,37 @@ class RoutingGraph:
             seen.add(node)
 
             for connection in self.connections:
-                if connection.source == node:
+                if connection.source == node and connection.dest.kind == 'bus':
                     stack.append(connection.dest)
 
+        return False
+
+    def _loops_through_a_loopback(self, source: NodeId, dest: NodeId) -> bool:
+        """Whether source -> dest would carry some output's loopback into that same output."""
+        # Loopbacks that already reach `source` (or `source` itself), backwards through buses.
+        loopbacks, stack, seen = set(), [source], set()
+        while stack:
+            node = stack.pop()
+            if node in seen:
+                continue
+            seen.add(node)
+            if node.kind == 'loopback':
+                loopbacks.add(node.ref)
+            elif node.kind == 'bus':
+                stack += [c.source for c in self.connections if c.dest == node]
+        if not loopbacks:
+            return False
+        # Outputs `dest` reaches (or `dest` itself), forwards through buses.
+        stack, seen = [dest], set()
+        while stack:
+            node = stack.pop()
+            if node in seen:
+                continue
+            seen.add(node)
+            if node.kind == 'device' and node.ref in loopbacks:
+                return True
+            if node.kind == 'bus':
+                stack += [c.dest for c in self.connections if c.source == node]
         return False
 
     def to_dict(self) -> dict:

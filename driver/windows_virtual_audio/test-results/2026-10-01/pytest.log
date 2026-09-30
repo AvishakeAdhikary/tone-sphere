@@ -1,0 +1,351 @@
+============================= test session starts =============================
+platform win32 -- Python 3.13.15, pytest-9.1.1, pluggy-1.6.0 -- C:\ts-venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: C:\ts
+configfile: pyproject.toml
+plugins: anyio-4.11.0
+collecting ... collected 14 items
+
+tests/hardware/test_virtual_driver.py::test_a_fresh_install_lists_two_cables_each_with_its_own_endpoints 
+ROOT\MEDIA\0000: 'ToneSphere Cable 1' working
+ROOT\MEDIA\0001: 'ToneSphere Cable 2' working
+PASSED
+tests/hardware/test_virtual_driver.py::test_one_application_to_another_through_each_cable[ToneSphere Cable 1] 
+PortAudio -> ToneSphere Cable 1 -> PortAudio: 1000.00 Hz, rms 0.14128 (expected 0.14142, -0.009 dB)
+PASSED
+tests/hardware/test_virtual_driver.py::test_one_application_to_another_through_each_cable[ToneSphere Cable 2] 
+PortAudio -> ToneSphere Cable 2 -> PortAudio: 1000.00 Hz, rms 0.14142 (expected 0.14142, +0.000 dB)
+PASSED
+tests/hardware/test_virtual_driver.py::test_the_cables_are_isolated_from_each_other 
+into ToneSphere Cable 1: ToneSphere Cable 1 rms 0.14142, ToneSphere Cable 2 peak 0.0e+00
+PASSED
+tests/hardware/test_virtual_driver.py::test_an_application_into_tonesphere 
+PortAudio -> ToneSphere Cable 1 -> ToneSphere: 1000.00 Hz, rms 0.14128 (expected 0.14142, -0.009 dB)
+PASSED
+tests/hardware/test_virtual_driver.py::test_tonesphere_through_a_plugin_into_another_application 
+ToneSphere -> Test Gain x0.5 -> ToneSphere Cable 2 -> PortAudio: 1000.00 Hz, rms 0.07071 (expected 0.07071, +0.000 dB)
+PASSED
+tests/hardware/test_virtual_driver.py::test_nothing_rendered_is_silence PASSED
+tests/hardware/test_virtual_driver.py::test_a_new_capture_does_not_hear_what_was_played_before_it PASSED
+tests/hardware/test_virtual_driver.py::test_the_engine_reports_every_cable_with_its_endpoints [32m[INFO][0m 2026-09-30 21:29:27 - tonesphere - Added channel control for device 0 with 2 channels
+[32m[INFO][0m 2026-09-30 21:29:27 - tonesphere - Added channel control for device 1 with 2 channels
+[32m[INFO][0m 2026-09-30 21:29:27 - tonesphere - Added channel control for device 2 with 2 channels
+[32m[INFO][0m 2026-09-30 21:29:27 - tonesphere - Added channel control for device 3 with 2 channels
+[32m[INFO][0m 2026-09-30 21:29:27 - tonesphere.core.engine - Engine initialized: 4 devices, Windows WASAPI
+PASSED[32m[INFO][0m 2026-09-30 21:29:27 - tonesphere.network.udp_transport - UDP audio transport stopped
+[32m[INFO][0m 2026-09-30 21:29:27 - tonesphere - Network audio router stopped
+[32m[INFO][0m 2026-09-30 21:29:27 - tonesphere.core.engine - Engine cleanup complete
+
+tests/hardware/test_virtual_driver.py::test_a_cable_added_renamed_and_uninstalled_through_the_app [32m[INFO][0m 2026-09-30 21:29:27 - tonesphere - Added channel control for device 0 with 2 channels
+[32m[INFO][0m 2026-09-30 21:29:27 - tonesphere - Added channel control for device 1 with 2 channels
+[32m[INFO][0m 2026-09-30 21:29:27 - tonesphere - Added channel control for device 2 with 2 channels
+[32m[INFO][0m 2026-09-30 21:29:27 - tonesphere - Added channel control for device 3 with 2 channels
+[32m[INFO][0m 2026-09-30 21:29:27 - tonesphere.core.engine - Engine initialized: 4 devices, Windows WASAPI
+[32m[INFO][0m 2026-09-30 21:29:28 - tonesphere.core.engine - Refreshed: 6 devices
+[32m[INFO][0m 2026-09-30 21:29:28 - tonesphere.core.engine - Refreshed: 6 devices
+[32m[INFO][0m 2026-09-30 21:29:32 - tonesphere.core.engine - Refreshed: 6 devices
+[32m[INFO][0m 2026-09-30 21:29:32 - tonesphere.core.engine - Refreshed: 4 devices
+[32m[INFO][0m 2026-09-30 21:29:32 - tonesphere.core.engine - Refreshed: 4 devices
+
+added 'Chat' (ROOT\MEDIA\0002), renamed it 'Game', uninstalled it; ToneSphere Cable 1 still carries audio
+PASSED[32m[INFO][0m 2026-09-30 21:29:36 - tonesphere.network.udp_transport - UDP audio transport stopped
+[32m[INFO][0m 2026-09-30 21:29:36 - tonesphere - Network audio router stopped
+[32m[INFO][0m 2026-09-30 21:29:36 - tonesphere.core.engine - Engine cleanup complete
+
+tests/hardware/test_virtual_driver.py::test_a_cable_disabled_mid_stream_is_reopened_when_it_returns [32m[INFO][0m 2026-09-30 21:29:36 - tonesphere - Added channel control for device 0 with 2 channels
+[32m[INFO][0m 2026-09-30 21:29:36 - tonesphere - Added channel control for device 1 with 2 channels
+[32m[INFO][0m 2026-09-30 21:29:36 - tonesphere - Added channel control for device 2 with 2 channels
+[32m[INFO][0m 2026-09-30 21:29:36 - tonesphere - Added channel control for device 3 with 2 channels
+[32m[INFO][0m 2026-09-30 21:29:36 - tonesphere.core.engine - Engine initialized: 4 devices, Windows WASAPI
+[32m[INFO][0m 2026-09-30 21:29:36 - tonesphere.network.udp_transport - UDP socket SO_RCVBUF: requested 1048576, got 1048576
+[32m[INFO][0m 2026-09-30 21:29:36 - tonesphere.network.udp_transport - UDP socket SO_SNDBUF: requested 1048576, got 1048576
+[32m[INFO][0m 2026-09-30 21:29:36 - tonesphere.network.udp_transport - UDP audio transport listening on 127.0.0.1:56094
+[32m[INFO][0m 2026-09-30 21:29:36 - tonesphere - Added channel control for device 10000 with 2 channels
+[32m[INFO][0m 2026-09-30 21:29:36 - tonesphere.core.engine - Created input bus 'heard' (id 10000)
+[32m[INFO][0m 2026-09-30 21:29:36 - tonesphere - Added channel control for device 10001 with 2 channels
+[32m[INFO][0m 2026-09-30 21:29:36 - tonesphere.core.engine - Created input bus 'tone' (id 10001)
+[32m[INFO][0m 2026-09-30 21:29:36 - tonesphere - Created routing: 3 -> 10000
+[32m[INFO][0m 2026-09-30 21:29:36 - tonesphere - Created routing: 10001 -> 0
+[32m[INFO][0m 2026-09-30 21:29:36 - tonesphere - Created routing: 10000 -> 20000
+[32m[INFO][0m 2026-09-30 21:29:36 - tonesphere.network.send_worker - Network send worker running every 10.0 ms
+
+captured 4.01 s, the tone from 0.6630416666666666 s
+[32m[INFO][0m 2026-09-30 21:29:41 - tonesphere.core.engine - Dropped routes to removed device: Windows WASAPI::{0.0.1.00000000}.{99cc0a7b-9fc1-4a34-bbc2-b6d5b6b9d740}
+[32m[INFO][0m 2026-09-30 21:29:41 - tonesphere.core.engine - Refreshed: 2 devices
+[33m[WARNING][0m 2026-09-30 21:29:41 - tonesphere.core.engine - Engine start: Windows WASAPI::{0.0.1.00000000}.{99cc0a7b-9fc1-4a34-bbc2-b6d5b6b9d740}: device not present
+[32m[INFO][0m 2026-09-30 21:29:41 - tonesphere.core.engine - Reopened after a device change: ['Windows WASAPI::{0.0.1.00000000}.{99cc0a7b-9fc1-4a34-bbc2-b6d5b6b9d740}']
+
+disabled ToneSphere Cable 2: {'arrived': [], 'left': ['Speakers (ToneSphere Cable 2)', 'Microphone Array (ToneSphere Cable 2)'], 'failed': {}, 'reopened': True, 'error': None, 'still_failed': {}, 'serial': 1, 'at': 1790803781.1401813, 'events': 0}
+[32m[INFO][0m 2026-09-30 21:29:41 - tonesphere.core.engine - Dropped routes to removed device: Windows WASAPI::{0.0.1.00000000}.{99cc0a7b-9fc1-4a34-bbc2-b6d5b6b9d740}
+[32m[INFO][0m 2026-09-30 21:29:41 - tonesphere.core.engine - Refreshed: 2 devices
+[32m[INFO][0m 2026-09-30 21:29:43 - tonesphere.core.engine - Refreshed: 4 devices
+[32m[INFO][0m 2026-09-30 21:29:43 - tonesphere.core.engine - Reopened after a device change: ['Windows WASAPI::{0.0.1.00000000}.{99cc0a7b-9fc1-4a34-bbc2-b6d5b6b9d740}']
+enabled ToneSphere Cable 2: {'arrived': ['Speakers (ToneSphere Cable 2)', 'Microphone Array (ToneSphere Cable 2)'], 'left': [], 'failed': {}, 'reopened': True, 'error': None, 'still_failed': {}, 'serial': 2, 'at': 1790803783.8905425, 'events': 0}
+[32m[INFO][0m 2026-09-30 21:29:44 - tonesphere.core.engine - Refreshed: 4 devices
+
+captured 4.01 s, the tone from 0.6520416666666666 s
+
+after ToneSphere Cable 2 returned, PortAudio -> ToneSphere Cable 2 -> ToneSphere (reopened with no user action): 1000.00 Hz, rms 0.14142 (expected 0.14142, +0.000 dB)
+PASSED[32m[INFO][0m 2026-09-30 21:29:49 - tonesphere.network.udp_transport - UDP audio transport stopped
+[32m[INFO][0m 2026-09-30 21:29:49 - tonesphere - Network audio router stopped
+[32m[INFO][0m 2026-09-30 21:29:49 - tonesphere.core.engine - Engine cleanup complete
+
+tests/hardware/test_virtual_driver.py::test_a_cable_in_use_elsewhere_is_disabled_or_refused_cleanly_never_left_pending_a_restart [32m[INFO][0m 2026-09-30 21:29:49 - tonesphere - Added channel control for device 0 with 2 channels
+[32m[INFO][0m 2026-09-30 21:29:49 - tonesphere - Added channel control for device 1 with 2 channels
+[32m[INFO][0m 2026-09-30 21:29:49 - tonesphere - Added channel control for device 2 with 2 channels
+[32m[INFO][0m 2026-09-30 21:29:49 - tonesphere - Added channel control for device 3 with 2 channels
+[32m[INFO][0m 2026-09-30 21:29:49 - tonesphere.core.engine - Engine initialized: 4 devices, Windows WASAPI
+[32m[INFO][0m 2026-09-30 21:29:55 - tonesphere.core.engine - Refreshed: 2 devices
+[32m[INFO][0m 2026-09-30 21:29:55 - tonesphere.core.engine - Refreshed: 4 devices
+[32m[INFO][0m 2026-09-30 21:29:55 - tonesphere.core.engine - Refreshed: 4 devices
+[32m[INFO][0m 2026-09-30 21:30:06 - tonesphere.core.engine - Refreshed: 4 devices
+[32m[INFO][0m 2026-09-30 21:30:06 - tonesphere.core.engine - Refreshed: 2 devices
+[32m[INFO][0m 2026-09-30 21:30:06 - tonesphere.core.engine - Refreshed: 4 devices
+
+while a PortAudio program recorded ToneSphere Cable 2: disabled under it. While another native-engine program held it: refused (a program has this cable open, and Windows' audio engine will not take a device away from a program using it; close that program, or stop it using the cable, and try again); disabled and enabled once it let go
+PASSED[32m[INFO][0m 2026-09-30 21:30:06 - tonesphere.network.udp_transport - UDP audio transport stopped
+[32m[INFO][0m 2026-09-30 21:30:06 - tonesphere - Network audio router stopped
+[32m[INFO][0m 2026-09-30 21:30:06 - tonesphere.core.engine - Engine cleanup complete
+
+tests/hardware/test_virtual_driver.py::test_the_virtual_cables_dialog_disables_and_enables_a_real_cable [32m[INFO][0m 2026-09-30 21:30:06 - tonesphere - Added channel control for device 0 with 2 channels
+[32m[INFO][0m 2026-09-30 21:30:06 - tonesphere - Added channel control for device 1 with 2 channels
+[32m[INFO][0m 2026-09-30 21:30:06 - tonesphere - Added channel control for device 2 with 2 channels
+[32m[INFO][0m 2026-09-30 21:30:06 - tonesphere - Added channel control for device 3 with 2 channels
+[32m[INFO][0m 2026-09-30 21:30:06 - tonesphere.core.engine - Engine initialized: 4 devices, Windows WASAPI
+[32m[INFO][0m 2026-09-30 21:30:12 - tonesphere.i18n - No language chosen yet; using 'en' from the system locale
+QFontDatabase: Cannot find font directory C:/ts-venv/Lib/site-packages/PySide6/lib/fonts.
+Note that Qt no longer ships fonts. Deploy some (from https://dejavu-fonts.github.io/ for example) or switch to fontconfig.
+[32m[INFO][0m 2026-09-30 21:30:12 - tonesphere.core.engine - Refreshed: 2 devices
+This plugin does not support propagateSizeHints()
+[32m[INFO][0m 2026-09-30 21:30:13 - tonesphere.core.engine - Refreshed: 2 devices
+[32m[INFO][0m 2026-09-30 21:30:13 - tonesphere.core.engine - Refreshed: 4 devices
+PASSED[32m[INFO][0m 2026-09-30 21:30:13 - tonesphere.network.udp_transport - UDP audio transport stopped
+[32m[INFO][0m 2026-09-30 21:30:13 - tonesphere - Network audio router stopped
+[32m[INFO][0m 2026-09-30 21:30:13 - tonesphere.core.engine - Engine cleanup complete
+
+tests/hardware/test_virtual_driver.py::test_ffmpeg_records_what_tonesphere_plays_into_a_cable 
+ffmpeg took 13.6 s to record 3 s
+
+ToneSphere -> ToneSphere Cable 1 -> ffmpeg (DirectShow): 1000.00 Hz, rms 0.14142 (expected 0.14142, +0.000 dB)
+PASSED
+
+=================================== PASSES ====================================
+___________ test_the_engine_reports_every_cable_with_its_endpoints ____________
+----------------------------- Captured log setup ------------------------------
+INFO     tonesphere:channel_control.py:230 Added channel control for device 0 with 2 channels
+INFO     tonesphere:channel_control.py:230 Added channel control for device 1 with 2 channels
+INFO     tonesphere:channel_control.py:230 Added channel control for device 2 with 2 channels
+INFO     tonesphere:channel_control.py:230 Added channel control for device 3 with 2 channels
+INFO     tonesphere.core.engine:engine.py:193 Engine initialized: 4 devices, Windows WASAPI
+---------------------------- Captured log teardown ----------------------------
+INFO     tonesphere.network.udp_transport:udp_transport.py:487 UDP audio transport stopped
+INFO     tonesphere:audio_router.py:192 Network audio router stopped
+INFO     tonesphere.core.engine:engine.py:323 Engine cleanup complete
+_________ test_a_cable_added_renamed_and_uninstalled_through_the_app __________
+----------------------------- Captured log setup ------------------------------
+INFO     tonesphere:channel_control.py:230 Added channel control for device 0 with 2 channels
+INFO     tonesphere:channel_control.py:230 Added channel control for device 1 with 2 channels
+INFO     tonesphere:channel_control.py:230 Added channel control for device 2 with 2 channels
+INFO     tonesphere:channel_control.py:230 Added channel control for device 3 with 2 channels
+INFO     tonesphere.core.engine:engine.py:193 Engine initialized: 4 devices, Windows WASAPI
+------------------------------ Captured log call ------------------------------
+INFO     tonesphere.core.engine:engine.py:409 Refreshed: 6 devices
+INFO     tonesphere.core.engine:engine.py:409 Refreshed: 6 devices
+INFO     tonesphere.core.engine:engine.py:409 Refreshed: 6 devices
+INFO     tonesphere.core.engine:engine.py:409 Refreshed: 4 devices
+INFO     tonesphere.core.engine:engine.py:409 Refreshed: 4 devices
+---------------------------- Captured log teardown ----------------------------
+INFO     tonesphere.network.udp_transport:udp_transport.py:487 UDP audio transport stopped
+INFO     tonesphere:audio_router.py:192 Network audio router stopped
+INFO     tonesphere.core.engine:engine.py:323 Engine cleanup complete
+________ test_a_cable_disabled_mid_stream_is_reopened_when_it_returns _________
+----------------------------- Captured log setup ------------------------------
+INFO     tonesphere:channel_control.py:230 Added channel control for device 0 with 2 channels
+INFO     tonesphere:channel_control.py:230 Added channel control for device 1 with 2 channels
+INFO     tonesphere:channel_control.py:230 Added channel control for device 2 with 2 channels
+INFO     tonesphere:channel_control.py:230 Added channel control for device 3 with 2 channels
+INFO     tonesphere.core.engine:engine.py:193 Engine initialized: 4 devices, Windows WASAPI
+------------------------------ Captured log call ------------------------------
+INFO     tonesphere.network.udp_transport:udp_transport.py:442 UDP socket SO_RCVBUF: requested 1048576, got 1048576
+INFO     tonesphere.network.udp_transport:udp_transport.py:442 UDP socket SO_SNDBUF: requested 1048576, got 1048576
+INFO     tonesphere.network.udp_transport:udp_transport.py:463 UDP audio transport listening on 127.0.0.1:56094
+INFO     tonesphere:channel_control.py:230 Added channel control for device 10000 with 2 channels
+INFO     tonesphere.core.engine:engine.py:670 Created input bus 'heard' (id 10000)
+INFO     tonesphere:channel_control.py:230 Added channel control for device 10001 with 2 channels
+INFO     tonesphere.core.engine:engine.py:670 Created input bus 'tone' (id 10001)
+INFO     tonesphere:routing.py:30 Created routing: 3 -> 10000
+INFO     tonesphere:routing.py:30 Created routing: 10001 -> 0
+INFO     tonesphere:routing.py:30 Created routing: 10000 -> 20000
+INFO     tonesphere.network.send_worker:send_worker.py:255 Network send worker running every 10.0 ms
+INFO     tonesphere.core.engine:engine.py:400 Dropped routes to removed device: Windows WASAPI::{0.0.1.00000000}.{99cc0a7b-9fc1-4a34-bbc2-b6d5b6b9d740}
+INFO     tonesphere.core.engine:engine.py:409 Refreshed: 2 devices
+WARNING  tonesphere.core.engine:engine.py:232 Engine start: Windows WASAPI::{0.0.1.00000000}.{99cc0a7b-9fc1-4a34-bbc2-b6d5b6b9d740}: device not present
+INFO     tonesphere.core.engine:engine.py:460 Reopened after a device change: ['Windows WASAPI::{0.0.1.00000000}.{99cc0a7b-9fc1-4a34-bbc2-b6d5b6b9d740}']
+INFO     tonesphere.core.engine:engine.py:400 Dropped routes to removed device: Windows WASAPI::{0.0.1.00000000}.{99cc0a7b-9fc1-4a34-bbc2-b6d5b6b9d740}
+INFO     tonesphere.core.engine:engine.py:409 Refreshed: 2 devices
+INFO     tonesphere.core.engine:engine.py:409 Refreshed: 4 devices
+INFO     tonesphere.core.engine:engine.py:460 Reopened after a device change: ['Windows WASAPI::{0.0.1.00000000}.{99cc0a7b-9fc1-4a34-bbc2-b6d5b6b9d740}']
+INFO     tonesphere.core.engine:engine.py:409 Refreshed: 4 devices
+---------------------------- Captured log teardown ----------------------------
+INFO     tonesphere.network.udp_transport:udp_transport.py:487 UDP audio transport stopped
+INFO     tonesphere:audio_router.py:192 Network audio router stopped
+INFO     tonesphere.core.engine:engine.py:323 Engine cleanup complete
+_ test_a_cable_in_use_elsewhere_is_disabled_or_refused_cleanly_never_left_pending_a_restart _
+----------------------------- Captured log setup ------------------------------
+INFO     tonesphere:channel_control.py:230 Added channel control for device 0 with 2 channels
+INFO     tonesphere:channel_control.py:230 Added channel control for device 1 with 2 channels
+INFO     tonesphere:channel_control.py:230 Added channel control for device 2 with 2 channels
+INFO     tonesphere:channel_control.py:230 Added channel control for device 3 with 2 channels
+INFO     tonesphere.core.engine:engine.py:193 Engine initialized: 4 devices, Windows WASAPI
+------------------------------ Captured log call ------------------------------
+INFO     tonesphere.core.engine:engine.py:409 Refreshed: 2 devices
+INFO     tonesphere.core.engine:engine.py:409 Refreshed: 4 devices
+INFO     tonesphere.core.engine:engine.py:409 Refreshed: 4 devices
+INFO     tonesphere.core.engine:engine.py:409 Refreshed: 4 devices
+INFO     tonesphere.core.engine:engine.py:409 Refreshed: 2 devices
+INFO     tonesphere.core.engine:engine.py:409 Refreshed: 4 devices
+---------------------------- Captured log teardown ----------------------------
+INFO     tonesphere.network.udp_transport:udp_transport.py:487 UDP audio transport stopped
+INFO     tonesphere:audio_router.py:192 Network audio router stopped
+INFO     tonesphere.core.engine:engine.py:323 Engine cleanup complete
+______ test_the_virtual_cables_dialog_disables_and_enables_a_real_cable _______
+----------------------------- Captured log setup ------------------------------
+INFO     tonesphere:channel_control.py:230 Added channel control for device 0 with 2 channels
+INFO     tonesphere:channel_control.py:230 Added channel control for device 1 with 2 channels
+INFO     tonesphere:channel_control.py:230 Added channel control for device 2 with 2 channels
+INFO     tonesphere:channel_control.py:230 Added channel control for device 3 with 2 channels
+INFO     tonesphere.core.engine:engine.py:193 Engine initialized: 4 devices, Windows WASAPI
+------------------------------ Captured log call ------------------------------
+INFO     tonesphere.core.engine:engine.py:409 Refreshed: 2 devices
+INFO     tonesphere.core.engine:engine.py:409 Refreshed: 2 devices
+INFO     tonesphere.core.engine:engine.py:409 Refreshed: 4 devices
+---------------------------- Captured log teardown ----------------------------
+INFO     tonesphere.network.udp_transport:udp_transport.py:487 UDP audio transport stopped
+INFO     tonesphere:audio_router.py:192 Network audio router stopped
+INFO     tonesphere.core.engine:engine.py:323 Engine cleanup complete
+=========================== short test summary info ===========================
+PASSED tests/hardware/test_virtual_driver.py::test_a_fresh_install_lists_two_cables_each_with_its_own_endpoints
+PASSED tests/hardware/test_virtual_driver.py::test_one_application_to_another_through_each_cable[ToneSphere Cable 1]
+PASSED tests/hardware/test_virtual_driver.py::test_one_application_to_another_through_each_cable[ToneSphere Cable 2]
+PASSED tests/hardware/test_virtual_driver.py::test_the_cables_are_isolated_from_each_other
+PASSED tests/hardware/test_virtual_driver.py::test_an_application_into_tonesphere
+PASSED tests/hardware/test_virtual_driver.py::test_tonesphere_through_a_plugin_into_another_application
+PASSED tests/hardware/test_virtual_driver.py::test_nothing_rendered_is_silence
+PASSED tests/hardware/test_virtual_driver.py::test_a_new_capture_does_not_hear_what_was_played_before_it
+PASSED tests/hardware/test_virtual_driver.py::test_the_engine_reports_every_cable_with_its_endpoints
+PASSED tests/hardware/test_virtual_driver.py::test_a_cable_added_renamed_and_uninstalled_through_the_app
+PASSED tests/hardware/test_virtual_driver.py::test_a_cable_disabled_mid_stream_is_reopened_when_it_returns
+PASSED tests/hardware/test_virtual_driver.py::test_a_cable_in_use_elsewhere_is_disabled_or_refused_cleanly_never_left_pending_a_restart
+PASSED tests/hardware/test_virtual_driver.py::test_the_virtual_cables_dialog_disables_and_enables_a_real_cable
+PASSED tests/hardware/test_virtual_driver.py::test_ffmpeg_records_what_tonesphere_plays_into_a_cable
+======================== 14 passed in 81.80s (0:01:21) ========================
+============================= test session starts =============================
+platform win32 -- Python 3.13.15, pytest-9.1.1, pluggy-1.6.0 -- C:\ts-venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: C:\ts
+configfile: pyproject.toml
+plugins: anyio-4.11.0
+collecting ... collected 4 items
+
+tests/hardware/test_asio.py::test_drivers_are_registered_and_load 
+ASIO4ALL v2: 'ASIO4ALL v2' v2, 2 in / 2 out, buffer 64-2048 (preferred 512, granularity 8), rates [44100, 48000, 96000, 192000], reported latency 512/512 frames, outputReady=False, types in ['int32', 'int32'] out ['int32', 'int32']
+PASSED
+tests/hardware/test_asio.py::test_the_buffer_switch_runs_the_engine[ASIO4ALL v2] 
+ASIO4ALL v2: first buffer switch 397 ms after start, then 47780 frames/s
+ASIO4ALL v2: 141 buffer switches of 512 frames at 48000 Hz, callback mean 24.3 us max 64.2 us, load 0.6%, xruns 0, reported latency [10.6666, 10.6666] ms, ASIO: ASIO4ALL v2; the driver requested a reset: restart the stream
+  input 1: -29.0 dBFS rms, dominant 1000.33 Hz
+  input 2: -29.0 dBFS rms, dominant 1000.33 Hz
+PASSED
+tests/hardware/test_asio.py::test_output_content_where_the_driver_renders_through_wasapi[ASIO4ALL v2] SKIPPED
+tests/hardware/test_asio.py::test_the_output_reaches_an_interface_cable_at_the_level_native_wasapi_gives[ASIO4ALL v2] 
+ASIO4ALL v2 -> ToneSphere Cable 1 cable -> ASIO4ALL v2: 1000.00 Hz, rms 0.03536; native WASAPI exclusive 0.03530; difference +0.01 dB
+PASSED
+
+=================================== PASSES ====================================
+=========================== short test summary info ===========================
+PASSED tests/hardware/test_asio.py::test_drivers_are_registered_and_load
+PASSED tests/hardware/test_asio.py::test_the_buffer_switch_runs_the_engine[ASIO4ALL v2]
+PASSED tests/hardware/test_asio.py::test_the_output_reaches_an_interface_cable_at_the_level_native_wasapi_gives[ASIO4ALL v2]
+SKIPPED [1] tests\hardware\test_asio.py:158: ASIO4ALL v2 does not render through WASAPI in this process; its output needs a loopback cable
+======================== 3 passed, 1 skipped in 16.99s ========================
+============================= test session starts =============================
+platform win32 -- Python 3.13.15, pytest-9.1.1, pluggy-1.6.0 -- C:\ts-venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: C:\ts
+configfile: pyproject.toml
+plugins: anyio-4.11.0
+collecting ... collected 7 items
+
+tests/hardware/test_roundtrip.py::test_the_digital_loopback_path_is_measured_and_repeatable 
+digital render->loopback: 43.35 / 43.35 ms (2081 / 2081 frames), confidence 34.3, nominal 10.0 ms, reported None
+PASSED
+tests/hardware/test_roundtrip.py::test_an_acoustic_attempt_either_measures_or_refuses 
+Speakers (ToneSphere Cable 1) -> Microphone Array (ToneSphere Cable 1): measured 64.35416666666667 ms, confidence 34.3; measured by GCC-PHAT on an exponential sweep
+PASSED
+tests/hardware/test_roundtrip.py::test_the_laptops_own_speaker_to_its_own_microphone SKIPPED
+tests/hardware/test_roundtrip.py::test_the_engine_keeps_a_loopback_measurement_apart_from_the_round_trip [32m[INFO][0m 2026-09-30 21:30:53 - tonesphere - Added channel control for device 0 with 2 channels
+[32m[INFO][0m 2026-09-30 21:30:53 - tonesphere - Added channel control for device 1 with 2 channels
+[32m[INFO][0m 2026-09-30 21:30:53 - tonesphere - Added channel control for device 2 with 2 channels
+[32m[INFO][0m 2026-09-30 21:30:53 - tonesphere - Added channel control for device 3 with 2 channels
+[32m[INFO][0m 2026-09-30 21:30:53 - tonesphere.core.engine - Engine initialized: 4 devices, Windows WASAPI
+[32m[INFO][0m 2026-09-30 21:30:55 - tonesphere - Added channel control for device 10000 with 2 channels
+[32m[INFO][0m 2026-09-30 21:30:55 - tonesphere.core.engine - Created input bus 'feed' (id 10000)
+[32m[INFO][0m 2026-09-30 21:30:55 - tonesphere - Created routing: 10000 -> 1
+[32m[INFO][0m 2026-09-30 21:30:55 - tonesphere.network.udp_transport - UDP audio transport stopped
+[32m[INFO][0m 2026-09-30 21:30:55 - tonesphere - Network audio router stopped
+[32m[INFO][0m 2026-09-30 21:30:55 - tonesphere.core.engine - Engine cleanup complete
+PASSED
+tests/hardware/test_roundtrip.py::test_an_interface_cable_round_trip FAILED
+tests/hardware/test_roundtrip.py::test_an_interface_cable_round_trip_in_shared_mode 
+ToneSphere Cable 1 out -> cable -> in, shared, 480-frame block: 73.35 / 63.35 ms (3521 / 3041 frames), confidence 79.0, captured peak -18.0 dBFS, nominal 10.0 ms, reported None
+PASSED
+tests/hardware/test_roundtrip.py::test_an_asio_round_trip_through_the_interface_cable 
+ASIO4ALL v2 (buffer 512): 29.94 ms (1437 frames), confidence 79.0, peak -18.0 dBFS, driver-reported 33.2083 ms
+PASSED
+
+================================== FAILURES ===================================
+_____________________ test_an_interface_cable_round_trip ______________________
+
+    def test_an_interface_cable_round_trip():
+        """
+        A cable from an interface's output to its own input (TONESPHERE_TEST_INTERFACE, default
+        "AI-04"): the physical round trip, DAC and ADC included, in exclusive mode. Without the
+        cable the tool must refuse, and the test skips with its reason instead of passing.
+        """
+        name, out, inp = interface_endpoints()
+        period = round(out.min_period_ms * 48) if out.min_period_ms else 144
+        first = measure(out.id, inp.id, exclusive=True, block=period, level_db=-18.0)
+        if first.measured_ms is None:
+            assert first.note
+            pytest.skip(f"MEASURED ROUND TRIP: -- ({name}: {first.note})")
+        second = measure(out.id, inp.id, exclusive=True, block=period, level_db=-18.0)
+>       assert first.confidence > CONFIDENCE_THRESHOLD and second.measured_ms is not None, second.note
+E       AssertionError: no clear path from output to input (confidence 2.3 < 4.0); a loopback cable, or a microphone that can hear the speaker, is needed
+E       assert (79.03912689363908 > 4.0 and None is not None)
+E        +  where 79.03912689363908 = RoundTrip(measured_ms=12.020833333333332, measured_frames=577, confidence=79.03912689363908, nominal_ms=3.0, reported_ms=6.0, sample_rate=48000, block=144, output='Speakers (ToneSphere Cable 1)', input='Microphone Array (ToneSphere Cable 1)', note='measured by GCC-PHAT on an exponential sweep', peak_dbfs=-18.000000436554874).confidence
+E        +  and   None = RoundTrip(measured_ms=None, measured_frames=None, confidence=2.2599970363429147, nominal_ms=3.0, reported_ms=6.0, sample_rate=48000, block=144, output='Speakers (ToneSphere Cable 1)', input='Microphone Array (ToneSphere Cable 1)', note='no clear path from output to input (confidence 2.3 < 4.0); a loopback cable, or a microphone that can hear the speaker, is needed', peak_dbfs=-18.000019970435567).measured_ms
+
+tests\hardware\test_roundtrip.py:145: AssertionError
+=================================== PASSES ====================================
+___ test_the_engine_keeps_a_loopback_measurement_apart_from_the_round_trip ____
+------------------------------ Captured log call ------------------------------
+INFO     tonesphere:channel_control.py:230 Added channel control for device 0 with 2 channels
+INFO     tonesphere:channel_control.py:230 Added channel control for device 1 with 2 channels
+INFO     tonesphere:channel_control.py:230 Added channel control for device 2 with 2 channels
+INFO     tonesphere:channel_control.py:230 Added channel control for device 3 with 2 channels
+INFO     tonesphere.core.engine:engine.py:193 Engine initialized: 4 devices, Windows WASAPI
+INFO     tonesphere:channel_control.py:230 Added channel control for device 10000 with 2 channels
+INFO     tonesphere.core.engine:engine.py:670 Created input bus 'feed' (id 10000)
+INFO     tonesphere:routing.py:30 Created routing: 10000 -> 1
+INFO     tonesphere.network.udp_transport:udp_transport.py:487 UDP audio transport stopped
+INFO     tonesphere:audio_router.py:192 Network audio router stopped
+INFO     tonesphere.core.engine:engine.py:323 Engine cleanup complete
+=========================== short test summary info ===========================
+PASSED tests/hardware/test_roundtrip.py::test_the_digital_loopback_path_is_measured_and_repeatable
+PASSED tests/hardware/test_roundtrip.py::test_an_acoustic_attempt_either_measures_or_refuses
+PASSED tests/hardware/test_roundtrip.py::test_the_engine_keeps_a_loopback_measurement_apart_from_the_round_trip
+PASSED tests/hardware/test_roundtrip.py::test_an_interface_cable_round_trip_in_shared_mode
+PASSED tests/hardware/test_roundtrip.py::test_an_asio_round_trip_through_the_interface_cable
+SKIPPED [1] tests\hardware\test_roundtrip.py:74: no 'Realtek' output or 'Microphone Array' input
+FAILED tests/hardware/test_roundtrip.py::test_an_interface_cable_round_trip
+=================== 1 failed, 5 passed, 1 skipped in 20.86s ===================

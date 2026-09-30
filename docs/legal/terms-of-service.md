@@ -2,8 +2,8 @@
 title: Terms of Service
 layout: default
 permalink: /legal/terms-of-service/
-version: "1.0"
-effective_date: "2026-09-09"
+version: "1.4"
+effective_date: "2026-10-01"
 publisher: Neural Nexus Studios
 description: What the ToneSphere application provides and does not provide, how it is distributed, updated and supported, and the terms attaching to its optional network streaming feature.
 ---
@@ -12,8 +12,8 @@ description: What the ToneSphere application provides and does not provide, how 
 
 - **Application:** ToneSphere
 - **Publisher:** Neural Nexus Studios, an individual developer, Kolkata, West Bengal, India
-- **Document version:** 1.0
-- **Effective date:** 9 September 2026
+- **Document version:** 1.4
+- **Effective date:** 1 October 2026
 
 ## 1. What this document covers
 
@@ -34,35 +34,47 @@ By using ToneSphere you accept this document together with the Terms and Conditi
 ToneSphere is a local desktop application for routing, mixing and processing audio on your
 own computer. Provided you have working audio hardware and drivers, it offers:
 
-- **Routing and mixing between the audio devices on your machine**, with one audio stream
-  per device and mixing performed inside the driver callback. A device used for both input
-  and output is opened as a single duplex stream, so that its input and output share one
-  clock.
-- **Mixer controls** — constant-power pan, polarity inversion, per-channel trim, mute and
-  solo, channel swap, smoothed gain changes, and a limiter on each output.
+- **Routing and mixing between the audio devices on your machine.** On Windows this runs
+  on a native real-time engine: one device's clock drives the mix, and every other device
+  crosses into it through a drift-corrected buffer. On Linux and macOS it runs on a
+  PortAudio host that mixes inside each driver callback, which is not real-time safe in the
+  strict sense.
+- **Mixer controls** — pan on routes (constant power for mono sources, balance for stereo),
+  balance on stereo channel strips, polarity inversion, per-channel trim, mute and solo,
+  channel swap, smoothed gain changes, and a limiter on each output.
 - **Built-in effects** — biquad equalisation (peaking and shelving filters, high-pass and
-  low-pass), a compressor with attack, release, knee and makeup gain, and a delay with
-  feedback.
-- **Hosting of VST3 and AU plugins that you already own**, loaded onto a channel and
-  monitored through. Plugin latency is added to the reported round-trip figure rather than
-  hidden from it.
+  low-pass), a compressor with attack, release, knee and makeup gain, a limiter, and a delay
+  with feedback; on Windows, in each device's and bus's insert chain alongside plugins.
 - **A patchbay** in which routes are made by dragging a port to a port, and feedback loops
   are refused rather than created.
 - **Presets** saved as plain YAML and keyed on device names rather than device indices, so
   that they survive hardware being plugged in or removed. A preset saved with an interface
   attached will load without it and report what was missing.
-- **Latency reporting that distinguishes measured from nominal.** The application reports
-  the round-trip latency it actually measured next to the figure that is only buffer
-  arithmetic, and reports a measurement it did not take as unavailable rather than as zero.
-- **Multiple audio backends**, selected automatically or by you: WASAPI (shared and
-  exclusive), WDM-KS, DirectSound and MME on Windows; ALSA and JACK on Linux; CoreAudio on
-  macOS. Exclusive mode is attempted first and falls back to shared mode per device when it
-  is refused, and the application tells you which it obtained.
+- **Latency reporting that says what each figure is.** The application shows the latency
+  the audio driver reports next to the figure that is only buffer arithmetic, labels each
+  for what it is, and shows a measurement it did not take as unavailable rather than as
+  zero. On Windows it can also measure the round trip, by playing a test sweep on an output
+  and timing its return on an input; that needs a physical path between the two (a
+  loopback cable, or a microphone that hears the speaker), and without one the result is
+  shown as unavailable.
+- **Multiple audio backends**: on Windows, WASAPI (shared and exclusive) and ASIO on the
+  native engine, with the PortAudio backends (WDM-KS, DirectSound, MME) available as a
+  fallback; ALSA and JACK on Linux; CoreAudio on macOS. Exclusive mode falls back to shared
+  mode per device when it is refused, and the application tells you which it obtained.
+  ASIO support is a separately licensed component; see section 3.
+- **VST3 effect plugins on Windows** that you already own: a browser that scans the
+  standard folders and yours, each module in a separate process so that a broken one
+  cannot take the application down; insert chains on each device's input and output;
+  parameters, bypass and the plugin's own editor; and presets that carry the chain and each
+  plugin's state; the same from the REST API and the command line. **VST3 instruments**,
+  played by MIDI from a MIDI input port, an on-screen keyboard, the REST API or the command
+  line. Proven with the project's own test plugin and two third-party plugins (Surge XT and
+  Dexed); see section 4.
 - **Per-application audio capture on Windows**, capturing one process's output through the
-  operating system's process-loopback interface, on Windows 10 build 20348 and later. No
-  driver and no virtual cable is required for this.
-- **System-wide loopback capture** of what is playing on an output device, and detection of
-  which applications are currently producing sound.
+  operating system's process-loopback interface, on Windows 10 build 20348 and later, and
+  **whole-system capture** of everything an output plays. No driver and no virtual cable is
+  required for either.
+- **Detection of which applications are currently producing sound.**
 - **A Linux audio sink that other applications can select**, created through PulseAudio or
   PipeWire and bridged into the audio engine as an ordinary output.
 - **A macOS CoreAudio plug-in publishing a loopback device**, on the terms set out in
@@ -82,25 +94,28 @@ This section exists so that you do not have to discover these by trying them.
 - **No accounts, no cloud, no hosted service.** There is no sign-in, no online workspace, no
   server-side storage, no cross-device sync, and no online licence check. ToneSphere runs
   entirely on your machine.
-- **No virtual audio device that other applications can select, on Windows.** The
-  application's buses are summing points inside its own process; nothing outside ToneSphere
-  can see them. A selectable Windows device requires a signed kernel-mode driver, which this
-  project does not attempt and does not claim. The
-  [virtual audio driver notes](../VIRTUAL_AUDIO_DRIVER.md) set out exactly what that route
-  would require.
-- **No ASIO** in the builds we distribute. The redistributable PortAudio build does not
-  include it, because Steinberg's SDK cannot be redistributed. ASIO appears automatically if
-  you supply your own PortAudio built against that SDK.
+- **No virtual audio device that other applications can select, on Windows**, in any build
+  we distribute. The application's buses are summing points inside its own process;
+  nothing outside ToneSphere can see them. A kernel-mode driver publishing such devices
+  ("virtual cables", which the application can add, rename, disable and uninstall) exists in
+  the project for development and testing only: it has been shown to work in a test virtual
+  machine, not on an installed system, and it cannot be offered to users until Microsoft
+  signs it. The [virtual audio driver notes](../VIRTUAL_AUDIO_DRIVER.md) say exactly where
+  it stands.
+- **No plugin hosting outside Windows, and no AU plugins.** No commercial plugin has been
+  tested, and none is represented as compatible. Plugins run inside ToneSphere's own
+  process: a plugin that faults while processing audio is bypassed, but a plugin can still
+  bring the application down.
+- **No audio interface's own ASIO driver tested.** ASIO on Windows is provided by a
+  component built from Steinberg's ASIO SDK under the GNU GPL version 3, and a build that
+  includes it is distributed under that licence (section 3 of the
+  [Terms and Conditions](terms-and-conditions.md)). It has been verified with FlexASIO, a
+  genuine but software ASIO driver, and with ASIO4ALL, a third-party driver, both driving a
+  USB audio interface; no interface manufacturer's ASIO driver has been tested. **The Microsoft Store package
+  does not include ASIO at all**; it runs on WASAPI, shared and exclusive.
 - **No recording to file.** ToneSphere routes and monitors audio; it does not capture it to
   disk. If you want to record, record in your DAW or recorder of choice, downstream of
   ToneSphere.
-- **No compressed network audio.** The network transport carries uncompressed PCM. A codec
-  identifier is reserved for Opus, and both encoding and decoding refuse it rather than
-  quietly substituting PCM.
-- **No sending over the TCP transport.** The TCP path receives only; its send side refuses
-  with a message saying so. UDP is the direction that is wired.
-- **No adaptive jitter buffering.** The network jitter buffer's target latency is a single
-  fixed setting that you can change, not a value estimated from measured jitter.
 - **No guaranteed latency, dropout-free operation, or plugin compatibility.** These depend
   on your hardware, drivers, buffer size, backend and plugins. See section 8 of the
   [Terms and Conditions](terms-and-conditions.md).
@@ -113,10 +128,19 @@ it away:
 
 | Feature | Platform | Status |
 |---|---|---|
-| Audio routing, mixing, effects, plugin hosting | Windows, Linux, macOS | Working and covered by automated tests |
+| Audio routing and mixing between devices | Windows, Linux, macOS | Working and covered by automated tests |
+| Routing through an internal bus from one device to another | Windows | Working; covered by automated signal tests of the native engine |
+| Routing through an internal bus from one device to another | Linux, macOS | Works; tested on Linux through a PulseAudio server. On macOS it runs the same code but has not been tested with real devices |
+| Built-in effects | Windows | Working, from the interface; proven by tests that drive the interface's own controls and measure what the effect did to a known signal |
+| Built-in effects | Linux, macOS | Covered by automated tests; not reachable from the interface |
 | Per-application capture | Windows 10 build 20348 and later | Working, proven by a test that captures a known tone and measures it |
+| Whole-system capture of an output | Windows | Working, proven by capturing two known tones played by other programs and measuring their levels |
+| VST3 effect plugins | Windows | Working with the project's test plugin and with Surge XT, proven by tests that measure what the plugin did to a known signal; other plugins untested |
+| VST3 instruments played by MIDI | Windows | Working with Surge XT and Dexed, proven by tests that play a note and measure its pitch; MIDI from a hardware port untested (no device) |
+| ASIO | Windows | Verified against FlexASIO and ASIO4ALL, third-party ASIO drivers; no interface manufacturer's driver |
+| Measured round-trip latency | Windows | Proven on a digital path, through an interface's cable and acoustically on the project's own hardware; a figure for your hardware depends on a physical path existing between the output and input you choose |
 | Selectable virtual sink | Linux, with PulseAudio or PipeWire running | Working |
-| Selectable virtual device | Windows | Not provided — see section 3 |
+| Selectable virtual device | Windows | Not provided — a development-only driver exists, proven in a test virtual machine only; see section 3 |
 | "ToneSphere Audio" loopback device | macOS | **Proven in continuous integration only.** The plug-in builds, installs and round-trips a measured tone on a macOS CI runner. Its behaviour in day-to-day use — appearing in System Settings and in other applications' device pickers, surviving sleep and wake, and installing past Gatekeeper on an end user's machine — is unverified. Treat it as untested in real use until the project says otherwise. |
 
 Features in that last row are provided on that basis, and no representation is made that
@@ -132,9 +156,10 @@ feature is part of the application, not a service we operate, and these terms ap
 - **We operate no server, relay or intermediary.** The connection is between your machine
   and the peer you nominate. Your audio does not pass through us, is not stored by us, and
   cannot be observed by us.
-- **The transport is unencrypted and unauthenticated.** Audio is carried as PCM in UDP
-  datagrams with a binary header, sequence numbers and a jitter buffer that reorders and
-  paces playout, alongside a TCP receive path for bulk transfer. There is no cipher and no
+- **The transport is unencrypted and unauthenticated.** Audio is carried as PCM, or
+  compressed with Opus, in UDP datagrams with a binary header, sequence numbers and a
+  jitter buffer that sizes itself to the measured network jitter; or over TCP in either
+  direction. There is no cipher and no
   verification of the peer. Anyone who can observe the network path could listen to the
   audio, and anyone who can reach the port you are listening on could send audio into it.
 - **Use it on networks you trust.** It is designed for monitoring across machines you
@@ -207,11 +232,16 @@ this section apply to a copy acquired from the Store once it is available there.
 - Information handling by both channels is described in section 6 of the
   [Privacy Policy](privacy-policy.md).
 
-## 10. Sponsorship and donations
+## 10. Price, sponsorship and donations
 
-ToneSphere is offered at no charge, and every feature it has is available without paying
-for it. No function is withheld, delayed, time-limited, nagged for, or gated behind a
+ToneSphere is currently offered at no charge, and every feature it has is available without
+paying for it. No function is withheld, delayed, time-limited, nagged for, or gated behind a
 payment or a donation prompt.
+
+Future versions or editions may be offered for a price, through the Microsoft Store or
+another channel. That does not change the terms of a copy you already have, and a price is
+always shown before anything is charged; section 3 of the
+[Terms and Conditions](terms-and-conditions.md) sets this out.
 
 You can support the project's continued development through GitHub Sponsors, Patreon, Ko-fi
 or Buy Me a Coffee. If you do:

@@ -1,27 +1,23 @@
 """
-Effects: built-in DSP and VST3/AU plugin hosting.
+Effects: built-in DSP for the legacy Python host.
 
 Replaces `core/processor.py`, whose "real-time audio effects" were an EQ that ignored two
 of its three bands, a compressor that ignored attack and release, and a reverb built on
 `np.roll` — which is a circular shift, so it wrapped the end of each block onto the start
 instead of delaying anything. None of it was connected to an audio path.
 
-Two kinds of effect live here:
+Biquad filters, a compressor and a delay, written to keep their state across blocks. A
+filter that resets each block is not a filter, it is a click generator.
 
-  Built-ins  Biquad filters and a compressor, written to keep their state across blocks.
-             A filter that resets each block is not a filter, it is a click generator.
-
-  Plugins    VST3 and AU, hosted through `pedalboard`. This is the point of the whole
-             exercise for a guitarist: Guitar Rig, Neural DSP or whatever else you already
-             own runs inside ToneSphere, on the same low-latency path as everything else.
+These are also the reference the native processors (native/engine/dsp.h) are proven
+against, sample for sample. VST3 plugins are hosted natively (tonesphere.plugins); the
+pedalboard-based chain that used to live here was never reachable from the UI, API or CLI
+and has been removed.
 """
 
 import math
-import subprocess
-import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any
 
 import numpy as np
 
@@ -495,248 +491,12 @@ class Delay:
         self._write = 0
 
 
-class PluginChainUnavailable(RuntimeError):
-    """`pedalboard` is not usable here, so plugin hosting is not available."""
-
-
-# Cache for PluginChain.is_available(): None means "not yet checked". The answer is a
-# property of the installed wheel and the host CPU, so it cannot change during a run, and
-# the check spawns a subprocess — worth paying for once, not on every call.
-_pedalboard_available: bool | None = None
-
-
-class PluginChain:
-    """
-    A chain of VST3/AU plugins, hosted through `pedalboard`.
-
-    This is the feature the project was originally for: rather than paying for a separate
-    router to get a guitar into Guitar Rig, load Guitar Rig here and monitor through it on
-    the same low-latency path.
-
-    Plugin processing is C++ inside pedalboard, so the GIL is released for the duration —
-    the Python overhead is one call per block, not per sample.
-
-    Latency: many plugins report an internal latency, which has to be added to the round
-    trip we report or the number we show the user is a lie. `reported_latency_samples`
-    exposes it.
-    """
-
-    def __init__(self, samplerate: int, blocksize: int):
-        self.samplerate = samplerate
-        self.blocksize = blocksize
-        self._plugins: list[Any] = []
-        self._names: list[str] = []
-        self._bypassed: list[bool] = []
-
-    @staticmethod
-    def is_available() -> bool:
-        """
-        Whether `pedalboard` can actually be imported here.
-
-        Checked in a throwaway subprocess rather than by importing it directly in this
-        process. A native extension can fail worse than raising ImportError: this
-        project's own CI hit exactly that when pedalboard's Linux wheel produced
-        `Illegal instruction` (SIGILL) purely from being imported, on a runner CPU
-        missing some instruction the compiled code used unconditionally. SIGILL is a
-        fatal signal, not a Python exception — no `try/except` in this process can
-        survive it, so the only way to ask "can this be imported" without risking the
-        process asking the question is to ask a disposable one instead.
-
-        The result is cached: it cannot legitimately change mid-run (same wheel, same
-        CPU), and re-probing would mean a subprocess launch on every call.
-        """
-        global _pedalboard_available
-
-        if _pedalboard_available is not None:
-            return _pedalboard_available
-
-        try:
-            result = subprocess.run(
-                [sys.executable, '-c', 'import pedalboard'],
-                capture_output=True, timeout=20,
-            )
-            available = result.returncode == 0
-            if not available:
-                stderr = result.stderr.decode('utf-8', errors='replace').strip()
-                logger.warning(
-                    "pedalboard could not be imported (exit code "
-                    f"{result.returncode}); VST3/AU plugin hosting is disabled. "
-                    f"{stderr[-300:]}"
-                )
-        except (subprocess.TimeoutExpired, OSError) as e:
-            available = False
-            logger.warning(f"Could not probe pedalboard availability: {e}")
-
-        _pedalboard_available = available
-        return available
-
-    @staticmethod
-    def scan_default_paths() -> list[str]:
-        """
-        Where VST3 plugins live by convention on each platform.
-
-        Returns paths that exist; the caller enumerates them. We do not attempt to load
-        anything here, because loading an unknown plugin can be slow and can crash.
-        """
-        import platform
-        from pathlib import Path
-
-        system = platform.system()
-        if system == "Windows":
-            candidates = [
-                Path("C:/Program Files/Common Files/VST3"),
-                Path("C:/Program Files/VSTPlugins"),
-                Path("C:/Program Files/Steinberg/VSTPlugins"),
-            ]
-        elif system == "Darwin":
-            candidates = [
-                Path("/Library/Audio/Plug-Ins/VST3"),
-                Path("/Library/Audio/Plug-Ins/Components"),
-                Path.home() / "Library/Audio/Plug-Ins/VST3",
-            ]
-        else:
-            candidates = [
-                Path("/usr/lib/vst3"),
-                Path("/usr/local/lib/vst3"),
-                Path.home() / ".vst3",
-            ]
-
-        return [str(path) for path in candidates if path.is_dir()]
-
-    @staticmethod
-    def discover(paths: Sequence[str] | None = None) -> list[str]:
-        """Plugin files found in the given paths, or the platform defaults."""
-        from pathlib import Path
-
-        search = list(paths) if paths else PluginChain.scan_default_paths()
-        found: list[str] = []
-
-        for root in search:
-            base = Path(root)
-            if not base.is_dir():
-                continue
-            for pattern in ("*.vst3", "*.component", "*.dll"):
-                found.extend(str(p) for p in base.glob(pattern))
-
-        return sorted(set(found))
-
-    def load(self, path: str, name: str | None = None) -> int:
-        """
-        Load a plugin and append it to the chain.
-
-        Raises rather than returning a sentinel: a plugin that failed to load is not
-        something to carry on quietly with, because the user's chain would silently differ
-        from what they configured.
-
-        Checks `is_available()` first rather than importing directly. That check has
-        already proven pedalboard imports cleanly in this exact environment (see its
-        docstring for why that matters); importing it here for real, now that we know it
-        is safe, is what actually lets us load the plugin.
-        """
-        if not PluginChain.is_available():
-            raise PluginChainUnavailable(
-                "pedalboard is not usable in this environment; plugin hosting unavailable"
-            )
-
-        import pedalboard
-
-        plugin = pedalboard.load_plugin(path)
-
-        self._plugins.append(plugin)
-        self._names.append(name or getattr(plugin, 'name', None) or path)
-        self._bypassed.append(False)
-
-        logger.info(f"Loaded plugin: {self._names[-1]}")
-        return len(self._plugins) - 1
-
-    def add_builtin(self, plugin: Any, name: str) -> int:
-        """Append a pedalboard built-in (Reverb, Chorus, and so on)."""
-        self._plugins.append(plugin)
-        self._names.append(name)
-        self._bypassed.append(False)
-        return len(self._plugins) - 1
-
-    def remove(self, index: int):
-        if 0 <= index < len(self._plugins):
-            del self._plugins[index]
-            del self._names[index]
-            del self._bypassed[index]
-
-    def set_bypassed(self, index: int, bypassed: bool):
-        if 0 <= index < len(self._bypassed):
-            self._bypassed[index] = bypassed
-
-    def clear(self):
-        self._plugins.clear()
-        self._names.clear()
-        self._bypassed.clear()
-
-    @property
-    def names(self) -> list[str]:
-        return list(self._names)
-
-    @property
-    def is_empty(self) -> bool:
-        return not self._plugins or all(self._bypassed)
-
-    @property
-    def reported_latency_samples(self) -> int:
-        """
-        Total latency the plugins declare.
-
-        Must be added to the measured round trip. A look-ahead limiter can add 5 ms on its
-        own, and omitting it would make the latency figure we show wrong.
-        """
-        total = 0
-        for plugin, bypassed in zip(self._plugins, self._bypassed, strict=True):
-            if bypassed:
-                continue
-            total += int(getattr(plugin, 'latency_samples', 0) or 0)
-        return total
-
-    def process(self, block: np.ndarray, frames: int) -> np.ndarray:
-        """
-        Run the chain.
-
-        pedalboard wants (channels, frames), the opposite of our layout, so the block is
-        transposed in and out. The transpose is a view, not a copy, and the plugin work
-        itself happens in C++ with the GIL released.
-        """
-        if self.is_empty:
-            return block
-
-        audio = np.ascontiguousarray(block[:frames].T)
-
-        for plugin, bypassed in zip(self._plugins, self._bypassed, strict=True):
-            if bypassed:
-                continue
-            try:
-                audio = plugin.process(audio, self.samplerate, reset=False)
-            except Exception as e:
-                # A misbehaving plugin must not take the audio thread down with it.
-                logger.error(f"Plugin error, bypassing for this block: {e}")
-                return block
-
-        processed = np.ascontiguousarray(audio.T)
-        copy_frames = min(frames, processed.shape[0])
-        copy_channels = min(block.shape[1], processed.shape[1])
-        block[:copy_frames, :copy_channels] = processed[:copy_frames, :copy_channels]
-
-        return block
-
-    def describe(self) -> list[dict[str, Any]]:
-        return [
-            {'index': i, 'name': name, 'bypassed': bypassed}
-            for i, (name, bypassed) in enumerate(zip(self._names, self._bypassed, strict=True))
-        ]
-
-
 class InsertChain:
     """
     Everything that can be inserted on one channel, in a fixed order.
 
     Order matches a console's signal flow: high-pass first so rumble never reaches the
-    compressor's detector, then EQ, then dynamics, then plugins, then delay. A compressor
+    compressor's detector, then EQ, then dynamics, then delay. A compressor
     reacting to sub-sonic rumble is a classic reason a channel "breathes" for no visible
     reason.
 
@@ -752,7 +512,6 @@ class InsertChain:
         self.highpass: Biquad | None = None
         self.eq: ParametricEQ | None = None
         self.compressor: Compressor | None = None
-        self.plugins: PluginChain | None = None
         self.delay: Delay | None = None
 
         self.enabled = True
@@ -769,10 +528,6 @@ class InsertChain:
         self.compressor = Compressor(self.samplerate, self.blocksize, **kwargs)
         return self.compressor
 
-    def enable_plugins(self) -> PluginChain:
-        self.plugins = PluginChain(self.samplerate, self.blocksize)
-        return self.plugins
-
     def enable_delay(self, **kwargs) -> Delay:
         self.delay = Delay(self.samplerate, self.channels, **kwargs)
         return self.delay
@@ -787,15 +542,9 @@ class InsertChain:
             return False
         if self.compressor is not None:
             return False
-        if self.plugins is not None and not self.plugins.is_empty:
-            return False
         if self.delay is not None and self.delay.mix > 0:
             return False
         return True
-
-    @property
-    def latency_samples(self) -> int:
-        return self.plugins.reported_latency_samples if self.plugins else 0
 
     def process(self, block: np.ndarray, frames: int) -> np.ndarray:
         if not self.enabled:
@@ -807,8 +556,6 @@ class InsertChain:
             self.eq.process(block, frames)
         if self.compressor is not None:
             self.compressor.process(block, frames)
-        if self.plugins is not None:
-            self.plugins.process(block, frames)
         if self.delay is not None:
             self.delay.process(block, frames)
 

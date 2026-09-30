@@ -51,6 +51,7 @@ from tonesphere.engine.graph import (
 from tonesphere.engine.meters import MeterRegistry
 from tonesphere.engine.ringbuffer import AudioRingBuffer
 from tonesphere.utils.logger import get_logger
+from tonesphere.utils.threads import synchronized
 
 logger = get_logger(__name__)
 
@@ -91,15 +92,22 @@ class _RouteTable:
     mid-resize.
     """
 
-    __slots__ = ('rings', 'by_source', 'panners', 'resamplers')
+    __slots__ = ('rings', 'by_source', 'panners', 'resamplers', 'feeds', 'clocked')
 
     def __init__(
         self,
         rings: dict[tuple[str, str], AudioRingBuffer],
         panners: dict[tuple[str, str], Panner] | None = None,
         resamplers: dict[tuple[str, str], DriftResampler] | None = None,
+        feeds: dict[str, AudioRingBuffer] | None = None,
+        clocked: frozenset[str] = frozenset(),
     ):
         self.rings = rings
+        # A bus's input from Python producers (`write_bus`), mixed in when the bus renders;
+        # and the buses an output device consumes, directly or through other buses, which
+        # render when that output asks for audio (see `AudioHost._render_bus`).
+        self.feeds = feeds if feeds is not None else {}
+        self.clocked = clocked
 
         # Per-route processing state lives here alongside the ring, rather than on the
         # destination stream. Pan and drift are properties of a route, and keying them by
@@ -154,11 +162,14 @@ class StreamConfig:
 @dataclass
 class HostStatistics:
     """
-    What the engine actually measured. Unmeasured values stay None.
+    What the engine knows about itself. Unknown values stay None.
 
-    `measured_latency_ms` comes from PortAudio's reported stream latency, which accounts
-    for the driver's own buffering — unlike blocksize/samplerate arithmetic, which only
-    describes our contribution and reads far lower than the truth.
+    `reported_latency_ms` is PortAudio's *reported* stream latency plus plugin latency. It
+    accounts for the driver's own buffering — unlike blocksize/samplerate arithmetic,
+    which only describes our contribution — but it is still what the driver says, not
+    something we timed. It excludes ring-buffer and resampler delay on cross-device
+    routes. `measured_round_trip_ms` is reserved for a real emitted-and-captured
+    measurement and stays None until one is taken.
     """
     running: bool = False
     samplerate: int | None = None
@@ -168,10 +179,20 @@ class HostStatistics:
 
     input_latency_ms: float | None = None
     output_latency_ms: float | None = None
-    measured_latency_ms: float | None = None
+    reported_latency_ms: float | None = None
+    measured_round_trip_ms: float | None = None
     nominal_latency_ms: float | None = None
 
     cpu_load: float | None = None
+    # Timed on the audio thread by the native engine; None from the PortAudio host, which
+    # has no such timing.
+    processing_load: float | None = None
+    callback_min_ms: float | None = None
+    callback_mean_ms: float | None = None
+    callback_max_ms: float | None = None
+    callback_p99_ms: float | None = None
+    audio_thread_allocations: int | None = None
+    backend: str = 'portaudio'
     xruns: int = 0
     callback_count: int = 0
     callback_errors: int = 0
@@ -194,9 +215,17 @@ class HostStatistics:
             'exclusive': self.exclusive,
             'input_latency_ms': self.input_latency_ms,
             'output_latency_ms': self.output_latency_ms,
-            'measured_latency_ms': self.measured_latency_ms,
+            'reported_latency_ms': self.reported_latency_ms,
+            'measured_round_trip_ms': self.measured_round_trip_ms,
             'nominal_latency_ms': self.nominal_latency_ms,
             'cpu_usage': self.cpu_load,
+            'processing_load': self.processing_load,
+            'callback_min_ms': self.callback_min_ms,
+            'callback_mean_ms': self.callback_mean_ms,
+            'callback_max_ms': self.callback_max_ms,
+            'callback_p99_ms': self.callback_p99_ms,
+            'audio_thread_allocations': self.audio_thread_allocations,
+            'backend': self.backend,
             'xruns': self.xruns,
             'callback_count': self.callback_count,
             'callback_errors': self.callback_errors,
@@ -319,9 +348,14 @@ class _DeviceStream:
         return self._source_scratch
 
 
+@synchronized()
 class AudioHost:
     """
     Owns the streams and runs the mix.
+
+    Thread-safe for control callers: every public method takes the host's lock. The
+    PortAudio callbacks never do — they read the route table swapped by reference — so
+    closing a stream under the lock cannot wait on a callback that waits on it.
 
     Lifecycle: `configure()` decides the topology from the graph, `start()` opens and
     starts streams, `apply_graph()` publishes routing changes without restarting
@@ -349,13 +383,12 @@ class AudioHost:
         # Buses are declared channel counts; their audio lives in the route table like
         # everything else, so a bus feeding two destinations fans out correctly.
         self._bus_channels: dict[str, int] = {}
-        self._bus_pending: dict[str, AudioRingBuffer] = {}
 
         # Swapped by reference on a routing change. Read once per callback.
         self._routes = _RouteTable({})
 
         self._running = False
-        self._lock = threading.RLock()   # guards configure/start/stop only, never a callback
+        self._lock = threading.RLock()   # every public method; never a callback
         self._sd = None
 
         # Set when a callback hits something it cannot handle, so the control thread can
@@ -407,7 +440,6 @@ class AudioHost:
     def remove_bus(self, name: str):
         with self._lock:
             self._bus_channels.pop(name, None)
-            self._bus_pending.pop(name, None)
             self.meters.remove(f"bus::{name}")
             self._rebuild_routes()
 
@@ -485,10 +517,105 @@ class AudioHost:
                     existing.resamplers.get(key) or DriftResampler(channels, self.blocksize)
                 )
 
+        feeds = {}
+        for name, channels in self._bus_channels.items():
+            key = str(bus_node(name))
+            previous = existing.feeds.get(key)
+            feeds[key] = previous if previous is not None and previous.channels == channels else \
+                AudioRingBuffer(capacity_frames=self.blocksize * RING_BLOCKS * 2, channels=channels)
+
         # Single reference swap: a callback sees either the old table or the new one,
         # never a dict mid-rebuild. Everything above happens on the control thread, so
         # the callback never allocates.
-        self._routes = _RouteTable(rings, panners, resamplers)
+        self._routes = _RouteTable(rings, panners, resamplers, feeds, self._clocked_buses(graph))
+
+    @staticmethod
+    def _clocked_buses(graph: RoutingGraph) -> frozenset[str]:
+        """Buses whose audio reaches a device output: that output's callback is their clock."""
+        clocked: set[str] = set()
+        changed = True
+        while changed:
+            changed = False
+            for c in graph.connections:
+                if c.source.kind != 'bus' or str(c.source) in clocked:
+                    continue
+                if c.dest.kind == 'device' or (c.dest.kind == 'bus' and str(c.dest) in clocked):
+                    clocked.add(str(c.source))
+                    changed = True
+        return frozenset(clocked)
+
+    # --- Buses: rendering ---
+
+    def _render_bus(self, bus_key: str, frames: int, graph: RoutingGraph, routes: _RouteTable,
+                    depth: int = 0):
+        """
+        Mix `frames` of one bus and fan them out to every route leaving it.
+
+        The inputs are every route into the bus — a device's capture ring, an upstream bus
+        (rendered first, the same way, if its ring is short) — and the feed Python writes
+        into, each read for exactly `frames` (a short one zero-fills: that is an underrun,
+        counted by its ring). Route gain, polarity and solo apply on the way in, as they do
+        on the way into a device.
+
+        It runs when a consumer is short: an output device's callback reading a route out
+        of a clocked bus, or a producer pushing into a bus nothing clocks. The graph is
+        acyclic (`would_feedback`), so the recursion ends; `depth` guards it anyway.
+        """
+        name = bus_key.split(':', 1)[1]
+        channels = self._bus_channels.get(name)
+        if channels is None or frames <= 0 or depth > 32:
+            return
+        mix = np.zeros((frames, channels), dtype=np.float32)
+        node = bus_node(name)
+
+        for connection in graph.connections:
+            if connection.dest != node:
+                continue
+            source_key = str(connection.source)
+            ring = routes.ring_for(source_key, bus_key)
+            if ring is None:
+                continue
+            if connection.source.kind == 'bus' and ring.available < frames:
+                self._render_bus(source_key, frames - ring.available, graph, routes, depth + 1)
+            block = np.zeros((frames, ring.channels), dtype=np.float32)
+            ring.read_into(block)
+            gain = connection.effective_gain
+            if graph.soloed and connection.source not in graph.soloed:
+                gain = 0.0
+            if connection.invert:
+                gain = -gain
+            if gain == 0.0:
+                continue
+            if ring.channels == channels:
+                mix += block * gain
+            elif ring.channels == 1:
+                mix += block * gain          # a mono source goes to every channel
+            else:
+                width = min(channels, ring.channels)
+                mix[:, :width] += block[:, :width] * gain
+
+        feed = routes.feeds.get(bus_key)
+        if feed is not None and feed.available:
+            block = np.zeros((frames, channels), dtype=np.float32)
+            feed.read_into(block)
+            mix += block
+
+        bank = self.meters.get(f"bus::{name}")
+        if bank is not None:
+            bank.measure(mix)
+        for ring in routes.sinks_for(bus_key):
+            ring.write(mix)
+        self._push_downstream(bus_key, frames, graph, routes, depth)
+
+    def _push_downstream(self, bus_key: str, frames: int, graph: RoutingGraph, routes: _RouteTable,
+                         depth: int = 0):
+        """A bus no output clocks renders as its producers arrive, and so do the buses it feeds."""
+        for connection in graph.connections:
+            # A bus that sends nowhere is left alone: rendering it would only drain its
+            # inbound rings, which a reader of those routes may still want.
+            if str(connection.source) == bus_key and connection.dest.kind == 'bus' \
+                    and str(connection.dest) not in routes.clocked and routes.sinks_for(str(connection.dest)):
+                self._render_bus(str(connection.dest), frames, graph, routes, depth + 1)
 
     # --- Configuration ---
 
@@ -798,21 +925,6 @@ class AudioHost:
             return None
         return stream.input_inserts if is_input else stream.output_inserts
 
-    def total_plugin_latency_ms(self) -> float:
-        """
-        Latency the loaded plugins add, on top of the driver's.
-
-        Must be included in what we report: a look-ahead limiter adds several milliseconds
-        by itself, and omitting it would make the latency figure wrong in exactly the
-        direction that flatters us.
-        """
-        samples = 0
-        for stream in self._streams.values():
-            for chain in (stream.input_inserts, stream.output_inserts):
-                if chain is not None:
-                    samples += chain.latency_samples
-        return samples / self.samplerate * 1000.0 if samples else 0.0
-
     def failed_streams(self) -> dict[str, str]:
         """Device key -> why its stream is not carrying audio."""
         return {
@@ -960,8 +1072,17 @@ class AudioHost:
 
             block = scratch
 
-        for ring in self._routes.sinks_for(source_key):
+        routes = self._routes
+        for ring in routes.sinks_for(source_key):
             ring.write(block)
+
+        # A bus nothing clocks renders now, as this producer arrives; a clocked bus waits
+        # for its output to ask.
+        graph = self.graph_holder.current()
+        for connection in graph.connections:
+            if str(connection.source) == source_key and connection.dest.kind == 'bus' \
+                    and str(connection.dest) not in routes.clocked and routes.sinks_for(str(connection.dest)):
+                self._render_bus(str(connection.dest), block.shape[0], graph, routes)
 
         # Meter post-trim, so the meter shows what is actually being sent onward.
         bank = self.meters.get(stream.input_meter_key)
@@ -1020,6 +1141,11 @@ class AudioHost:
             ring = routes.ring_for(source_key, dest_key)
             if ring is None:
                 continue
+
+            # This output is the clock of every bus it consumes: a short ring out of one
+            # means the bus has not been mixed for this block yet.
+            if connection.source.kind == 'bus' and ring.available < frames:
+                self._render_bus(source_key, frames - ring.available, graph, routes)
 
             gain = connection.effective_gain * master
 
@@ -1270,20 +1396,34 @@ class AudioHost:
 
     def write_bus(self, name: str, frames: np.ndarray) -> int:
         """
-        Push audio into a bus, fanning it out to every route leaving that bus.
+        Push audio into a bus from a Python producer (network receive, process capture, a
+        tone, a test).
 
-        Used by tone generators, network receive and tests. Returns the number of frames
-        accepted by the most backed-up consumer, so a caller can tell it is outrunning
-        the audio clock.
+        A bus an output device consumes takes it into its feed, and mixes it with the bus's
+        other inputs when that output asks for audio. A bus nothing clocks fans it straight
+        out to every route leaving it, and on through any bus downstream. Returns the frames
+        accepted (by the feed, or the most backed-up consumer), so a caller can tell it is
+        outrunning the audio clock; 0 if nothing is routed out of the bus.
         """
         if name not in self._bus_channels:
             return 0
 
+        key = str(bus_node(name))
+        routes = self._routes
         block = np.ascontiguousarray(frames, dtype=np.float32)
-        sinks = self._routes.sinks_for(str(bus_node(name)))
+        sinks = routes.sinks_for(key)
 
         if not sinks:
             return 0
+
+        if key in routes.clocked:
+            feed = routes.feeds.get(key)
+            if block.ndim == 1:
+                block = block.reshape(-1, 1)
+            if block.shape[1] != feed.channels:
+                block = np.repeat(block[:, :1], feed.channels, axis=1) if block.shape[1] == 1 \
+                    else block[:, :feed.channels]
+            return feed.write(block)
 
         written = min(ring.write(block) for ring in sinks)
 
@@ -1291,6 +1431,7 @@ class AudioHost:
         if bank is not None:
             bank.measure(block)
 
+        self._push_downstream(key, written, self.graph_holder.current(), routes)
         return written
 
     def read_route(self, source: str, dest: str | None, frames: int) -> np.ndarray | None:
@@ -1433,14 +1574,11 @@ class AudioHost:
         stats.input_latency_ms = input_latency
         stats.output_latency_ms = output_latency
 
-        # Round trip is what a player feels: in, through us, and back out — including
-        # whatever the loaded plugins add, which can be several milliseconds.
+        # Round trip is what a player feels: in, through us, and back out. Every term here
+        # is reported, none is timed, so this is never labelled "measured". (This host has
+        # no plugins; the native engine reports plugin latency itself.)
         if input_latency is not None or output_latency is not None:
-            stats.measured_latency_ms = (
-                (input_latency or 0.0)
-                + (output_latency or 0.0)
-                + self.total_plugin_latency_ms()
-            )
+            stats.reported_latency_ms = (input_latency or 0.0) + (output_latency or 0.0)
 
         if cpu_loads:
             stats.cpu_load = max(cpu_loads) * 100.0

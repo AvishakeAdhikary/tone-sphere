@@ -260,15 +260,15 @@ class TestPanKnob:
 class TestHardwareBar:
     def test_unmeasured_latency_is_not_shown_as_the_nominal_figure(self, qt_app):
         """
-        Nominal is arithmetic; measured is reality, and they differ by 4x on shared-mode
-        WASAPI. Showing the nominal figure alone is how the old UI claimed 2.67 ms while
-        passing no audio.
+        Nominal is arithmetic; the driver-reported figure includes the driver's buffering,
+        and they differ by 4x on shared-mode WASAPI. Showing the nominal figure alone is
+        how the old UI claimed 2.67 ms while passing no audio.
         """
         from tonesphere.ui.strip import HardwareBar
 
         bar = HardwareBar()
         bar.update_state('idle', {
-            'measured_latency_ms': None,
+            'reported_latency_ms': None,
             'nominal_latency_ms': 2.67,
             'cpu_usage': None,
             'xruns': 0,
@@ -277,18 +277,19 @@ class TestHardwareBar:
         assert "--" in bar.latency._value
         assert "nom" in bar.latency._value
 
-    def test_measured_latency_is_shown_when_available(self, qt_app):
+    def test_reported_latency_is_shown_when_available(self, qt_app):
         from tonesphere.ui.strip import HardwareBar
 
         bar = HardwareBar()
         bar.update_state('running', {
-            'measured_latency_ms': 5.7,
+            'reported_latency_ms': 5.7,
             'nominal_latency_ms': 2.7,
             'cpu_usage': 5.0,
             'xruns': 0,
         })
 
         assert "5.7" in bar.latency._value
+        assert "rep" in bar.latency._value, "a driver-reported figure must say so"
 
     def test_degraded_state_is_distinct_from_running(self, qt_app):
         """
@@ -300,7 +301,7 @@ class TestHardwareBar:
         bar = HardwareBar()
         bar.update_state('degraded', {
             'failed_streams': {'mic': 'Invalid device'},
-            'measured_latency_ms': 5.7,
+            'reported_latency_ms': 5.7,
             'nominal_latency_ms': 2.7,
             'cpu_usage': 4.0,
             'xruns': 0,

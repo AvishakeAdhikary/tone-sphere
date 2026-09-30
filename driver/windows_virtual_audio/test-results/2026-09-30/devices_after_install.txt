@@ -1,0 +1,9 @@
+
+Status Class         FriendlyName                                      InstanceId                                                          
+------ -----         ------------                                      ----------                                                          
+OK     AudioEndpoint Speakers (ToneSphere Virtual Audio Cable)         SWD\MMDEVAPI\{0.0.0.00000000}.{9A7062F4-4665-432A-890C-3D317D68876F}
+OK     AudioEndpoint Microphone Array (ToneSphere Virtual Audio Cable) SWD\MMDEVAPI\{0.0.1.00000000}.{46E51B3A-9E29-4E5E-85FE-1C3C50BB129C}
+OK     MEDIA         ToneSphere Virtual Audio Cable                    ROOT\MEDIA\0000                                                     
+
+
+

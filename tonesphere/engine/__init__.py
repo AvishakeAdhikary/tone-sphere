@@ -25,6 +25,7 @@ from tonesphere.engine.graph import (
     db_to_linear,
     device_node,
     linear_to_db,
+    loopback_node,
     network_node,
 )
 from tonesphere.engine.host import AudioHost, HostStatistics, StreamConfig
@@ -54,6 +55,7 @@ __all__ = [
     "enumerate_devices",
     "find_device",
     "linear_to_db",
+    "loopback_node",
     "network_node",
     "preferred_host_api",
 ]

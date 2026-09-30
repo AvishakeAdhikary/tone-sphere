@@ -497,3 +497,110 @@ class TestConstruction:
         assert buffer.priming is True
         assert buffer.pull() is None
         assert buffer.buffered_packets == 0
+
+
+class VirtualClock:
+    def __init__(self):
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def simulate(buffer, clock, seconds: float, jitter_ms, *, start: float = 0.0, seed: int = 7,
+             first_sequence: int = 0) -> dict:
+    """
+    A sender at the audio rate and a playout thread at the same rate, on one virtual clock.
+    Each packet arrives 5 ms plus a uniform 0..`jitter_ms(t)` after it was sent, so packets
+    overtake each other whenever the jitter exceeds a packet. Returns what playout did.
+    """
+    import heapq
+    import random
+
+    rng = random.Random(seed)
+    packet = buffer.frames_per_packet / buffer.sample_rate
+    count = int(seconds / packet)
+    events = []
+    for k in range(count):
+        sent = start + k * packet
+        late = rng.uniform(0.0, jitter_ms(sent) / 1000.0)
+        heapq.heappush(events, (sent + 0.005 + late, 0, first_sequence + k, sent))
+        heapq.heappush(events, (sent + packet * 0.5, 1, None, None))  # a pull, mid-slot
+    block = np.full((buffer.frames_per_packet, buffer.channels), 0.1, np.float32)
+    played = silent = 0
+    targets = []
+    while events:
+        t, kind, sequence, sent = heapq.heappop(events)
+        clock.now = t
+        if kind == 0:
+            buffer.push(sequence, block, timestamp_us=int(sent * 1e6))
+        else:
+            out = buffer.pull()
+            if out is not None:
+                played += 1
+                silent += not out.any()
+                targets.append(buffer.target_packets * buffer.packet_duration_ms)
+    return {'played': played, 'silent': silent, 'targets': targets, **buffer.statistics()}
+
+
+def adaptive(clock, **kwargs):
+    return JitterBuffer(frames_per_packet=128, channels=2, sample_rate=48000, mode='adaptive', clock=clock,
+                        **kwargs)
+
+
+class TestAdaptiveDepth:
+    """
+    The adaptive buffer against scripted arrival schedules. 128-frame packets at 48 kHz are
+    2.67 ms each; the jitter is uniform, so its 99th percentile is known in advance.
+    """
+
+    def test_a_calm_link_settles_at_the_floor_and_loses_nothing(self):
+        clock = VirtualClock()
+        stats = simulate(adaptive(clock, target_latency_ms=40.0), clock, 20.0, lambda t: 0.5)
+        assert stats['packets_lost'] == 0 and stats['stretches'] == 0
+        assert stats['targets'][-1] <= 10.0 + stats['packet_duration_ms']
+        assert stats['buffered_latency_ms'] <= 16.0, "it came down from the 40 ms it started at"
+
+    def test_jitter_grows_the_target_to_cover_it_where_a_fixed_small_buffer_does_not(self):
+        clock = VirtualClock()
+        grown = simulate(adaptive(clock, target_latency_ms=10.0), clock, 20.0, lambda t: 30.0)
+        clock = VirtualClock()
+        fixed = simulate(JitterBuffer(frames_per_packet=128, channels=2, target_latency_ms=10.0, clock=clock),
+                         clock, 20.0, lambda t: 30.0)
+        print(f"\n+/-15 ms jitter: adaptive lost {grown['packets_lost']} of {grown['played']} "
+              f"(target {grown['targets'][-1]:.1f} ms, jitter {grown['jitter_ms']} ms, "
+              f"{grown['stretches']} stretches); fixed 10 ms lost {fixed['packets_lost']} of {fixed['played']}")
+        assert 28.0 <= grown['targets'][-1] <= 40.0, "target ≈ the 30 ms spread plus a packet"
+        assert grown['packets_lost'] / grown['played'] < 0.01
+        assert fixed['packets_lost'] / fixed['played'] > 0.10
+        assert grown['jitter_ms'] is not None and grown['jitter_ms'] > 5.0
+
+    def test_when_the_jitter_stops_the_latency_comes_down_one_packet_a_second_at_most(self):
+        clock = VirtualClock()
+        buffer = adaptive(clock, target_latency_ms=10.0)
+        stormy = simulate(buffer, clock, 10.0, lambda t: 30.0)
+        before = stormy['buffered_latency_ms']
+        shrinks_before = stormy['shrinks']
+        calm = simulate(buffer, clock, 12.0, lambda t: 0.5, start=10.0, first_sequence=int(10.0 / (128 / 48000)))
+        shrinks = calm['shrinks'] - shrinks_before
+        print(f"\nafter the jitter stops: {before:.1f} ms buffered -> {calm['buffered_latency_ms']:.1f} ms, "
+              f"{shrinks} shrinks in 12 s")
+        assert shrinks <= 12, "never faster than one packet per second"
+        assert calm['buffered_latency_ms'] < before - 10.0
+        assert calm['targets'][-1] <= 10.0 + calm['packet_duration_ms']
+        assert calm['packets_lost'] == stormy['packets_lost'], "coming down loses nothing"
+
+    def test_a_stretch_is_not_counted_as_a_loss(self):
+        clock = VirtualClock()
+        buffer = adaptive(clock, target_latency_ms=10.0)
+        stats = simulate(buffer, clock, 5.0, lambda t: 0.5 if t < 2.0 else 40.0)
+        assert stats['stretches'] > 0
+        assert stats['packets_lost'] + stats['packets_played_on_time'] + stats['shrinks'] <= stats['packets_pushed']
+
+    def test_fixed_mode_measures_nothing_and_keeps_its_target(self):
+        clock = VirtualClock()
+        buffer = JitterBuffer(frames_per_packet=128, channels=2, target_latency_ms=40.0, clock=clock)
+        stats = simulate(buffer, clock, 3.0, lambda t: 30.0)
+        assert stats['mode'] == 'fixed' and stats['jitter_ms'] is None
+        assert stats['stretches'] == 0 and stats['shrinks'] == 0
+        assert stats['target_latency_ms'] == 40.0

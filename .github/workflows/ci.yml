@@ -63,7 +63,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libegl1 libxkbcommon-x11-0 libxcb-cursor0 \
             libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libgl1 \
-            libportaudio2
+            libportaudio2 libopus0
+
+      - name: Install libopus (macOS)
+        # Opus is loaded with ctypes from the system library (tonesphere/network/opus.py);
+        # Windows builds it from Xiph's pinned source, Linux gets libopus0 above.
+        if: runner.os == 'macOS'
+        run: brew install opus
 
       - name: Start a headless PulseAudio server (Linux)
         # Unlike `hardware` (needs a real sound card, which no CI runner has),
@@ -87,6 +93,18 @@ jobs:
           pactl info
           echo "--- aplay -L (ALSA's own view) ---"
           aplay -L || true
+
+      - name: Build the native engine (Windows)
+        # tests/native fails rather than skips on Windows without the DLL, so this has to
+        # run first. The runner's Visual Studio is found through vswhere; CMake and Ninja
+        # come from the `native` dependency group. Both SDKs are fetched (VST3 pinned by tag,
+        # ASIO by checksum with its GPLv3 option verified), so the VST3 host, its test
+        # plugin and the GPLv3 ASIO host are all built and tested; the runner has no ASIO
+        # driver, so nothing here drives one.
+        if: runner.os == 'Windows'
+        run: |
+          uv run python scripts/fetch_sdks.py
+          uv run python scripts/build_native.py
 
       - name: Run tests
         # CI runners have no audio hardware, so hardware-marked tests are excluded.
@@ -179,7 +197,7 @@ jobs:
     # never actually invoked by CI, so "packaging" was an unverified claim — this job is
     # what makes it a real one: build the frozen app, launch it, and prove it doesn't
     # immediately die (the exact failure the spec's own comments say it was built to
-    # prevent: a missing PortAudio/pedalboard native library) before ever calling it done.
+    # prevent: a missing PortAudio or ToneSphere native library) before ever calling it done.
     #
     # Built with ONEFILE=1: a user fetching "download for Windows" from a Releases page
     # expects one executable, not a zip holding 279 loose files including an `_internal`
@@ -221,7 +239,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libegl1 libxkbcommon-x11-0 libxcb-cursor0 \
             libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libgl1 \
-            libportaudio2
+            libportaudio2 libopus0
+
+      - name: Build the native engine (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          uv run python scripts/fetch_sdks.py
+          uv run python scripts/build_native.py
 
       - name: Build with PyInstaller (one-file)
         run: uv run pyinstaller tonesphere.spec
@@ -258,6 +282,21 @@ jobs:
         with:
           name: ${{ matrix.asset_name }}
           path: ${{ matrix.asset_name }}
+          if-no-files-found: error
+
+      - name: Package the Corresponding Source (Windows)
+        # The Windows executable bundles the GPLv3 ASIO host, so it is distributed under
+        # GPLv3 and its Corresponding Source -- including both SDKs, which are never
+        # committed -- has to be released next to it. See scripts/package_source.py.
+        if: runner.os == 'Windows'
+        run: uv run python scripts/package_source.py ToneSphere-windows-source.zip
+
+      - name: Upload the Corresponding Source (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ToneSphere-windows-source.zip
+          path: ToneSphere-windows-source.zip
           if-no-files-found: error
 
   tag-release:

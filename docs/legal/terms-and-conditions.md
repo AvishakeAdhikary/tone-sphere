@@ -2,8 +2,8 @@
 title: Terms and Conditions
 layout: default
 permalink: /legal/terms-and-conditions/
-version: "1.0"
-effective_date: "2026-09-09"
+version: "1.2"
+effective_date: "2026-09-30"
 publisher: Neural Nexus Studios
 description: The agreement between you and Neural Nexus Studios governing your use of the ToneSphere application, including the grant of use, acceptable use, warranties, liability and governing law.
 ---
@@ -12,8 +12,8 @@ description: The agreement between you and Neural Nexus Studios governing your u
 
 - **Application:** ToneSphere
 - **Publisher:** Neural Nexus Studios, an individual developer, Kolkata, West Bengal, India
-- **Document version:** 1.0
-- **Effective date:** 9 September 2026
+- **Document version:** 1.2
+- **Effective date:** 30 September 2026
 
 ## 1. About this document
 
@@ -58,13 +58,48 @@ under-read:
 - **The one condition is attribution.** The copyright notice and the permission notice must
   be included in all copies or substantial portions of the Application. Removing them is
   the one thing that takes you outside the licence.
-- **No fee is charged** by us for the Application as we distribute it, through either the
-  Microsoft Store or the project's releases.
+- **No fee is charged today** by us for the Application as we distribute it, through
+  either the Microsoft Store or the project's releases. See "Price and future versions"
+  below.
 - **The licence covers the software, not the name.** "ToneSphere" and "Neural Nexus Studios"
   are ours. MIT grants no trademark rights, so a modified or redistributed build must not be
   presented in a way that suggests it is the official Application or that we endorse,
   support or published it. Rename it, or say clearly what it is.
-- **Third-party components keep their own licences.** See section 8.
+- **Third-party components keep their own licences.** See section 6.
+
+**Windows builds that include ASIO support are licensed to you under the GNU General Public
+License, version 3.** ASIO support is a separate component, `tonesphere_asio.dll`, built from
+Steinberg's ASIO SDK, which Steinberg licenses under GPLv3; its own source, in the
+`native/asio` directory of the repository, is GPLv3 (the licence text is in that directory's
+`LICENSE` file). A distributed build that includes that component — the Windows executable
+published on the project's releases page — is distributed under GPLv3 as a whole. The
+Microsoft Store package does not include that component. For a build that does:
+
+- you have every right GPLv3 grants, including to run, study, modify and convey it;
+- its Corresponding Source, including the Steinberg SDK sources it was built from, is
+  published next to the executable on the same release, as a `-source.zip` archive;
+- ToneSphere's own source files remain available to you under the MIT Licence as well, as
+  set out above; and
+- **nothing in these Terms and Conditions, or in the other two documents, restricts a right
+  GPLv3 gives you.** Where a provision would, it does not apply to that build. That includes
+  the acceptable-use terms in section 4: they describe conduct the law or other people's
+  rights already govern, and are not conditions on your licence.
+
+Builds without that component — the Microsoft Store package, and the Linux and macOS
+executables — are under the MIT Licence alone.
+
+**Price and future versions.** The Application is free of charge today. We may in future
+offer paid versions, editions or features, through the Microsoft Store or through other
+channels, and may release future versions under licence terms different from those above.
+If we do:
+
+- a copy you have already obtained keeps the licence it came with, which is not withdrawn,
+  and continues to work as it did;
+- the price, and the licence terms of a paid version, are shown to you before you pay, and
+  nothing is charged for without your acting to buy it;
+- a purchase through the Microsoft Store, including payment and refunds, is handled by
+  Microsoft under its own terms (section 14), and a purchase through another channel under
+  that channel's terms as presented at the time.
 
 ## 4. Acceptable use
 
@@ -103,26 +138,33 @@ you captured, transmitted or published.
 
 ## 5. Third-party plugins
 
-The Application can host VST3 and AU audio plugins that you already own, and load them onto
-channels you choose. Those plugins are not ours:
+On Windows, the Application can host VST3 audio effect plugins that you already own, and
+load them onto the device inputs and outputs you choose. AU plugins are not supported, and
+instrument plugins are not offered. Those plugins are not ours:
 
 - We do not supply, sell, bundle or endorse any third-party plugin. Your right to use a
   plugin comes from that plugin's own licence, from its vendor, and having a valid licence
   for each plugin you load is your responsibility.
-- A hosted plugin runs inside the Application's process, in the real-time audio path. A
-  plugin that misbehaves can therefore produce unexpected output, add latency, degrade
-  performance, or crash the Application. We are not responsible for a plugin's behaviour,
-  its stability, its audio quality, or anything it does on your system.
+- A hosted plugin runs inside the Application's process, in the real-time audio path. The
+  Application stops calling a plugin that faults and tells you so, but a plugin that
+  misbehaves can still produce unexpected output, add latency, degrade performance, or
+  crash the Application. We are not responsible for a plugin's behaviour, its stability,
+  its audio quality, or anything it does on your system.
 - What a plugin transmits, stores or checks over the network is governed by its vendor's own
   terms. See section 5 of the [Privacy Policy](privacy-policy.md).
 
 ## 6. Third-party components
 
 The Application is built on third-party software, including PortAudio (through
-`sounddevice`), Qt (through PySide6), `pedalboard`, NumPy, FastAPI and others. Each of those
-components is governed by its own licence, and those licences continue to apply to those
-components. Nothing in this agreement restricts a right you have in a third-party component
-under its own licence.
+`sounddevice`), Qt (through PySide6), NumPy, FastAPI, Steinberg's VST3 SDK (MIT), Xiph's
+libopus (BSD 3-clause) and, in Windows builds from GitHub, Steinberg's ASIO SDK (GPLv3; see
+section 3). The project's
+`docs/DEPENDENCIES.md` lists them with their licences. Each of those components is governed
+by its own licence, and those licences continue to apply to those components. Nothing in
+this agreement restricts a right you have in a third-party component under its own licence.
+
+"ASIO" and "VST" are trademarks of Steinberg Media Technologies GmbH. Their use here
+describes compatibility and implies no endorsement.
 
 ## 7. Audio levels, hearing and equipment
 
@@ -170,8 +212,8 @@ of such loss.
 
 To the fullest extent permitted by applicable law, our total aggregate liability arising out
 of or in connection with the Application and this agreement is limited to the greater of the
-amount you actually paid us for the Application — which, as we charge nothing for it, will
-ordinarily be zero — or INR 1,000.
+amount you actually paid for the Application in the twelve months before the claim — which,
+for a copy obtained free of charge, is zero — or INR 1,000.
 
 Nothing in this agreement excludes or limits liability that cannot lawfully be excluded or
 limited, including liability for death or personal injury caused by negligence, or for

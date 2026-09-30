@@ -6,23 +6,17 @@ version = "0.1.0"
 description = "Low-latency audio routing and mixing for Windows, Linux and macOS."
 readme = "README.md"
 requires-python = ">=3.13"
+# Runtime only. Why each one is here, and what could replace it, is in
+# docs/DEPENDENCIES.md — update that file when this list changes.
 dependencies = [
     "fastapi>=0.117.1",
     "numpy>=2.3.3",
     "pydantic>=2.11.9",
-    "pyinstaller>=6.16.0",
     "pyyaml>=6.0.2",
-    "requests>=2.32.5",
     "sounddevice>=0.5.2",
     "uvicorn>=0.37.0",
     "websockets>=15.0.1",
-    # Pillow is not used by the application itself — only by
-    # packaging/msix/generate_assets.py, to produce the Store's required logo sizes from
-    # assets/images/ToneSphere.png. It stays a main dependency rather than a dev one so a
-    # source checkout can build a Store package without a second install step.
-    "pillow>=10.0.0",
     "pyside6>=6.11.1",
-    "pedalboard>=0.9.24",
 ]
 
 [dependency-groups]
@@ -31,6 +25,23 @@ dev = [
     "pytest>=9.1.1",
     "ruff>=0.16.0",
 ]
+# Building the frozen app and the Store package. Pillow is used only by
+# packaging/msix/generate_assets.py, never by the application.
+packaging = [
+    "pyinstaller>=6.16.0",
+    "pillow>=10.0.0",
+]
+# The native build's generator tools, from PyPI so no system install is needed. The
+# compiler itself comes from the EWDK — see docs/BUILDING_WINDOWS.md.
+native = [
+    "cmake>=3.31",
+    "ninja>=1.11",
+]
+
+[tool.uv]
+# A source checkout should build, package and test with a plain `uv sync`; the groups
+# exist to keep runtime dependencies honest, not to add install steps.
+default-groups = ["dev", "packaging", "native"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -62,10 +73,10 @@ exclude = ["dist", "build", "presets"]
 select = ["E", "F", "W", "B", "UP", "I"]
 ignore = [
     "E402",   # a handful of modules import mid-file on purpose (optional deps, lazy
-              # imports to avoid pulling in PortAudio/Qt/pedalboard just for a type check)
+              # imports to avoid pulling in PortAudio/Qt just for a type check)
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# Tests intentionally build throwaway fixture objects inline and re-import optional
-# dependencies (pedalboard) after checking availability at runtime, not at module load.
+# Tests intentionally build throwaway fixture objects inline and import some modules only
+# after checking availability at runtime, not at module load.
 "tests/*" = ["E402"]

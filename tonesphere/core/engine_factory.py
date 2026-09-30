@@ -325,6 +325,100 @@ class UnifiedAudioEngine:
     def set_routing_invert(self, source_id: int, destination_id: int, invert: bool):
         self.engine.set_routing_invert(source_id, destination_id, invert)
 
+    def set_master_volume(self, volume: float):
+        return self.engine.set_master_volume(volume)
+
+    def failed_device_ids(self) -> dict[int, str]:
+        return self.engine.failed_device_ids()
+
+    def virtual_device_status(self) -> dict[str, Any]:
+        return self.engine.virtual_device_status()
+
+    def manage_virtual_cable(self, operation: str, *args: str) -> tuple[bool, str]:
+        return self.engine.manage_virtual_cable(operation, *args)
+
+    def handle_device_change(self) -> dict[str, Any]:
+        return self.engine.handle_device_change()
+
+    def last_device_change(self) -> dict[str, Any] | None:
+        return self.engine.last_device_change()
+
+    # --- Plugins ---
+
+    def hosts_plugins(self) -> bool:
+        return self.engine.hosts_plugins()
+
+    def scan_plugins(self, paths=None) -> list:
+        return self.engine.scan_plugins(paths)
+
+    def add_plugin(self, device_id: int, info, is_input: bool = True) -> tuple[bool, str]:
+        return self.engine.add_plugin(device_id, info, is_input)
+
+    def remove_plugin(self, device_id: int, index: int, is_input: bool = True) -> bool:
+        return self.engine.remove_plugin(device_id, index, is_input)
+
+    def plugin_instances(self, device_id: int, is_input: bool = True) -> list:
+        return self.engine.plugin_instances(device_id, is_input)
+
+    def list_plugins(self, device_id: int, is_input: bool = True) -> list[dict[str, Any]]:
+        return self.engine.list_plugins(device_id, is_input)
+
+    def set_plugin_bypassed(self, device_id: int, index: int, bypassed: bool, is_input: bool = True) -> bool:
+        return self.engine.set_plugin_bypassed(device_id, index, bypassed, is_input)
+
+    def set_plugin_parameter(self, device_id: int, index: int, param_id: int, normalized: float,
+                             is_input: bool = True):
+        return self.engine.set_plugin_parameter(device_id, index, param_id, normalized, is_input)
+
+    def find_plugin(self, path: str, uid: str | None = None):
+        return self.engine.find_plugin(path, uid)
+
+    def create_instrument(self, info, name: str | None = None, channels: int = 2):
+        return self.engine.create_instrument(info, name, channels)
+
+    def instruments(self) -> list[dict[str, Any]]:
+        return self.engine.instruments()
+
+    def send_midi(self, device_id: int, status: int, data1: int, data2: int = 0) -> tuple[bool, str]:
+        return self.engine.send_midi(device_id, status, data1, data2)
+
+    def midi_inputs(self) -> list[str]:
+        return self.engine.midi_inputs()
+
+    def connect_midi_input(self, port: int, device_id: int) -> tuple[bool, str]:
+        return self.engine.connect_midi_input(port, device_id)
+
+    def note_on(self, device_id: int, note: int, velocity: int = 100, channel: int = 0) -> tuple[bool, str]:
+        return self.engine.note_on(device_id, note, velocity, channel)
+
+    def note_off(self, device_id: int, note: int, channel: int = 0) -> tuple[bool, str]:
+        return self.engine.note_off(device_id, note, channel)
+
+    def add_builtin(self, device_id: int, kind: str, is_input: bool = True, values=None) -> tuple[bool, str]:
+        return self.engine.add_builtin(device_id, kind, is_input, values)
+
+    def list_inserts(self, device_id: int, is_input: bool = True) -> list[dict[str, Any]]:
+        return self.engine.list_inserts(device_id, is_input)
+
+    def insert_instance(self, device_id: int, index: int, is_input: bool = True):
+        return self.engine.insert_instance(device_id, index, is_input)
+
+    def remove_insert(self, device_id: int, index: int, is_input: bool = True) -> bool:
+        return self.engine.remove_insert(device_id, index, is_input)
+
+    def move_insert(self, device_id: int, index: int, to: int, is_input: bool = True) -> bool:
+        return self.engine.move_insert(device_id, index, to, is_input)
+
+    def set_insert_bypassed(self, device_id: int, index: int, bypassed: bool, is_input: bool = True) -> bool:
+        return self.engine.set_insert_bypassed(device_id, index, bypassed, is_input)
+
+    def set_insert_parameter(self, device_id: int, index: int, param_id: int, normalized: float,
+                             is_input: bool = True) -> bool:
+        return self.engine.set_insert_parameter(device_id, index, param_id, normalized, is_input)
+
+    def set_builtin_value(self, device_id: int, index: int, param: int, value: float, is_input: bool = True):
+        return self.engine.set_builtin_value(device_id, index, param, value, is_input)
+
     # --- Properties ---
 
     @property
@@ -345,5 +439,4 @@ class UnifiedAudioEngine:
 
     @master_volume.setter
     def master_volume(self, value: float):
-        self.engine.master_volume = value
-        self.engine._publish_graph()
+        self.engine.set_master_volume(value)

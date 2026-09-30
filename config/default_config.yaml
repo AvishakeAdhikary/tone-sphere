@@ -17,7 +17,7 @@ engine:
   sample_rate: 48000
 
   # Frames per audio callback. Smaller means lower latency and less margin before a
-  # dropout. Measured round trip on WASAPI exclusive: 128 frames -> 5.7 ms.
+  # dropout. Driver-reported round trip on WASAPI exclusive: 128 frames -> 5.7 ms.
   # Raise to 256 or 512 if you hear crackling (check `xruns` in the status bar).
   buffer_size: 128
 

@@ -41,14 +41,16 @@ class ChannelStripWidget(QFrame):
     pan_changed = Signal(int, float)       # device_id, -1..1
     mute_toggled = Signal(int, bool)
     solo_toggled = Signal(int, bool)
+    inserts_requested = Signal(int, bool)  # device_id, is_input
     selected = Signal(int)
 
     def __init__(self, device_id: int, name: str, subtitle: str, channels: int = 2,
-                 parent: QWidget | None = None):
+                 is_input: bool = True, hosts_plugins: bool = False, parent: QWidget | None = None):
         super().__init__(parent)
 
         self.device_id = device_id
         self.channels = channels
+        self.is_input = is_input
         self._name = name
 
         self.setObjectName("Panel")
@@ -62,6 +64,7 @@ class ChannelStripWidget(QFrame):
         layout.addWidget(self._build_header(name, subtitle))
         layout.addWidget(self._build_pan(), alignment=Qt.AlignmentFlag.AlignHCenter)
         layout.addLayout(self._build_buttons())
+        layout.addWidget(self._build_inserts(hosts_plugins))
         layout.addLayout(self._build_fader_and_meter(), stretch=1)
 
         self.setToolTip(tr('strip.tooltip', name=name, subtitle=subtitle))
@@ -116,11 +119,30 @@ class ChannelStripWidget(QFrame):
             )
 
     def _build_pan(self) -> QWidget:
+        """
+        Balance, on a stereo strip only. A mono source's position belongs on each of its
+        routes, where the destination width is known; a knob here would move nothing.
+        """
         self.pan_knob = PanKnob()
+        self.pan_knob.setToolTip(tr('strip.balance_tooltip'))
         self.pan_knob.value_changed.connect(
             lambda value: self.pan_changed.emit(self.device_id, value)
         )
+        self.pan_knob.setVisible(self.channels == 2)
         return self.pan_knob
+
+    def _build_inserts(self, hosts_plugins: bool) -> QWidget:
+        self.inserts_button = QPushButton(tr('strip.inserts', count=0))
+        self.inserts_button.setFixedHeight(METRICS.BUTTON_HEIGHT)
+        self.inserts_button.setToolTip(tr('strip.inserts_tooltip') if hosts_plugins
+                                       else tr('strip.inserts_unavailable'))
+        self.inserts_button.setEnabled(hosts_plugins)
+        self.inserts_button.clicked.connect(lambda: self.inserts_requested.emit(self.device_id, self.is_input))
+        return self.inserts_button
+
+    def set_insert_count(self, count: int, crashed: bool = False):
+        self.inserts_button.setText(tr('strip.inserts', count=count))
+        self.inserts_button.setStyleSheet(f"color: {Colors.ERROR.name()};" if crashed else "")
 
     def _build_buttons(self) -> QHBoxLayout:
         row = QHBoxLayout()
@@ -296,9 +318,11 @@ class HardwareBar(QFrame):
     Every field here is either a real measurement or "--". The old UI's equivalent showed
     "CPU: 0% | Latency: 0ms" permanently, which was not a reading of anything.
 
-    Latency shows the measured round trip with the nominal figure beside it, because those
-    two numbers differ by a factor of four on shared-mode WASAPI and the difference is the
-    single most useful thing a latency-sensitive user can know.
+    Latency shows the driver-reported round trip with the nominal figure beside it, because
+    those two numbers differ by a factor of four on shared-mode WASAPI and the difference
+    is the single most useful thing a latency-sensitive user can know. Both are labelled
+    for what they are: neither is a measurement. A round trip measured at the current rate
+    and block (Diagnostics) replaces both.
     """
 
     def __init__(self, parent: QWidget | None = None):
@@ -330,6 +354,16 @@ class HardwareBar(QFrame):
 
         layout.addStretch()
 
+        self.busy = QLabel("")
+        self.busy.setObjectName("Dim")
+        self.busy.setFont(Type.font(Type.SMALL))
+        layout.addWidget(self.busy)
+
+        self.notice = QLabel("")
+        self.notice.setObjectName("Dim")
+        self.notice.setFont(Type.font(Type.SMALL))
+        layout.addWidget(self.notice)
+
         self.message = QLabel("")
         self.message.setObjectName("Dim")
         self.message.setFont(Type.font(Type.SMALL))
@@ -340,6 +374,15 @@ class HardwareBar(QFrame):
         line.setFrameShape(QFrame.Shape.VLine)
         line.setStyleSheet(f"color: {Colors.BORDER.name()};")
         return line
+
+    def set_notice(self, text: str):
+        """The last thing that happened to the devices: connected, removed, reopened."""
+        self.notice.setText(text[:120])
+        self.notice.setToolTip(text)
+
+    def set_busy(self, busy: bool):
+        """Whether the engine worker has an action queued or running."""
+        self.busy.setText(tr('status.working') if busy else "")
 
     def update_state(self, state: str, stats: dict):
         """Reflect engine state and measurements. Called on a UI timer."""
@@ -394,23 +437,30 @@ class HardwareBar(QFrame):
         self.xruns.set_label(tr('status.pill.xruns'))
 
     def _update_latency(self, stats: dict):
-        measured = stats.get('measured_latency_ms')
+        reported = stats.get('reported_latency_ms')
         nominal = stats.get('nominal_latency_ms')
+        measured = stats.get('measured_round_trip_ms')
 
-        if measured is None:
+        if measured is not None:
+            # A real measurement outranks anything a driver says about itself.
+            tone = Colors.OK if measured < 15 else (Colors.WARN if measured < 40 else Colors.ERROR)
+            self.latency.set_value(tr('status.latency_measured', ms=f"{measured:.1f}"), tone)
+            return
+
+        if reported is None:
             # Never show the nominal figure alone as if it were the real one.
             self.latency.set_value(
                 tr('status.latency_unmeasured', nominal=f"{nominal:.1f}") if nominal else None
             )
             return
 
-        tone = Colors.OK if measured < 15 else (
-            Colors.WARN if measured < 40 else Colors.ERROR
+        tone = Colors.OK if reported < 15 else (
+            Colors.WARN if reported < 40 else Colors.ERROR
         )
-        measured_text = tr('status.latency_ms', ms=f"{measured:.1f}")
+        reported_text = tr('status.latency_ms', ms=f"{reported:.1f}")
         text = (
-            tr('status.latency_with_nominal', measured=measured_text, nominal=f"{nominal:.1f}")
-            if nominal else measured_text
+            tr('status.latency_with_nominal', reported=reported_text, nominal=f"{nominal:.1f}")
+            if nominal else reported_text
         )
         self.latency.set_value(text, tone)
 
