@@ -18,6 +18,7 @@ binds it.
 | Boundary tests without a driver | **VERIFIED** — `tests/native/test_asio.py`: every Windows ASIO sample type round-trips, aligned types put the sample in the low bits, over-range clips, big-endian types are refused, a missing driver fails with the reason |
 | Against a real ASIO driver: **FlexASIO 1.10b** (software ASIO driver) | **HARDWARE VERIFIED** on the development machine, 2026-09-29 — see below |
 | Through FlexASIO to a USB audio interface, **Audio Array AI-04**, WASAPI exclusive | **HARDWARE VERIFIED** 2026-09-30: the interface's clock drives the buffer switch at 144 frames, and its input delivers a real signal — see below |
+| Against **ASIO4ALL 2.22** (a third-party WDM-KS ASIO driver) on the AI-04, with a cable from its output to its input | **HARDWARE VERIFIED** 2026-09-30: round trip measured at 64–512 frames, repeatable to the frame; the output heard through the cable at the level native WASAPI gives — see below |
 | Against an audio interface manufacturer's own ASIO driver | **NOT AVAILABLE** — the AI-04 has none: Audio Array sells it as driver-free, a USB Audio Class device on Windows' in-box driver. Until an interface with its own ASIO driver is tested, ToneSphere's ASIO support is proven through a software ASIO driver only |
 
 A driver name in the registry is not ASIO support. Only a driver initialised by this host,
@@ -63,10 +64,17 @@ removed afterwards). `tests/hardware/test_asio.py`, 2026-09-30:
   (Kolkata mains is 50 Hz); input 2, with nothing plugged in, its noise floor at −63.1 dBFS.
   A real signal from a physical source crossed the interface's ADC, the class driver,
   FlexASIO and ToneSphere's buffer switch. Recorded, not asserted.
-- **Output content:** not checked. FlexASIO holds the device exclusively, so its output
-  bypasses the Windows mixer and no loopback can hear it; the output test skips with that
-  reason. Checking it needs a cable from the output to the input (`test_roundtrip.py`'s
-  cable test).
+- **Output content:** with a cable from the AI-04's output to its input (later the same
+  day), a 1 kHz tone played through FlexASIO's outputs came back on its input 1 at 999.67 Hz,
+  **−0.03 dB** from the level the same tone gives through native WASAPI exclusive over the
+  same cable (`test_the_output_reaches_an_interface_cable_at_the_level_native_wasapi_gives`).
+- **Duplex in exclusive mode:** FlexASIO opening input and output exclusively in one
+  stream damages the audio — 2106 sample discontinuities in 2.7 s of a sweep, round-trip
+  confidence 1.7–5. Each direction alone is clean (0 discontinuities: FlexASIO exclusive
+  input under a native render, and FlexASIO exclusive output under a native capture), and
+  native WASAPI duplex exclusive on the same device is clean, so this is FlexASIO's duplex
+  path through PortAudio, not the ASIO host. Use ASIO4ALL, or FlexASIO in shared mode, for
+  duplex on this interface.
 
 With FlexASIO left at its defaults (shared mode, 882-frame buffers) on the AI-04, the output
 test does run: the 1 kHz tone came back through process loopback at exactly the level sent
@@ -75,6 +83,39 @@ measured with the Realtek above was that driver's enhancement; the AI-04 applies
 
 This is the ASIO host driving real interface hardware, through a software ASIO driver. It
 is not a test of any manufacturer's ASIO driver.
+
+## Verified with ASIO4ALL on the AI-04
+
+ASIO4ALL 2.22 (freeware by Michael Tippach; `ASIO4ALL_2_22.exe` from asio4all.org, SHA-256
+`0d4f0c63bf5df077e4c74f18372f72b8e875a9abea499fea78aaa9f56022ac7e`, Authenticode-signed by
+Michael Tippach) installed silently (`/S`) on the development machine, and switched in its
+own panel from the Realtek to the AI-04. It talks to the device through kernel streaming
+(WDM-KS), a path entirely separate from WASAPI and from FlexASIO. A 6.35 mm cable joined
+the AI-04's headphone output to its input. 2026-09-30:
+
+- **Query:** 2 in / 2 out ("AI-04 1/2"), Int32 LSB; buffers 64–2048 (granularity 8); rates
+  22.05–192 kHz; reported latency 747 / 814 frames at query, 6.23 / 7.63 ms once running at
+  64 frames.
+- **Buffer switch at 64 frames (1.33 ms):** 3659 buffer switches in 5 s, 0 xruns, callback
+  mean 5.0 µs, max 95.4 µs, 0 audio-thread allocations.
+- **Output content:** a 1 kHz tone through ASIO4ALL's outputs came back on its input 1 at
+  1000.35 Hz, **+0.00 dB** from native WASAPI exclusive over the same cable.
+- **Measured round trip** (`tonesphere.native.roundtrip.measure_asio`: the sweep played and
+  captured from the one buffer switch, so no drift cushion is in the path), three runs each,
+  identical to the frame:
+
+  | Buffer | Measured round trip | Driver-reported (in + out) |
+  |---|---|---|
+  | 64 frames | **15.58 ms** (748 frames) | 13.85 ms |
+  | 128 frames | 18.27 ms (877 frames) | — |
+  | 256 frames | 23.58 ms (1132 frames) | — |
+  | 512 frames | 34.27 ms (1645 frames) | — |
+
+  The captured sweep peaked at −8.0 dBFS for −18 dBFS sent: the headphone output into the
+  line input gains about 10 dB, well clear of clipping.
+
+ASIO4ALL is a genuine ASIO driver from a third party and its path to the hardware is
+kernel streaming, but it is still not an interface manufacturer's driver.
 
 ## Licence
 

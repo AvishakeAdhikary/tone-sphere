@@ -44,6 +44,7 @@ class RoundTrip:
     output: str
     input: str
     note: str
+    peak_dbfs: float | None = None  # the loudest captured sample: near 0 means the path clipped
 
 
 def sweep(rate: int, seconds: float, low: float, high: float, level_db: float) -> np.ndarray:
@@ -71,6 +72,60 @@ def gcc_phat(captured: np.ndarray, reference: np.ndarray, max_lag: int) -> tuple
     return lag, float(corr[lag] / rival) if rival > 0 else float('inf')
 
 
+def _stimulus(sample_rate: int, level_db: float, max_latency_ms: float) -> np.ndarray:
+    stimulus = sweep(sample_rate, 0.5, 150.0, min(12000.0, sample_rate * 0.45), level_db)
+    lead = np.zeros(int(sample_rate * 0.4), np.float32)
+    return np.concatenate([lead, stimulus, np.zeros(int(sample_rate * max_latency_ms / 1000) + sample_rate // 4,
+                                                     np.float32)])
+
+
+def _plan(engine: NativeEngine, out_channels: int, in_channels: int, frames: int, sample_rate: int) -> None:
+    engine.apply_plan(
+        [Node.source(STIMULUS, out_channels, ring_frames=frames + sample_rate),
+         Node.sink(OUTPUT, out_channels),
+         Node.sink(MONITOR, 1, ring_frames=frames + sample_rate * 2),
+         Node.source(INPUT, in_channels),
+         Node.sink(CAPTURED, 1, ring_frames=frames + sample_rate * 2)],
+        [Route(STIMULUS, OUTPUT), Route(STIMULUS, MONITOR), Route(INPUT, CAPTURED)],
+    )
+
+
+def _record(engine: NativeEngine, frames: int, sample_rate: int) -> tuple[np.ndarray, np.ndarray, list[dict]]:
+    monitor, captured = [], []
+    deadline = time.time() + frames / sample_rate + 0.5
+    while time.time() < deadline:
+        monitor.append(engine.port_read(MONITOR, sample_rate))
+        captured.append(engine.port_read(CAPTURED, sample_rate))
+        time.sleep(0.02)
+    status = engine.stream_status()
+    engine.stop_backend()
+    monitor.append(engine.port_read(MONITOR, sample_rate * 4))
+    captured.append(engine.port_read(CAPTURED, sample_rate * 4))
+    mon = np.concatenate(monitor)[:, 0].astype(np.float64)
+    cap = np.concatenate(captured)[:, 0].astype(np.float64)
+    length = min(len(mon), len(cap))
+    return mon[:length], cap[:length], status
+
+
+def _analyse(mon: np.ndarray, cap: np.ndarray, status: list[dict], max_latency_ms: float, **common) -> RoundTrip:
+    sample_rate = common['sample_rate']
+    failed = [s for s in status if s['state'] != 'running']
+    if failed:
+        return RoundTrip(None, None, 0.0, note=f"a stream failed: {failed[0]['message']}", **common)
+    peak = float(np.max(np.abs(cap))) if len(cap) else 0.0
+    if peak < 1e-6:
+        return RoundTrip(None, None, 0.0, note="nothing was captured: the input heard silence", **common)
+    common['peak_dbfs'] = float(20 * np.log10(peak))
+    lag, confidence = gcc_phat(cap, mon, int(sample_rate * max_latency_ms / 1000))
+    if confidence < CONFIDENCE_THRESHOLD:
+        return RoundTrip(None, None, confidence,
+                         note=f"no clear path from output to input (confidence {confidence:.1f} < "
+                              f"{CONFIDENCE_THRESHOLD}); a loopback cable, or a microphone that can hear the speaker, "
+                              f"is needed", **common)
+    return RoundTrip(lag / sample_rate * 1000, lag, confidence, note="measured by GCC-PHAT on an exponential sweep",
+                     **common)
+
+
 def measure(output_id: str, input_id: str, *, input_kind: str = 'capture', sample_rate: int = 48000,
             block: int = 480, level_db: float = -24.0, exclusive: bool = False,
             max_latency_ms: float = 500.0) -> RoundTrip:
@@ -88,22 +143,12 @@ def measure(output_id: str, input_id: str, *, input_kind: str = 'capture', sampl
         raise ValueError("unknown endpoint id")
     in_channels = out_ep.mix_channels if input_kind == 'loopback' else in_ep.mix_channels
 
-    stimulus = sweep(sample_rate, 0.5, 150.0, min(12000.0, sample_rate * 0.45), level_db)
-    lead = np.zeros(int(sample_rate * 0.4), np.float32)
-    signal = np.concatenate([lead, stimulus, np.zeros(int(sample_rate * max_latency_ms / 1000) + sample_rate // 4,
-                                                       np.float32)])
+    signal = _stimulus(sample_rate, level_db, max_latency_ms)
     stereo = np.repeat(signal.reshape(-1, 1), out_ep.mix_channels, axis=1)
     frames = len(signal)
 
     with NativeEngine(sample_rate, block) as engine:
-        engine.apply_plan(
-            [Node.source(STIMULUS, out_ep.mix_channels, ring_frames=frames + sample_rate),
-             Node.sink(OUTPUT, out_ep.mix_channels),
-             Node.sink(MONITOR, 1, ring_frames=frames + sample_rate * 2),
-             Node.source(INPUT, in_channels),
-             Node.sink(CAPTURED, 1, ring_frames=frames + sample_rate * 2)],
-            [Route(STIMULUS, OUTPUT), Route(STIMULUS, MONITOR), Route(INPUT, CAPTURED)],
-        )
+        _plan(engine, out_ep.mix_channels, in_channels, frames, sample_rate)
         # The monitor tee and the capture both mix to mono: averaging the channels changes
         # nothing about where the stimulus is in time.
         engine.port_write(STIMULUS, stereo)
@@ -112,21 +157,7 @@ def measure(output_id: str, input_id: str, *, input_kind: str = 'capture', sampl
             StreamSpec(INPUT, input_kind, in_channels, input_id if input_kind == 'capture' else output_id,
                        exclusive=exclusive and input_kind == 'capture'),
         ], master=0)
-        monitor, captured = [], []
-        deadline = time.time() + frames / sample_rate + 0.5
-        while time.time() < deadline:
-            monitor.append(engine.port_read(MONITOR, sample_rate))
-            captured.append(engine.port_read(CAPTURED, sample_rate))
-            time.sleep(0.02)
-        status = engine.stream_status()
-        engine.stop_backend()
-        monitor.append(engine.port_read(MONITOR, sample_rate * 4))
-        captured.append(engine.port_read(CAPTURED, sample_rate * 4))
-
-    mon = np.concatenate(monitor)[:, 0].astype(np.float64)
-    cap = np.concatenate(captured)[:, 0].astype(np.float64)
-    length = min(len(mon), len(cap))
-    mon, cap = mon[:length], cap[:length]
+        mon, cap, status = _record(engine, frames, sample_rate)
 
     reported = [s['reported_latency_ms'] for s in status]
     reported_ms = sum(reported) if all(r is not None for r in reported) else None
@@ -134,17 +165,34 @@ def measure(output_id: str, input_id: str, *, input_kind: str = 'capture', sampl
     common = dict(nominal_ms=block / sample_rate * 1000, reported_ms=reported_ms, sample_rate=sample_rate,
                   block=block, output=out_ep.name, input=listened)
 
-    failed = [s for s in status if s['state'] != 'running']
-    if failed:
-        return RoundTrip(None, None, 0.0, note=f"a stream failed: {failed[0]['message']}", **common)
-    if np.max(np.abs(cap)) < 1e-6:
-        return RoundTrip(None, None, 0.0, note="nothing was captured: the input heard silence", **common)
+    return _analyse(mon, cap, status, max_latency_ms, **common)
 
-    lag, confidence = gcc_phat(cap, mon, int(sample_rate * max_latency_ms / 1000))
-    if confidence < CONFIDENCE_THRESHOLD:
-        return RoundTrip(None, None, confidence,
-                         note=f"no clear path from output to input (confidence {confidence:.1f} < "
-                              f"{CONFIDENCE_THRESHOLD}); a loopback cable, or a microphone that can hear the speaker, "
-                              f"is needed", **common)
-    return RoundTrip(lag / sample_rate * 1000, lag, confidence, note="measured by GCC-PHAT on an exponential sweep",
-                     **common)
+
+def measure_asio(driver: str, *, outputs: tuple[int, ...] = (0, 1), inputs: tuple[int, ...] = (0,),
+                 sample_rate: int = 48000, buffer_frames: int = 0, level_db: float = -24.0,
+                 max_latency_ms: float = 500.0) -> RoundTrip:
+    """
+    The same measurement run from an ASIO driver's buffer switch: its outputs play the sweep
+    and its inputs listen, on the driver's one clock, so no drift cushion is in the path.
+    `buffer_frames` 0 takes the driver's preferred size.
+    """
+    from tonesphere.native import asio
+
+    info = asio.query(driver)
+    block = buffer_frames or info.preferred_buffer
+    signal = _stimulus(sample_rate, level_db, max_latency_ms)
+    frames = len(signal)
+    with NativeEngine(sample_rate, block) as engine:
+        _plan(engine, len(outputs), len(inputs), frames, sample_rate)
+        engine.port_write(STIMULUS, np.repeat(signal.reshape(-1, 1), len(outputs), axis=1))
+        asio.start(engine, driver, input_node=INPUT, inputs=inputs, output_node=OUTPUT, outputs=outputs,
+                   buffer_frames=block)
+        mon, cap, status = _record(engine, frames, sample_rate)
+    # What the driver reports once its buffers exist: the query before createBuffers
+    # describes its default buffer size, not this one.
+    reported = [s['reported_latency_ms'] for s in status]
+    reported_ms = sum(reported) if reported and all(r is not None for r in reported) else None
+    common = dict(nominal_ms=block / sample_rate * 1000, reported_ms=reported_ms, sample_rate=sample_rate,
+                  block=block, output=f"{driver} outputs {[c + 1 for c in outputs]}",
+                  input=f"{driver} inputs {[c + 1 for c in inputs]}")
+    return _analyse(mon, cap, status, max_latency_ms, **common)

@@ -148,3 +148,59 @@ def test_output_content_where_the_driver_renders_through_wasapi(driver):
     heard = back[loud[0] + rate // 10: loud[0] + rate // 10 + rate // 2]
     assert dominant_frequency(heard) == pytest.approx(1000.0, abs=2.0)
     print(f"\n{driver} output through process loopback: rms {rms(heard):.5f} (sent {rms(tone):.5f})")
+
+
+def _loop_level(engine, rate):
+    """Play a 1 kHz tone out and read back input 1 over a loopback cable; the level and frequency heard."""
+    time.sleep(2.0)
+    got = engine.port_read(CAPTURED, rate * 4)
+    engine.stop_backend()
+    body = got[len(got) // 2:, 0].astype(np.float64)
+    return rms(body), dominant_frequency(body, rate)
+
+
+def test_the_output_reaches_an_interface_cable_at_the_level_native_wasapi_gives(driver):
+    """
+    With a cable from an interface's output to its input (TONESPHERE_TEST_INTERFACE, default
+    "AI-04"), the driver's output is heard directly: the same tone through the ASIO driver
+    and through native WASAPI exclusive must come back at the same level, so the driver's
+    sample conversion and channel mapping are proven on real hardware, not just its timing.
+    """
+    from tonesphere.native.wasapi import endpoints
+
+    name = os.environ.get('TONESPHERE_TEST_INTERFACE', 'AI-04')
+    found = {e.flow: e for e in endpoints() if name in e.name}
+    if 'render' not in found or 'capture' not in found:
+        pytest.skip(f"no interface named '{name}' is connected")
+    info = asio.query(driver)
+    if len(info.inputs) < 1 or len(info.outputs) < 2 or 48000 not in info.sample_rates:
+        pytest.skip(f"{driver} has no stereo output and input at 48 kHz")
+    rate = 48000
+    tone = sine(rate * 4, 1000.0, rate=rate, amplitude=0.05)
+
+    with NativeEngine(rate, 144) as engine:
+        engine.apply_plan([Node.source(TONE, 2, ring_frames=rate * 5), Node.sink(ASIO_OUT, 2),
+                           Node.source(ASIO_IN, 2), Node.sink(CAPTURED, 2, ring_frames=rate * 5)],
+                          [Route(TONE, ASIO_OUT), Route(ASIO_IN, CAPTURED)])
+        engine.port_write(TONE, tone)
+        engine.start_wasapi([StreamSpec(ASIO_OUT, 'render', 2, found['render'].id, exclusive=True),
+                             StreamSpec(ASIO_IN, 'capture', 2, found['capture'].id, exclusive=True)], master=0)
+        native_level, native_freq = _loop_level(engine, rate)
+    if native_freq != pytest.approx(1000.0, abs=2.0):
+        pytest.skip(f"no cable from {name}'s output to its input (native WASAPI heard {native_freq:.1f} Hz)")
+
+    block = max(info.preferred_buffer, 64)
+    with NativeEngine(rate, block) as engine:
+        engine.apply_plan([Node.source(TONE, 2, ring_frames=rate * 5), Node.sink(ASIO_OUT, 2),
+                           Node.source(ASIO_IN, 1), Node.sink(CAPTURED, 1, ring_frames=rate * 5)],
+                          [Route(TONE, ASIO_OUT), Route(ASIO_IN, CAPTURED)])
+        engine.port_write(TONE, tone)
+        asio.start(engine, driver, input_node=ASIO_IN, inputs=(0,), output_node=ASIO_OUT, outputs=(0, 1),
+                   buffer_frames=block)
+        level, freq = _loop_level(engine, rate)
+    if freq != pytest.approx(1000.0, abs=2.0):
+        pytest.skip(f"{driver} does not reach {name} (heard {freq:.1f} Hz); its configuration picks other devices")
+    gap = 20 * np.log10(level / native_level)
+    print(f"\n{driver} -> {name} cable -> {driver}: {freq:.2f} Hz, rms {level:.5f}; native WASAPI exclusive "
+          f"{native_level:.5f}; difference {gap:+.2f} dB")
+    assert abs(gap) < 0.5

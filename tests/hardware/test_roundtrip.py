@@ -81,25 +81,83 @@ def test_the_engine_keeps_a_loopback_measurement_apart_from_the_round_trip():
         engine.cleanup()
 
 
+def interface_endpoints():
+    name = os.environ.get('TONESPHERE_TEST_INTERFACE', 'AI-04')
+    found = {e.flow: e for e in endpoints() if name in e.name}
+    if 'render' not in found or 'capture' not in found:
+        pytest.skip(f"no interface named '{name}' is connected")
+    return name, found['render'], found['capture']
+
+
+def report(tag, first, second):
+    print(f"\n{tag}: {first.measured_ms:.2f} / {second.measured_ms:.2f} ms ({first.measured_frames} / "
+          f"{second.measured_frames} frames), confidence {first.confidence:.1f}, captured peak "
+          f"{first.peak_dbfs:.1f} dBFS, nominal {first.nominal_ms:.1f} ms, reported {first.reported_ms}")
+
+
 def test_an_interface_cable_round_trip():
     """
     A cable from an interface's output to its own input (TONESPHERE_TEST_INTERFACE, default
     "AI-04"): the physical round trip, DAC and ADC included, in exclusive mode. Without the
     cable the tool must refuse, and the test skips with its reason instead of passing.
     """
-    name = os.environ.get('TONESPHERE_TEST_INTERFACE', 'AI-04')
-    found = {e.flow: e for e in endpoints() if name in e.name}
-    if 'render' not in found or 'capture' not in found:
-        pytest.skip(f"no interface named '{name}' is connected")
-    period = round(found['render'].min_period_ms * 48) if found['render'].min_period_ms else 144
-    first = measure(found['render'].id, found['capture'].id, exclusive=True, block=period, level_db=-18.0)
+    name, out, inp = interface_endpoints()
+    period = round(out.min_period_ms * 48) if out.min_period_ms else 144
+    first = measure(out.id, inp.id, exclusive=True, block=period, level_db=-18.0)
     if first.measured_ms is None:
         assert first.note
         pytest.skip(f"MEASURED ROUND TRIP: -- ({name}: {first.note})")
-    second = measure(found['render'].id, found['capture'].id, exclusive=True, block=period, level_db=-18.0)
+    second = measure(out.id, inp.id, exclusive=True, block=period, level_db=-18.0)
     assert first.confidence > CONFIDENCE_THRESHOLD and second.measured_ms is not None, second.note
     assert first.nominal_ms < first.measured_ms < 200
+    # A peak near full scale means the cable path clipped, and a clipped sweep can still
+    # correlate: the figure would be right while the path is not.
+    assert first.peak_dbfs < -1.0, f"the captured sweep peaked at {first.peak_dbfs:.1f} dBFS: the path clips"
+    # The capture side starts in a different phase against the render period each time;
+    # on the AI-04 the delay lands on one of two values a USB packet group apart (96 frames).
     assert abs(first.measured_frames - second.measured_frames) <= period, "a restart moved the delay by over a period"
-    print(f"\n{name} out -> cable -> in, exclusive, {period}-frame period: {first.measured_ms:.2f} / "
-          f"{second.measured_ms:.2f} ms ({first.measured_frames} / {second.measured_frames} frames), confidence "
-          f"{first.confidence:.1f}, nominal {first.nominal_ms:.1f} ms, reported {first.reported_ms}")
+    report(f"{name} out -> cable -> in, exclusive, {period}-frame period", first, second)
+
+
+def test_an_interface_cable_round_trip_in_shared_mode():
+    name, out, inp = interface_endpoints()
+    first = measure(out.id, inp.id, exclusive=False, block=480, level_db=-18.0)
+    if first.measured_ms is None:
+        pytest.skip(f"MEASURED ROUND TRIP: -- ({name}: {first.note})")
+    second = measure(out.id, inp.id, exclusive=False, block=480, level_db=-18.0)
+    assert second.measured_ms is not None, second.note
+    assert first.peak_dbfs < -1.0
+    assert abs(first.measured_frames - second.measured_frames) <= 480
+    report(f"{name} out -> cable -> in, shared, 480-frame block", first, second)
+
+
+def test_an_asio_round_trip_through_the_interface_cable():
+    """
+    Every registered ASIO driver, run from its own buffer switch with inputs and outputs on
+    one clock. Whether a driver reaches the interface depends on its own configuration
+    (FlexASIO's default is the default devices, shared), so a driver that finds no path
+    records `--` and the reason, and only a confident measurement is printed as one.
+    """
+    from tonesphere.native import asio
+    from tonesphere.native.roundtrip import measure_asio
+
+    interface_endpoints()
+    if not asio.available() or not [d for d in asio.drivers() if d.dll_present]:
+        pytest.skip("ASIO HARDWARE VERIFICATION: NOT AVAILABLE ON THIS MACHINE (no ASIO driver)")
+    measured = 0
+    for d in [d for d in asio.drivers() if d.dll_present]:
+        info = asio.query(d.name)
+        if not info.inputs or not info.outputs or 48000 not in info.sample_rates:
+            continue
+        result = measure_asio(d.name, inputs=tuple(range(len(info.inputs))),
+                              outputs=tuple(range(min(2, len(info.outputs)))), level_db=-18.0)
+        if result.measured_ms is None:
+            print(f"\n{d.name}: MEASURED ROUND TRIP: -- ({result.note})")
+            continue
+        assert result.peak_dbfs < -1.0
+        measured += 1
+        print(f"\n{d.name} (buffer {result.block}): {result.measured_ms:.2f} ms ({result.measured_frames} frames), "
+              f"confidence {result.confidence:.1f}, peak {result.peak_dbfs:.1f} dBFS, driver-reported "
+              f"{result.reported_ms} ms")
+    if not measured:
+        pytest.skip("no ASIO driver reached a path from output to input")

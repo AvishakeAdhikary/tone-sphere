@@ -122,10 +122,23 @@ while it converges, and the ratio follows the input's wander — a pitch change 
 ±2.6 cents, over seconds. That case is recorded as a known failure in the test, not hidden.
 Use 48 kHz on this interface.
 
-**Not established here:** that sound left the output jack (nothing listened to it), and a
-measured round trip through the interface — that needs a cable from its output to its
-input (`test_roundtrip.py::test_an_interface_cable_round_trip` measures it as soon as there
-is one; without one it reads `--`).
+**Measured round trip through the interface.** Later on 2026-09-30 a 6.35 mm cable joined
+the AI-04's headphone output to its input (`test_roundtrip.py`), a −18 dBFS sweep each time,
+captured back at a −8.0 dBFS peak (the path gains about 10 dB; nothing clips):
+
+| Path | Measured round trip | Runs | Nominal / reported |
+|---|---|---|---|
+| Native WASAPI exclusive, 144-frame period | **17.92 ms** (860 frames); 15.94 ms (765) in 2 of 10 starts | 10, confidence 16–24 | 3.0 ms / 6.0 ms |
+| Native WASAPI exclusive, engine block 96 / 128 / 256 | 17.92 / 15.94 / 25.15 ms | 1 each | |
+| Native WASAPI shared, 480-frame block | **76.9 ms** (3688–3692 frames) | 7, confidence 13–19 | 10 ms / -- |
+| ASIO4ALL 2.22 at 64 frames | **15.58 ms** (748 frames) | 3, identical | [ASIO.md](ASIO.md) |
+| FlexASIO defaults (shared, 882 frames) | 119.75 ms | 1 | |
+
+Within one start the exclusive figure is fixed to the frame; between starts it lands on one
+of two values 96 frames (two USB packet groups of 1 ms) apart, set by the phase the capture
+stream starts in. The same tone through the cable came back at the same level through
+native WASAPI, ASIO4ALL (+0.00 dB) and FlexASIO (−0.03 dB), which also establishes that
+sound leaves the output jack.
 
 ## Latency figures and what they mean
 
