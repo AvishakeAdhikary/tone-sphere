@@ -50,8 +50,9 @@ def inputs() -> list[str]:
     return names
 
 
-_CALLBACK = ctypes.WINFUNCTYPE(None, wintypes.HANDLE, wintypes.UINT, ctypes.c_size_t, ctypes.c_size_t,
-                               ctypes.c_size_t)
+# winmm's callback convention; the module still imports elsewhere, where ports() is empty.
+_CALLBACK = getattr(ctypes, 'WINFUNCTYPE', ctypes.CFUNCTYPE)(None, wintypes.HANDLE, wintypes.UINT, ctypes.c_size_t,
+                                                             ctypes.c_size_t, ctypes.c_size_t)
 
 
 class MidiInput:
