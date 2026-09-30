@@ -27,7 +27,7 @@ import numpy as np
 
 from tonesphere.engine.devices import DeviceInfo, HostApi
 from tonesphere.engine.dsp import balance_gains
-from tonesphere.engine.graph import GraphHolder, NodeId, RoutingGraph, bus_node
+from tonesphere.engine.graph import GraphHolder, NodeId, RoutingGraph, bus_node, loopback_node
 from tonesphere.engine.host import HostStatistics
 from tonesphere.engine.meters import MeterReading
 from tonesphere.native import NativeEngine, NativeError, NativeUnavailable
@@ -237,12 +237,15 @@ class NativeHost:
         self._buses: dict[str, int] = {}
         self._plan = None
         self._device_sides: dict[tuple[str, str], int] = {}   # (device key, role) -> native node
+        self._loopback_sides: dict[str, int] = {}              # output device key -> native source
+        self._loopback_clock: tuple[int, str] | None = None     # (native sink, device key)
         self._stream_set: frozenset = frozenset()
         self._running = False
         self._clock = False
         self._strips: dict[tuple[str, str], _Strip] = {}
-        self._inserts: dict[tuple[str, str], list[tuple]] = {}
-        self._plugins: dict[tuple[str, str], list] = {}
+        # Each device side's (and bus's) processing chain, in order: `BuiltinInsert`s and
+        # VST3 `PluginInstance`s. Its slot in the engine is its position here.
+        self._chains: dict[tuple[NodeId, str], list] = {}
         self._last_error: str | None = None
         self.meters = _Meters(self)
 
@@ -273,14 +276,13 @@ class NativeHost:
     def _rebuild(self):
         with self._lock:
             self.stop()
-            reopened = {}
-            for side, slots in self._plugins.items():
-                reopened[side] = [self._reopen(instance) for instance in slots]
+            reopened = {side: [entry if getattr(entry, 'is_builtin', False) else self._reopen(entry)
+                               for entry in chain]
+                        for side, chain in self._chains.items()}
             old = self._engine
             self._engine = NativeEngine(self._samplerate, max(self._blocksize, CAPACITY_FRAMES))
             old.close()
-            self._plugins = reopened
-            self._sync_plugin_inserts()
+            self._chains = reopened
             self._republish()
             for side, strip in self._strips.items():
                 if side in self._device_sides:
@@ -296,67 +298,134 @@ class NativeHost:
         fresh.bypassed = instance.bypassed
         return fresh
 
-    # --- Plugins, owned per device side ---
+    # --- Insert chains: built-in processors and VST3 plugins, per device side or bus ---
 
-    def add_plugin(self, device_key: str, is_input: bool, info) -> int:
-        """Open `info` for this device side's width and insert it after any existing plugins."""
+    def _side(self, node: NodeId, is_input: bool) -> tuple[NodeId, str]:
+        # A bus is one native node; its chain runs on what it has summed.
+        return (node, OUTPUT) if node.kind == 'bus' else (node, INPUT if is_input else OUTPUT)
+
+    def _side_channels(self, node: NodeId, is_input: bool) -> int:
+        if node.kind == 'bus':
+            channels = self._buses.get(node.ref)
+            if channels is None:
+                raise ValueError(f"bus {node.ref} does not exist")
+            return channels
+        if node.kind != 'device':
+            raise ValueError(f"{node} cannot host effects")
+        device = self._device(node.ref)
+        if device is None:
+            raise ValueError(f"{node.ref}: device not present")
+        channels = device.max_input_channels if is_input else device.max_output_channels
+        if channels < 1:
+            raise ValueError(f"{device.name} has no {'input' if is_input else 'output'} channels")
+        return channels
+
+    def chain_for(self, node: NodeId, is_input: bool) -> list:
+        return list(self._chains.get(self._side(node, is_input), []))
+
+    def add_plugin(self, node: NodeId, is_input: bool, info) -> int:
+        """Open `info` for this side's width and append it to the chain; its index there."""
         from tonesphere.plugins import PluginInstance
 
-        with self._lock:
-            device = self._device(device_key)
-            if device is None:
-                raise ValueError(f"{device_key}: device not present")
-            channels = device.max_input_channels if is_input else device.max_output_channels
-            if channels < 1:
-                raise ValueError(f"{device.name} has no {'input' if is_input else 'output'} channels")
-            instance = PluginInstance(info, self._samplerate, self._engine.max_block, channels)
-            side = (device_key, INPUT if is_input else OUTPUT)
-            self._plugins.setdefault(side, []).append(instance)
-            self._sync_plugin_inserts()
-            self._republish()
-            return len(self._plugins[side]) - 1
+        channels = self._side_channels(node, is_input)
+        instance = PluginInstance(info, self._samplerate, self._engine.max_block, channels)
+        return self._append(node, is_input, instance)
 
-    def remove_plugin(self, device_key: str, is_input: bool, index: int) -> bool:
-        with self._lock:
-            slots = self._plugins.get((device_key, INPUT if is_input else OUTPUT), [])
-            if not 0 <= index < len(slots):
-                return False
-            instance = slots.pop(index)
-            self._sync_plugin_inserts()
-            self._republish()
-            instance.close()  # released once the plan that used it is retired
-            return True
+    def add_builtin(self, node: NodeId, is_input: bool, kind: str, values: list[float] | None = None) -> int:
+        from tonesphere.engine.builtins import BuiltinInsert
 
-    def plugins_for(self, device_key: str, is_input: bool) -> list:
-        return list(self._plugins.get((device_key, INPUT if is_input else OUTPUT), []))
+        self._side_channels(node, is_input)
+        return self._append(node, is_input, BuiltinInsert(kind, values))
 
-    def set_plugin_bypassed(self, device_key: str, is_input: bool, index: int, bypassed: bool) -> bool:
-        """The host's bypass: the plugin is not called at all, and its reported latency no longer counts."""
-        with self._lock:
-            slots = self._plugins.get((device_key, INPUT if is_input else OUTPUT), [])
-            if not 0 <= index < len(slots):
-                return False
-            slots[index].bypassed = bool(bypassed)
-            self._sync_plugin_inserts()
-            self._republish()
-            return True
+    def _append(self, node: NodeId, is_input: bool, entry) -> int:
+        from tonesphere.native._abi import MAX_INSERTS
 
-    def _sync_plugin_inserts(self):
+        chain = self._chains.setdefault(self._side(node, is_input), [])
+        if len(chain) >= MAX_INSERTS:
+            if not getattr(entry, 'is_builtin', False):
+                entry.close()
+            raise ValueError(f"a chain holds at most {MAX_INSERTS} effects")
+        chain.append(entry)
+        self._republish()
+        return len(chain) - 1
+
+    def remove_insert(self, node: NodeId, is_input: bool, index: int) -> bool:
+        chain = self._chains.get(self._side(node, is_input), [])
+        if not 0 <= index < len(chain):
+            return False
+        entry = chain.pop(index)
+        self._republish()
+        if not getattr(entry, 'is_builtin', False):
+            entry.close()  # released once the plan that used it is retired
+        return True
+
+    def move_insert(self, node: NodeId, is_input: bool, index: int, to: int) -> bool:
+        chain = self._chains.get(self._side(node, is_input), [])
+        if not (0 <= index < len(chain) and 0 <= to < len(chain)):
+            return False
+        chain.insert(to, chain.pop(index))
+        self._republish()
+        return True
+
+    def set_insert_bypassed(self, node: NodeId, is_input: bool, index: int, bypassed: bool) -> bool:
+        """The host's bypass: the processor is not run at all, and a plugin's latency no longer counts."""
+        chain = self._chains.get(self._side(node, is_input), [])
+        if not 0 <= index < len(chain):
+            return False
+        chain[index].bypassed = bool(bypassed)
+        self._republish()
+        return True
+
+    def set_builtin_value(self, node: NodeId, is_input: bool, index: int, param: int, value: float) -> float:
+        """Set a built-in's parameter in its own unit; it reaches the audio thread on the next block."""
+        side = self._side(node, is_input)
+        entry = self._chains.get(side, [])[index]
+        if not getattr(entry, 'is_builtin', False):
+            raise ValueError("not a built-in effect")
+        applied = entry.set_value(param, value)
+        native = self._plan.native_ids.get(side) if self._plan is not None else None
+        if native is not None:
+            self._engine.set_insert_param(native, index, param, applied)
+        return applied
+
+    def _plan_inserts(self) -> dict[tuple[NodeId, str], list[tuple]]:
         from tonesphere.native import VST3
 
-        for side in set(self._plugins) | set(self._inserts):
-            builtins = [p for p in self._inserts.get(side, []) if p[1] != VST3]
-            first = max((p[0] for p in builtins), default=-1) + 1
-            plugins = [(first + i, VST3, inst.bypassed, inst.handle)
-                       for i, inst in enumerate(self._plugins.get(side, []))]
-            self._inserts[side] = builtins + plugins
+        out = {}
+        for side, chain in self._chains.items():
+            out[side] = [(slot, entry.type, entry.bypassed) if getattr(entry, 'is_builtin', False)
+                         else (slot, VST3, entry.bypassed, entry.handle)
+                         for slot, entry in enumerate(chain)]
+        return out
+
+    def _push_builtin_values(self):
+        """After a plan swap: a moved or rebuilt processor would otherwise run its defaults."""
+        for side, chain in self._chains.items():
+            native = self._plan.native_ids.get(side)
+            if native is None:
+                continue
+            for slot, entry in enumerate(chain):
+                if getattr(entry, 'is_builtin', False):
+                    for param, value in enumerate(entry.values):
+                        self._engine.set_insert_param(native, slot, param, value)
+
+    def insert_readout(self, node: NodeId, is_input: bool, index: int) -> float | None:
+        """A built-in's gain reduction (compressor, limiter) as the audio thread last applied it."""
+        native = self._plan.native_ids.get(self._side(node, is_input)) if self._plan is not None else None
+        if native is None or not self._running:
+            return None
+        try:
+            return self._engine.insert_readout(native, index)
+        except NativeError:
+            return None
 
     def plugin_latency_samples(self) -> int:
         """Reported by the plugins on output paths plus the worst input path: what a player hears."""
-        per_side = {side: sum(inst.latency_samples for inst in slots if not inst.bypassed)
-                    for side, slots in self._plugins.items()}
-        worst_in = max((n for (key, role), n in per_side.items() if role == INPUT), default=0)
-        worst_out = max((n for (key, role), n in per_side.items() if role == OUTPUT), default=0)
+        per_side = {side: sum(e.latency_samples for e in chain
+                              if not getattr(e, 'is_builtin', False) and not e.bypassed)
+                    for side, chain in self._chains.items()}
+        worst_in = max((n for (_node, role), n in per_side.items() if role == INPUT), default=0)
+        worst_out = max((n for (_node, role), n in per_side.items() if role == OUTPUT), default=0)
         return worst_in + worst_out
 
     # --- Backend description, for AudioEngine.get_driver_info ---
@@ -395,6 +464,11 @@ class NativeHost:
 
     def _device(self, key: str) -> DeviceInfo | None:
         return next((d for d in self._devices if d.key == key), None)
+
+    @property
+    def supports_loopback(self) -> bool:
+        """Whole-system loopback of an output is a WASAPI shared-mode feature; ASIO has none."""
+        return self.host_api == HostApi.WASAPI
 
     # --- Buses ---
 
@@ -447,17 +521,6 @@ class NativeHost:
         except NativeError:
             return None
 
-    # --- Inserts (native built-ins and VST3 plugins), keyed by device side ---
-
-    def set_inserts(self, device_key: str, is_input: bool, inserts: list[tuple]):
-        """(slot, type, bypassed[, plugin handle]) per processor; applied now and after any restart."""
-        with self._lock:
-            self._inserts[(device_key, INPUT if is_input else OUTPUT)] = list(inserts)
-            self._republish()
-
-    def inserts_for(self, device_key: str, is_input: bool):
-        return self._inserts.get((device_key, INPUT if is_input else OUTPUT))
-
     def node_for_side(self, device_key: str, is_input: bool) -> int | None:
         return self._device_sides.get((device_key, INPUT if is_input else OUTPUT))
 
@@ -473,6 +536,12 @@ class NativeHost:
                     problems.append(f"{node.ref}: device not present")
                     continue
                 endpoints[node] = Endpoint(device.max_input_channels, device.max_output_channels)
+            elif node.kind == 'loopback':
+                device = self._device(node.ref)
+                if device is None or not device.can_output or not self.supports_loopback:
+                    problems.append(f"loopback of {node.ref}: not available")
+                    continue
+                endpoints[node] = Endpoint(device.max_output_channels, 0, limiter=False)
             elif node.kind == 'bus':
                 channels = self._buses.get(node.ref)
                 if channels is None:
@@ -495,11 +564,8 @@ class NativeHost:
             connections=tuple(c for c in graph.connections if c.source in endpoints and c.dest in endpoints),
             soloed=graph.soloed, master_gain=graph.master_gain,
         )
-        inserts = {}
-        for (key, role), processors in self._inserts.items():
-            inserts[(NodeId('device', key), role)] = processors
         try:
-            plan = self._compiler.compile(usable, endpoints, inserts,
+            plan = self._compiler.compile(usable, endpoints, self._plan_inserts(),
                                           always=tuple(bus_node(name) for name in self._buses))
         except (KeyError, ValueError) as e:
             return None, problems + [str(e)]
@@ -511,20 +577,35 @@ class NativeHost:
             bus = self._compiler.native_id(bus_node(name), BUS)
             plan.nodes.append(Node.source(feed, channels, ring_frames=self.blocksize * FEED_RING_BLOCKS))
             plan.routes.append(Route(feed, bus))
+
+        # A loopback has no clock of its own (Windows sends it nothing during silence), so a
+        # plan whose only device is a loopback also renders silence into that output, in
+        # shared mode, to be its clock — which also keeps its loopback delivering packets.
+        self._loopback_clock = None
+        loopbacks = [node for (node, _role) in plan.native_ids if node.kind == 'loopback']
+        if loopbacks and not any(node.kind == 'device' for (node, _role) in plan.native_ids):
+            ref = loopbacks[0].ref
+            clock = self._compiler.native_id(loopback_node(ref), 'clock')
+            plan.nodes.append(Node.sink(clock, endpoints[loopbacks[0]].input_channels, limiter=False))
+            self._loopback_clock = (clock, ref)
         return plan, problems
 
     def _apply(self, plan):
         self._engine.apply_plan(plan.nodes, plan.routes, plan.inserts)
         self._engine.set_master_gain(plan.master_gain)
         self._plan = plan
+        self._push_builtin_values()
         self._device_sides = {(node.ref, role): native for (node, role), native in plan.native_ids.items()
                               if node.kind == 'device'}
+        self._loopback_sides = {node.ref: native for (node, _role), native in plan.native_ids.items()
+                                if node.kind == 'loopback'}
         for side in list(self._strips):
             if side not in self._device_sides:
                 del self._strips[side]
 
     def _wanted_streams(self) -> frozenset:
-        return frozenset((key, role, native) for (key, role), native in self._device_sides.items())
+        return frozenset((key, role, native) for (key, role), native in self._device_sides.items()) | \
+            frozenset((key, 'loopback', native) for key, native in self._loopback_sides.items())
 
     def _republish(self):
         """Recompile and swap in the current graph; used when buses or inserts change."""
@@ -581,7 +662,9 @@ class NativeHost:
             sides = sorted(self._device_sides.items(), key=lambda item: (item[0][1] != OUTPUT, item[0][0]))
             problems = []
             try:
-                if not sides:
+                if self._loopback_sides and self.host_api != HostApi.WASAPI:
+                    problems.append("whole-system loopback needs WASAPI; ASIO has none")
+                if not sides and not self._loopback_sides:
                     self._engine.start_clock(self._blocksize)
                     self._clock = True
                 elif self.host_api == HostApi.ASIO:
@@ -609,6 +692,16 @@ class NativeHost:
             channels = device.max_output_channels if role == OUTPUT else device.max_input_channels
             specs.append(StreamSpec(native, 'render' if role == OUTPUT else 'capture', channels, device.endpoint_id,
                                     exclusive=self.exclusive, period_frames=self._blocksize))
+        if not specs and self._loopback_clock is not None:
+            clock, key = self._loopback_clock
+            device = self._device(key)
+            specs.append(StreamSpec(clock, 'render', device.max_output_channels, device.endpoint_id))
+        for key, native in sorted(self._loopback_sides.items()):
+            device = self._device(key)
+            if device is not None and device.endpoint_id:
+                # Loopback is shared mode only: it hears the Windows mixer, which an
+                # exclusive stream on the same device bypasses.
+                specs.append(StreamSpec(native, 'loopback', device.max_output_channels, device.endpoint_id))
         self._engine.start_wasapi(specs, master=0)
         return []
 
@@ -658,10 +751,11 @@ class NativeHost:
 
     def cleanup(self):
         self.stop()
-        for slots in self._plugins.values():
-            for instance in slots:
-                instance.close()
-        self._plugins.clear()
+        for chain in self._chains.values():
+            for entry in chain:
+                if not getattr(entry, 'is_builtin', False):
+                    entry.close()
+        self._chains.clear()
         self._engine.close()
 
     # --- Strips ---
@@ -685,6 +779,9 @@ class NativeHost:
         for (key, _), node in self._device_sides.items():
             if node == native:
                 return key
+        for key, node in self._loopback_sides.items():
+            if node == native:
+                return f"loopback::{key}"
         return str(native)
 
     def failed_streams(self) -> dict[str, str]:
@@ -694,11 +791,14 @@ class NativeHost:
                 for s in self._engine.stream_status() if s['state'] == 'failed'}
 
     def dead_nodes(self) -> list[NodeId]:
-        return [NodeId('device', key) for key in self.failed_streams()]
+        return [loopback_node(key[len('loopback::'):]) if key.startswith('loopback::') else NodeId('device', key)
+                for key in self.failed_streams()]
 
     def _meter_nodes(self) -> dict[str, int]:
         nodes = {f"{key}::{'in' if role == INPUT else 'out'}": native
                  for (key, role), native in self._device_sides.items()}
+        for key, native in self._loopback_sides.items():
+            nodes[f"loopback::{key}"] = native
         for name in self._buses:
             nodes[f"bus::{name}"] = self._compiler.native_id(bus_node(name), BUS)
         return nodes

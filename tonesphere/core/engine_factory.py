@@ -331,6 +331,12 @@ class UnifiedAudioEngine:
     def failed_device_ids(self) -> dict[int, str]:
         return self.engine.failed_device_ids()
 
+    def handle_device_change(self) -> dict[str, Any]:
+        return self.engine.handle_device_change()
+
+    def last_device_change(self) -> dict[str, Any] | None:
+        return self.engine.last_device_change()
+
     # --- Plugins ---
 
     def hosts_plugins(self) -> bool:
@@ -357,6 +363,31 @@ class UnifiedAudioEngine:
     def set_plugin_parameter(self, device_id: int, index: int, param_id: int, normalized: float,
                              is_input: bool = True):
         return self.engine.set_plugin_parameter(device_id, index, param_id, normalized, is_input)
+
+    def add_builtin(self, device_id: int, kind: str, is_input: bool = True, values=None) -> tuple[bool, str]:
+        return self.engine.add_builtin(device_id, kind, is_input, values)
+
+    def list_inserts(self, device_id: int, is_input: bool = True) -> list[dict[str, Any]]:
+        return self.engine.list_inserts(device_id, is_input)
+
+    def insert_instance(self, device_id: int, index: int, is_input: bool = True):
+        return self.engine.insert_instance(device_id, index, is_input)
+
+    def remove_insert(self, device_id: int, index: int, is_input: bool = True) -> bool:
+        return self.engine.remove_insert(device_id, index, is_input)
+
+    def move_insert(self, device_id: int, index: int, to: int, is_input: bool = True) -> bool:
+        return self.engine.move_insert(device_id, index, to, is_input)
+
+    def set_insert_bypassed(self, device_id: int, index: int, bypassed: bool, is_input: bool = True) -> bool:
+        return self.engine.set_insert_bypassed(device_id, index, bypassed, is_input)
+
+    def set_insert_parameter(self, device_id: int, index: int, param_id: int, normalized: float,
+                             is_input: bool = True) -> bool:
+        return self.engine.set_insert_parameter(device_id, index, param_id, normalized, is_input)
+
+    def set_builtin_value(self, device_id: int, index: int, param: int, value: float, is_input: bool = True):
+        return self.engine.set_builtin_value(device_id, index, param, value, is_input)
 
     # --- Properties ---
 

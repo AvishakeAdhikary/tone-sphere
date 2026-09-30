@@ -125,15 +125,20 @@ class PresetManager:
             }
 
         plugins = {}
-        for device_id in engine._device_by_id:
+        for device_id in list(engine._device_by_id) + list(engine._bus_meta):
             reference = self._reference(device_id)
             sides = {}
             for side, is_input in (('input', True), ('output', False)):
                 entries = []
-                for instance in engine.plugin_instances(device_id, is_input):
+                for index in range(len(engine.list_inserts(device_id, is_input))):
+                    instance = engine.insert_instance(device_id, index, is_input)
+                    if getattr(instance, 'is_builtin', False):
+                        entries.append(instance.to_dict())
+                        continue
                     if instance.status().crashed:
                         continue  # its state cannot be trusted, and it cannot be reopened as it was
                     entries.append({
+                        'kind': 'vst3',
                         'path': instance.info.path,
                         'uid': instance.info.uid,
                         'name': instance.info.name,
@@ -368,9 +373,18 @@ class PresetManager:
                 if device_id is None:
                     result.missing_plugins.extend(f"{e.get('name', '?')} (device absent)" for e in entries)
                     continue
-                while engine.plugin_instances(device_id, is_input):
-                    engine.remove_plugin(device_id, 0, is_input)
+                while engine.list_inserts(device_id, is_input):
+                    engine.remove_insert(device_id, 0, is_input)
                 for entry in entries:
+                    if entry.get('kind') == 'builtin':
+                        ok, message = engine.add_builtin(device_id, entry['type'], is_input, entry.get('values'))
+                        if not ok:
+                            result.warnings.append(f"built-in {entry.get('type')}: {message}")
+                            continue
+                        if entry.get('bypassed'):
+                            engine.set_insert_bypassed(device_id, len(engine.list_inserts(device_id, is_input)) - 1,
+                                                       True, is_input)
+                        continue
                     info = PluginInfo(path=entry['path'], uid=entry['uid'], name=entry.get('name', ''),
                                       vendor=entry.get('vendor', ''), version=entry.get('version', ''),
                                       category='Audio Module Class', subcategories='', sdk_version='',
@@ -379,14 +393,14 @@ class PresetManager:
                     if not ok:
                         result.missing_plugins.append(f"{info.name}: {message}")
                         continue
-                    index = len(engine.plugin_instances(device_id, is_input)) - 1
-                    instance = engine.plugin_instances(device_id, is_input)[index]
+                    index = len(engine.list_inserts(device_id, is_input)) - 1
+                    instance = engine.insert_instance(device_id, index, is_input)
                     try:
                         instance.restore(PluginState.from_dict(entry.get('state', {})))
                     except PluginError as e:
                         result.warnings.append(f"{info.name} opened but kept its defaults: {e}")
                     if entry.get('bypassed'):
-                        engine.set_plugin_bypassed(device_id, index, True, is_input)
+                        engine.set_insert_bypassed(device_id, index, True, is_input)
                     result.restored_plugins += 1
 
     # --- Files ---

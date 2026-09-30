@@ -1,5 +1,7 @@
 """
-VST3 plugins: the browser that scans for them, and the insert chain of one device side.
+Effects: the VST3 browser that scans for plugins, and the insert chain of one device side
+or bus — ToneSphere's built-in EQ, compressor, limiter and delay, and VST3 plugins, in one
+ordered chain.
 
 Scanning runs each module in a subprocess (`tonesphere.plugins.scan`), which takes seconds
 on a cold cache, so it runs on a worker thread and the window stays live. A module that
@@ -27,6 +29,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMenu,
     QPushButton,
     QSlider,
     QSplitter,
@@ -367,7 +370,7 @@ class ParameterPanel(QWidget):
 
 
 class InsertsDialog(QDialog):
-    """The VST3 plugins on one side of one device, in processing order."""
+    """The effects on one side of one device (or on a bus), in processing order."""
 
     changed = Signal()
 
@@ -405,8 +408,18 @@ class InsertsDialog(QDialog):
         left_layout.addWidget(self.chain, stretch=1)
 
         buttons = QHBoxLayout()
+        self.builtin_button = QPushButton(tr('plugins.inserts.add_builtin'))
+        builtin_menu = QMenu(self.builtin_button)
+        from tonesphere.engine.builtins import KINDS
+        for kind in KINDS:
+            builtin_menu.addAction(tr(f'builtin.{kind}'), lambda k=kind: self.add_builtin(k))
+        self.builtin_button.setMenu(builtin_menu)
         self.add_button = QPushButton(tr('plugins.inserts.add'))
         self.add_button.clicked.connect(self._browse)
+        self.up_button = QPushButton(tr('plugins.inserts.move_up'))
+        self.up_button.clicked.connect(lambda: self._move(-1))
+        self.down_button = QPushButton(tr('plugins.inserts.move_down'))
+        self.down_button.clicked.connect(lambda: self._move(1))
         self.remove_button = QPushButton(tr('plugins.inserts.remove'))
         self.remove_button.clicked.connect(self._remove)
         self.bypass_button = QPushButton(tr('plugins.inserts.bypass'))
@@ -415,9 +428,13 @@ class InsertsDialog(QDialog):
         self.bypass_button.toggled.connect(self._bypass)
         self.editor_button = QPushButton(tr('plugins.inserts.open_editor'))
         self.editor_button.clicked.connect(self._open_editor)
-        for b in (self.add_button, self.remove_button, self.bypass_button, self.editor_button):
+        for b in (self.builtin_button, self.add_button, self.remove_button):
             buttons.addWidget(b)
         left_layout.addLayout(buttons)
+        order = QHBoxLayout()
+        for b in (self.up_button, self.down_button, self.bypass_button, self.editor_button):
+            order.addWidget(b)
+        left_layout.addLayout(order)
 
         self.fault_label = QLabel()
         self.fault_label.setWordWrap(True)
@@ -454,7 +471,7 @@ class InsertsDialog(QDialog):
 
     def refresh(self, select: int | None = None):
         current = self.chain.currentRow() if select is None else select
-        self._submit(lambda: self._engine.list_plugins(self._device_id, self._is_input),
+        self._submit(lambda: self._engine.list_inserts(self._device_id, self._is_input),
                      lambda entries: self._show_entries(entries, current))
 
     def _show_entries(self, entries: list[dict], current: int):
@@ -462,8 +479,13 @@ class InsertsDialog(QDialog):
         self.chain.blockSignals(True)
         self.chain.clear()
         for e in entries:
-            latency = tr('plugins.inserts.latency', samples=e['latency_samples']) if e['latency_samples'] else ''
-            text = tr('plugins.inserts.entry', name=e['name'], vendor=e['vendor'] or '--', latency=latency)
+            if e['kind'] == 'builtin':
+                text = tr('plugins.inserts.builtin_entry', name=e['name'])
+                if e['gain_reduction_db']:
+                    text += tr('plugins.inserts.reduction', db=f"{e['gain_reduction_db']:.1f}")
+            else:
+                latency = tr('plugins.inserts.latency', samples=e['latency_samples']) if e['latency_samples'] else ''
+                text = tr('plugins.inserts.entry', name=e['name'], vendor=e['vendor'] or '--', latency=latency)
             if e['crashed']:
                 text = tr('plugins.inserts.crashed_entry', entry=text)
             elif e['bypassed']:
@@ -486,6 +508,8 @@ class InsertsDialog(QDialog):
         entries = self._entries
         valid = 0 <= row < len(entries)
         self.remove_button.setEnabled(valid)
+        self.up_button.setEnabled(valid and row > 0)
+        self.down_button.setEnabled(valid and row < len(entries) - 1)
         self.bypass_button.setEnabled(valid and not (valid and entries[row]['crashed']))
         self.editor_button.setEnabled(valid and entries[row]['has_editor'] and not entries[row]['crashed'])
         self.bypass_button.blockSignals(True)
@@ -499,11 +523,11 @@ class InsertsDialog(QDialog):
         device, is_input = self._device_id, self._is_input
 
         def show(instance):
-            if self.chain.currentRow() == row:
-                self.parameters.show_plugin(instance, lambda pid, value: self._engine.set_plugin_parameter(
+            if self.chain.currentRow() == row and instance is not None:
+                self.parameters.show_plugin(instance, lambda pid, value: self._engine.set_insert_parameter(
                     device, row, pid, value, is_input))
 
-        self._submit(lambda: self._engine.plugin_instances(device, is_input)[row], show)
+        self._submit(lambda: self._engine.insert_instance(device, row, is_input), show)
 
     def _browse(self):
         browser = PluginBrowser(self._engine, self._config, picking=True, parent=self)
@@ -523,6 +547,30 @@ class InsertsDialog(QDialog):
         self._submit(lambda: self._engine.add_plugin(self._device_id, info, self._is_input), added,
                      lambda e: self.fault_label.setText(tr('plugins.inserts.add_failed', reason=str(e))))
 
+    def add_builtin(self, kind: str):
+        """Append a built-in effect; the chain shows it once the engine has it."""
+        def added(result):
+            ok, message = result
+            if not ok:
+                self.fault_label.setText(tr('plugins.inserts.add_failed', reason=message))
+                return
+            self.refresh(select=len(self._entries))
+            self.changed.emit()
+
+        self._submit(lambda: self._engine.add_builtin(self._device_id, kind, self._is_input), added)
+
+    def _move(self, step: int):
+        row = self.chain.currentRow()
+        if row < 0:
+            return
+
+        def moved(ok):
+            if ok:
+                self.refresh(select=row + step)
+                self.changed.emit()
+
+        self._submit(lambda: self._engine.move_insert(self._device_id, row, row + step, self._is_input), moved)
+
     def _remove(self):
         row = self.chain.currentRow()
         if row < 0:
@@ -533,7 +581,7 @@ class InsertsDialog(QDialog):
                 self.refresh(select=row)
                 self.changed.emit()
 
-        self._submit(lambda: self._engine.remove_plugin(self._device_id, row, self._is_input), removed)
+        self._submit(lambda: self._engine.remove_insert(self._device_id, row, self._is_input), removed)
 
     def _bypass(self, bypassed: bool):
         row = self.chain.currentRow()
@@ -544,7 +592,7 @@ class InsertsDialog(QDialog):
             self.refresh(select=row)
             self.changed.emit()
 
-        self._submit(lambda: self._engine.set_plugin_bypassed(self._device_id, row, bypassed, self._is_input), done)
+        self._submit(lambda: self._engine.set_insert_bypassed(self._device_id, row, bypassed, self._is_input), done)
 
     def _open_editor(self):
         row = self.chain.currentRow()
@@ -552,9 +600,9 @@ class InsertsDialog(QDialog):
             return
 
         def open_editor():
-            instances = self._engine.plugin_instances(self._device_id, self._is_input)
-            if 0 <= row < len(instances):
-                instances[row].open_editor()
+            instance = self._engine.insert_instance(self._device_id, row, self._is_input)
+            if instance is not None and not getattr(instance, 'is_builtin', False):
+                instance.open_editor()
 
         self._submit(open_editor, None,
                      lambda e: self.fault_label.setText(tr('plugins.inserts.editor_failed', reason=str(e))))

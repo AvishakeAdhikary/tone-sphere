@@ -258,16 +258,21 @@ class TestCaptureStatusMatchesWhatIsImplemented:
             assert status['process_loopback_supported'] is False
             assert status['process_loopback_implemented'] is False
 
-    def test_whole_system_loopback_is_not_claimed_until_something_opens_it(self):
+    def test_whole_system_loopback_is_claimed_only_where_something_opens_it(self):
         """
         This field used to read `system_loopback_available: True` on any Windows machine,
-        because WASAPI render endpoints existed. Nothing ever opened a loopback stream.
+        because WASAPI render endpoints existed, when nothing opened a loopback stream. Now
+        the native engine opens one (`tests/hardware/test_loopback_source.py`), so it is
+        claimed exactly where that engine is loaded, and nowhere else.
         """
+        import sys
+
         from tonesphere.engine.app_capture import capture_status
+        from tonesphere.native import available
 
         status = capture_status()
 
-        assert status['system_loopback_implemented'] is False
+        assert status['system_loopback_implemented'] is (sys.platform == 'win32' and available())
         assert 'system_loopback_available' not in status
         assert "loopback works" not in status['note']
 

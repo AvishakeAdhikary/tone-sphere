@@ -291,8 +291,11 @@ class TestOriginLabelling:
         if not devices:
             pytest.skip("no enumerated devices on this machine")
 
-        assert all(d["origin"] == "hardware" for d in devices
+        # Loopback sources (Windows) are derived from hardware and say so; they are not ours either.
+        assert all(d["origin"] in ("hardware", "loopback") for d in devices
                    if d["id"] not in engine._system_virtual_devices)
+        assert not any(d["origin"] == "os_virtual_endpoint" for d in devices
+                       if d["id"] not in engine._system_virtual_devices)
 
 
 class TestExposureIsActuallyWired:

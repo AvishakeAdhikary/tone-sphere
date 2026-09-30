@@ -81,6 +81,7 @@ class MainWindow(QMainWindow):
         self._running = False
         self._tick = 0
         self._stats_due = True
+        self._device_serial = 0
 
         self.setWindowTitle(tr('app.name'))
         self.resize(1360, 880)
@@ -133,8 +134,8 @@ class MainWindow(QMainWindow):
             counts = {}
             if plugin_host:
                 for d in devices:
-                    if d['origin'] != 'in_process_bus':
-                        entries = self.engine.list_plugins(d['id'], d['direction'] == 'input')
+                    if d['origin'] != 'loopback':
+                        entries = self.engine.list_inserts(d['id'], d['direction'] == 'input')
                         counts[(d['id'], d['direction'] == 'input')] = (
                             len(entries), any(e['crashed'] for e in entries))
             view.update(devices=devices, drivers=self.engine.get_available_drivers(),
@@ -487,7 +488,7 @@ class MainWindow(QMainWindow):
         self._strips.clear()
 
     def _hosts_plugins(self, device: dict) -> bool:
-        return device['origin'] != 'in_process_bus' and self._view['plugin_host']
+        return device['origin'] != 'loopback' and self._view['plugin_host']
 
     def _add_strip(self, device: dict):
         direction_key = f"device.direction.{device['direction']}"
@@ -632,10 +633,10 @@ class MainWindow(QMainWindow):
             if strip is not None:
                 strip.set_insert_count(*self._view['insert_counts'][(device_id, is_input)])
 
-        self._run(self.engine.list_plugins, device_id, is_input, done=counted)
+        self._run(self.engine.list_inserts, device_id, is_input, done=counted)
 
     def _rescan(self):
-        self._run(self.engine.refresh_devices, refresh='all')
+        self._run(self.engine.handle_device_change, refresh='all')
 
     def _create_monitor_patch(self):
         def created(result):
@@ -730,6 +731,7 @@ class MainWindow(QMainWindow):
             poll['stats'] = self.engine.get_performance_stats()
             poll['state'] = self.engine.state
             poll['failed'] = self.engine.failed_device_ids()
+            poll['device_change'] = self.engine.last_device_change()
         return poll
 
     def _apply_poll(self, poll: dict):
@@ -737,6 +739,23 @@ class MainWindow(QMainWindow):
         self._update_meters(poll['meters'])
         if 'stats' in poll:
             self._update_stats(poll['stats'], poll['state'], poll['failed'])
+            change = poll['device_change']
+            if change and change['serial'] != self._device_serial:
+                self._device_serial = change['serial']
+                self.hardware_bar.set_notice(self._describe_change(change))
+                # The device list changed under the window: redraw it from a fresh snapshot.
+                self._run(lambda: None, refresh='all')
+
+    @staticmethod
+    def _describe_change(change: dict) -> str:
+        parts = []
+        if change['left']:
+            parts.append(tr('status.device_left', names=', '.join(change['left'])))
+        if change['arrived']:
+            parts.append(tr('status.device_arrived', names=', '.join(change['arrived'])))
+        if change['reopened']:
+            parts.append(tr('status.device_reopened'))
+        return ' · '.join(parts)
 
     def _update_meters(self, meters: dict | None):
         """Show one poll's meters. Values the audio thread measured; never computed here."""

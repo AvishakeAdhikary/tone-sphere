@@ -319,6 +319,14 @@ def process_loopback_supported() -> bool:
     return build >= _PROCESS_LOOPBACK_MIN_BUILD
 
 
+def _native_loopback_available() -> bool:
+    if platform.system() != 'Windows':
+        return False
+    from tonesphere.native import available
+
+    return available()
+
+
 def capture_status() -> dict:
     """
     What application capture can and cannot do here.
@@ -331,6 +339,7 @@ def capture_status() -> dict:
     """
     sessions = list_audio_sessions()
     supported = process_loopback_supported()
+    system_loopback = _native_loopback_available()
 
     return {
         'platform': platform.system(),
@@ -339,16 +348,16 @@ def capture_status() -> dict:
             for s in sessions
         ],
         'session_count': len(sessions),
-        # Nothing opens a whole-system loopback stream: the PyPI PortAudio build lists
-        # no loopback devices and sounddevice exposes no WASAPI loopback flag. An earlier
-        # version reported this as available because render endpoints *existed*.
-        'system_loopback_implemented': False,
+        # The native engine opens it: every WASAPI output is also offered as a routable
+        # '(loopback)' source. Only there - the PortAudio host has no loopback path.
+        'system_loopback_implemented': system_loopback,
         'process_loopback_supported': supported,
         'process_loopback_implemented': supported,
         'note': (
             "Per-application capture uses ActivateAudioInterfaceAsync with "
             "VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK (Windows 10 build 20348+). "
-            "Whole-system loopback is not implemented yet."
+            + ("Whole-system loopback: route any output's '(loopback)' source." if system_loopback
+               else "Whole-system loopback needs the native engine, which is not loaded.")
             if supported else
             "Per-application capture needs ActivateAudioInterfaceAsync with "
             "VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK, which exists only on Windows 10 "

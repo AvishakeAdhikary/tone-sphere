@@ -140,6 +140,30 @@ stream starts in. The same tone through the cable came back at the same level th
 native WASAPI, ASIO4ALL (+0.00 dB) and FlexASIO (−0.03 dB), which also establishes that
 sound leaves the output jack.
 
+## Whole-system loopback, as a source
+
+Every WASAPI output is offered in the routing as "<output> (loopback)": everything every
+application plays on it, after the Windows mixer. It is shared mode only (an exclusive
+stream bypasses the mixer, and the loopback with it), and it has no clock: Windows sends a
+loopback nothing while the output is silent. So when a loopback is the only device in a
+plan, the host also opens a shared-mode render stream on the same output, playing nothing,
+as the plan's clock; that stream also keeps the loopback delivering packets through
+silence. Routing a loopback back into its own output, directly or through buses, is refused
+as feedback. On the AI-04, two other processes playing 1 kHz at 0.1 and 440 Hz at 0.05 came
+back through the loopback, a bus and a network send's ring at 0.1000 and 0.0500
+(`tests/hardware/test_loopback_source.py`).
+
+## Devices that come and go
+
+`engine/device_monitor.py` drains Windows' endpoint notifications on a control thread and,
+300 ms after the last of a burst, has the engine re-enumerate. If a device the routing uses
+left, arrived, or has a failed stream, the engine restarts with what is present: other
+devices carry on after a gap of a few blocks (the backend opens and closes its streams
+together), and a route to the missing device is kept, so when it returns it is reopened
+under the same id with no user action. What is proven without hardware is the decision
+(`tests/test_device_monitor.py`); a real device disappearing and returning is exercised on
+the ToneSphere virtual cable in the driver VM.
+
 ## Latency figures and what they mean
 
 Every stream reports `reported_latency_ms` (`IAudioClient::GetStreamLatency`) — what

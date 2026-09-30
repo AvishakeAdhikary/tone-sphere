@@ -359,6 +359,11 @@ class HardwareBar(QFrame):
         self.busy.setFont(Type.font(Type.SMALL))
         layout.addWidget(self.busy)
 
+        self.notice = QLabel("")
+        self.notice.setObjectName("Dim")
+        self.notice.setFont(Type.font(Type.SMALL))
+        layout.addWidget(self.notice)
+
         self.message = QLabel("")
         self.message.setObjectName("Dim")
         self.message.setFont(Type.font(Type.SMALL))
@@ -369,6 +374,11 @@ class HardwareBar(QFrame):
         line.setFrameShape(QFrame.Shape.VLine)
         line.setStyleSheet(f"color: {Colors.BORDER.name()};")
         return line
+
+    def set_notice(self, text: str):
+        """The last thing that happened to the devices: connected, removed, reopened."""
+        self.notice.setText(text[:120])
+        self.notice.setToolTip(text)
 
     def set_busy(self, busy: bool):
         """Whether the engine worker has an action queued or running."""

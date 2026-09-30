@@ -38,6 +38,7 @@ from tonesphere.engine import (
     device_node,
     enumerate_devices,
     linear_to_db,
+    loopback_node,
     network_node,
     preferred_host_api,
 )
@@ -59,6 +60,10 @@ BUS_ID_BASE = 10000
 # (hardware, bus, network) stay disjoint and a stale int held by a UI can never end up
 # pointing at a different kind of thing than it did.
 NETWORK_ID_BASE = 20000
+
+# Whole-system loopback sources: the loopback of output device N is LOOPBACK_ID_BASE + N, so
+# it follows its device's id and never collides with the other ranges.
+LOOPBACK_ID_BASE = 30000
 
 # Default port for the UDP transport. One above the TCP router's 9001, so the two can run
 # side by side on one machine without either having to be reconfigured.
@@ -143,6 +148,8 @@ class AudioEngine:
         self._system_virtual_devices: dict[int, dict[str, Any]] = {}
 
         self._lock = threading.RLock()
+        self._monitor = None
+        self._device_change: dict[str, Any] | None = None
         self._initialized = False
         self._started = False
         self._backend_error: str | None = None
@@ -177,6 +184,7 @@ class AudioEngine:
                 channels = max(device.max_input_channels, device.max_output_channels)
                 self.channel_control_manager.add_device(device_id, channels)
 
+            self._start_device_monitor()
             self._initialized = True
             api = self.host.host_api.value if self.host.host_api else 'none'
             logger.info(f"Engine initialized: {len(self._devices)} devices, {api}")
@@ -270,8 +278,8 @@ class AudioEngine:
             return True, f"{source.name} -> {dest.name}{suffix}"
 
     def stop_engine(self):
-        # Outside the lock: stopping a capture joins its thread, and no other caller
-        # should be blocked behind that.
+        # A capture thread writes through `write_to_bus`, which never takes this lock, so
+        # joining it here cannot wait on anything this thread holds.
         self._stop_all_process_captures()
 
         with self._lock:
@@ -283,6 +291,11 @@ class AudioEngine:
         return self.host.is_running
 
     def cleanup(self):
+        if self._monitor is not None:
+            # It waits for this lock in short attempts that watch for stop, so stopping it
+            # while holding the lock ends it rather than deadlocking with it.
+            self._monitor.stop()
+            self._monitor = None
         self._stop_all_process_captures()
 
         with self._lock:
@@ -335,6 +348,11 @@ class AudioEngine:
             self._node_to_id[node_key] = device_id
             self._device_by_id[device_id] = device
 
+            if device.can_output and getattr(self.host, 'supports_loopback', False):
+                loop = loopback_node(device.key)
+                self._id_to_node[LOOPBACK_ID_BASE + device_id] = loop
+                self._node_to_id[str(loop)] = LOOPBACK_ID_BASE + device_id
+
     def _enumerate(self) -> list[DeviceInfo]:
         """The host's own device list: MMDevice/ASIO for the native host, PortAudio otherwise."""
         if hasattr(self.host, 'enumerate'):
@@ -383,6 +401,66 @@ class AudioEngine:
 
             logger.info(f"Refreshed: {len(self._devices)} devices")
             return True
+
+    # --- Devices that come and go ---
+
+    def _start_device_monitor(self):
+        """Windows' endpoint notifications, on the native WASAPI host; nothing elsewhere."""
+        if self._monitor is not None or getattr(self.host, 'backend', None) != 'native':
+            return
+        from tonesphere.engine.device_monitor import DeviceMonitor
+
+        monitor = DeviceMonitor(self._reconcile_devices, self._lock)
+        try:
+            monitor.start()
+        except NativeError as e:
+            logger.warning(f"Device notifications unavailable; changes need a manual Rescan: {e}")
+            return
+        self._monitor = monitor
+
+    def handle_device_change(self) -> dict[str, Any]:
+        """Re-enumerate now and reopen what changed, as the monitor does on a notification."""
+        return self._reconcile_devices([])
+
+    def _reconcile_devices(self, events: list[dict]) -> dict[str, Any]:
+        """
+        Called with the lock held, after Windows reported devices arriving, leaving or
+        changing state. Re-enumerates; then, if the engine was started and a device its
+        routing uses left, arrived, or has a failed stream, restarts it with the devices
+        present now. A route to a missing device is kept, not deleted: when the device
+        returns, the restart picks it up under the same id.
+
+        The native backend opens and closes its streams together, so a restart is a gap of
+        a few blocks on every device, not only the one that changed.
+        """
+        before = {d.key: d.name for d in self._devices}
+        failed = self.host.failed_streams() if self.host.is_running else {}
+        if not self.refresh_devices():
+            change = {'arrived': [], 'left': [], 'failed': failed, 'reopened': False,
+                      'error': self._backend_error}
+        else:
+            after = {d.key: d.name for d in self._devices}
+            used = {node.ref for c in self._build_graph().connections for node in (c.source, c.dest)
+                    if node.kind == 'device'}
+            arrived = sorted(after.keys() - before.keys())
+            left = sorted(before.keys() - after.keys())
+            touched = used & (set(arrived) | set(left) | set(failed))
+            reopened = False
+            if self._started and touched:
+                self.host.stop()
+                self.start_engine()
+                reopened = True
+                logger.info(f"Reopened after a device change: {sorted(touched)}")
+            change = {'arrived': [after[k] for k in arrived], 'left': [before[k] for k in left],
+                      'failed': failed, 'reopened': reopened, 'error': None,
+                      'still_failed': self.host.failed_streams() if self.host.is_running else {}}
+        serial = (self._device_change or {}).get('serial', 0) + 1
+        self._device_change = {**change, 'serial': serial, 'at': time.time(), 'events': len(events)}
+        return dict(self._device_change)
+
+    def last_device_change(self) -> dict[str, Any] | None:
+        """What the last reconcile found, with a serial the UI compares to notice a new one."""
+        return dict(self._device_change) if self._device_change else None
 
     def get_devices(self, include_all_backends: bool = False) -> list[dict]:
         """
@@ -452,6 +530,26 @@ class AudioEngine:
                         'supports_exclusive': device.supports_exclusive,
                         'direction': 'output',
                         'origin': origin,
+                    })
+
+            if getattr(self.host, 'supports_loopback', False):
+                for device_id, device in sorted(self._device_by_id.items()):
+                    if not device.can_output or (not include_all_backends and active_api is not None
+                                                 and device.host_api != active_api):
+                        continue
+                    devices.append({
+                        'id': LOOPBACK_ID_BASE + device_id,
+                        'name': f"{device.name} (loopback)",
+                        'type': DeviceType.PHYSICAL_INPUT.value,
+                        'channels': device.max_output_channels,
+                        'sample_rate': device.default_samplerate,
+                        'is_asio': False,
+                        'is_active': self.host.is_running,
+                        'latency_ms': device.default_low_output_latency_ms,
+                        'host_api': device.host_api_name,
+                        'supports_exclusive': False,
+                        'direction': 'input',
+                        'origin': 'loopback',
                     })
 
             for bus_id, meta in sorted(self._bus_meta.items()):
@@ -1048,6 +1146,8 @@ class AudioEngine:
                 return False, f"Unknown source device {source_id}"
             if dest is None:
                 return False, f"Unknown destination device {destination_id}"
+            if dest.kind == 'loopback':
+                return False, "A loopback is a source: it records what its output plays"
 
             if self.host.graph_holder.current().would_feedback(source, dest):
                 return False, "Refused: this would create a feedback loop"
@@ -1260,27 +1360,28 @@ class AudioEngine:
 
     def get_inserts(self, device_id: int, is_input: bool = True):
         """
-        The insert chain for a device, or None if it has no open stream.
-
-        None is normal while stopped. Inserts belong to a stream, so they exist only once
-        that stream is open; configuration should be reapplied after a restart.
+        The PortAudio host's Python effect chain for a device side, or None. On the native
+        host the chain is `list_inserts`.
         """
         node = self._node_for(device_id)
-        if node is None or node.kind != 'device':
+        if node is None or node.kind != 'device' or not hasattr(self.host, 'inserts_for'):
             return None
         return self.host.inserts_for(node.ref, is_input)
 
-    # --- Route parameters ---
+    # --- Insert chains: built-in effects and VST3 plugins (the native engine) ---
 
-    # --- Plugins (VST3; the native engine only) ---
-
-    def _plugin_side(self, device_id: int) -> tuple[str | None, str]:
+    def _chain_node(self, device_id: int):
+        """The graph node whose chain `device_id` names, or (None, why not)."""
         node = self._node_for(device_id)
-        if node is None or node.kind != 'device':
-            return None, f"Unknown device {device_id}"
-        if not hasattr(self.host, 'add_plugin'):
-            return None, "Plugin hosting needs the native engine (Windows)"
-        return node.ref, ""
+        if node is None or node.kind not in ('device', 'bus'):
+            return None, f"Unknown device or bus {device_id}"
+        if not hasattr(self.host, 'chain_for'):
+            return None, "Effect chains need the native engine (Windows)"
+        return node, ""
+
+    def _chain(self, device_id: int, is_input: bool) -> list:
+        node, _ = self._chain_node(device_id)
+        return self.host.chain_for(node, is_input) if node is not None else []
 
     def scan_plugins(self, paths: list[str] | None = None) -> list:
         """
@@ -1295,59 +1396,112 @@ class AudioEngine:
         return scan.scan(paths, cache)
 
     def add_plugin(self, device_id: int, info, is_input: bool = True) -> tuple[bool, str]:
-        """Open a scanned plugin (`plugins.PluginInfo`) on one side of a device, after any already there."""
+        """Open a scanned plugin (`plugins.PluginInfo`) at the end of a device side's or bus's chain."""
         from tonesphere.plugins import PluginError
 
         if info.is_instrument:
             return False, f"{info.name} is an instrument: it needs MIDI input, which ToneSphere does not provide yet"
-        key, problem = self._plugin_side(device_id)
-        if key is None:
+        node, problem = self._chain_node(device_id)
+        if node is None:
             return False, problem
-        with self._lock:
-            try:
-                index = self.host.add_plugin(key, is_input, info)
-            except (PluginError, ValueError, NativeError) as e:
-                return False, str(e)
-        instance = self.host.plugins_for(key, is_input)[index]
-        latency = instance.latency_samples
+        try:
+            index = self.host.add_plugin(node, is_input, info)
+        except (PluginError, ValueError, NativeError) as e:
+            return False, str(e)
+        latency = self.host.chain_for(node, is_input)[index].latency_samples
         note = f" (+{latency} samples latency, reported by the plugin)" if latency else ""
         return True, f"Loaded {info.name}{note}"
 
-    def remove_plugin(self, device_id: int, index: int, is_input: bool = True) -> bool:
-        key, _ = self._plugin_side(device_id)
-        if key is None:
-            return False
-        with self._lock:
-            return self.host.remove_plugin(key, is_input, index)
+    def add_builtin(self, device_id: int, kind: str, is_input: bool = True,
+                    values: list[float] | None = None) -> tuple[bool, str]:
+        """Append a built-in effect ('eq', 'compressor', 'limiter', 'delay') to a chain."""
+        node, problem = self._chain_node(device_id)
+        if node is None:
+            return False, problem
+        try:
+            self.host.add_builtin(node, is_input, kind, values)
+        except (ValueError, NativeError) as e:
+            return False, str(e)
+        return True, f"Added {kind}"
 
-    def plugin_instances(self, device_id: int, is_input: bool = True) -> list:
-        key, _ = self._plugin_side(device_id)
-        return self.host.plugins_for(key, is_input) if key else []
-
-    def list_plugins(self, device_id: int, is_input: bool = True) -> list[dict[str, Any]]:
+    def list_inserts(self, device_id: int, is_input: bool = True) -> list[dict[str, Any]]:
+        """The whole chain, in processing order: built-ins and plugins alike."""
         out = []
-        for index, instance in enumerate(self.plugin_instances(device_id, is_input)):
-            status = instance.status()
-            out.append({
-                'index': index,
-                'name': instance.info.name,
-                'vendor': instance.info.vendor,
-                'version': instance.info.version,
-                'path': instance.info.path,
-                'latency_samples': status.latency_samples,
-                'crashed': status.crashed,
-                'fault': status.fault,
-                'has_editor': instance.has_editor(),
-                'bypassed': instance.bypassed,
-            })
+        node, _ = self._chain_node(device_id)
+        for index, entry in enumerate(self._chain(device_id, is_input)):
+            if getattr(entry, 'is_builtin', False):
+                out.append({'index': index, 'kind': 'builtin', 'type': entry.kind, 'name': entry.name,
+                            'vendor': 'ToneSphere', 'version': '', 'path': '', 'latency_samples': 0,
+                            'crashed': False, 'fault': '', 'has_editor': False, 'bypassed': entry.bypassed,
+                            'gain_reduction_db': self.host.insert_readout(node, is_input, index)})
+                continue
+            status = entry.status()
+            out.append({'index': index, 'kind': 'vst3', 'type': 'vst3', 'name': entry.info.name,
+                        'vendor': entry.info.vendor, 'version': entry.info.version, 'path': entry.info.path,
+                        'latency_samples': status.latency_samples, 'crashed': status.crashed,
+                        'fault': status.fault, 'has_editor': entry.has_editor(), 'bypassed': entry.bypassed,
+                        'gain_reduction_db': None})
         return out
 
-    def set_plugin_bypassed(self, device_id: int, index: int, bypassed: bool, is_input: bool = True) -> bool:
-        key, _ = self._plugin_side(device_id)
-        if key is None:
+    def insert_instance(self, device_id: int, index: int, is_input: bool = True):
+        """The entry at `index`: a `BuiltinInsert` or a `PluginInstance`, each with `parameters()`."""
+        chain = self._chain(device_id, is_input)
+        return chain[index] if 0 <= index < len(chain) else None
+
+    def remove_insert(self, device_id: int, index: int, is_input: bool = True) -> bool:
+        node, _ = self._chain_node(device_id)
+        return node is not None and self.host.remove_insert(node, is_input, index)
+
+    def move_insert(self, device_id: int, index: int, to: int, is_input: bool = True) -> bool:
+        node, _ = self._chain_node(device_id)
+        return node is not None and self.host.move_insert(node, is_input, index, to)
+
+    def set_insert_bypassed(self, device_id: int, index: int, bypassed: bool, is_input: bool = True) -> bool:
+        node, _ = self._chain_node(device_id)
+        return node is not None and self.host.set_insert_bypassed(node, is_input, index, bypassed)
+
+    def set_insert_parameter(self, device_id: int, index: int, param_id: int, normalized: float,
+                             is_input: bool = True) -> bool:
+        """A normalized 0..1 value, for a built-in or a plugin alike."""
+        entry = self.insert_instance(device_id, index, is_input)
+        if entry is None:
             return False
-        with self._lock:
-            return self.host.set_plugin_bypassed(key, is_input, index, bypassed)
+        if getattr(entry, 'is_builtin', False):
+            spec = entry.specs[param_id]
+            node, _ = self._chain_node(device_id)
+            self.host.set_builtin_value(node, is_input, index, param_id, spec.from_normalized(normalized))
+        else:
+            entry.set_parameter(param_id, normalized)
+        return True
+
+    def set_builtin_value(self, device_id: int, index: int, param: int, value: float,
+                          is_input: bool = True) -> float | None:
+        """A built-in's parameter in its own unit (Hz, dB, ms...); the value applied, after clamping."""
+        node, _ = self._chain_node(device_id)
+        if node is None:
+            return None
+        return self.host.set_builtin_value(node, is_input, index, param, value)
+
+    # The VST3-only view the earlier API offered: indices count plugins, not built-ins.
+
+    def _plugin_positions(self, device_id: int, is_input: bool) -> list[int]:
+        return [i for i, e in enumerate(self._chain(device_id, is_input)) if not getattr(e, 'is_builtin', False)]
+
+    def remove_plugin(self, device_id: int, index: int, is_input: bool = True) -> bool:
+        positions = self._plugin_positions(device_id, is_input)
+        return 0 <= index < len(positions) and self.remove_insert(device_id, positions[index], is_input)
+
+    def plugin_instances(self, device_id: int, is_input: bool = True) -> list:
+        return [e for e in self._chain(device_id, is_input) if not getattr(e, 'is_builtin', False)]
+
+    def list_plugins(self, device_id: int, is_input: bool = True) -> list[dict[str, Any]]:
+        plugins = [e for e in self.list_inserts(device_id, is_input) if e['kind'] == 'vst3']
+        return [{**e, 'index': i} for i, e in enumerate(plugins)]
+
+    def set_plugin_bypassed(self, device_id: int, index: int, bypassed: bool, is_input: bool = True) -> bool:
+        positions = self._plugin_positions(device_id, is_input)
+        return 0 <= index < len(positions) and self.set_insert_bypassed(device_id, positions[index], bypassed,
+                                                                          is_input)
 
     def set_plugin_parameter(self, device_id: int, index: int, param_id: int, normalized: float,
                              is_input: bool = True) -> bool:
@@ -1380,10 +1534,16 @@ class AudioEngine:
     # --- Metering ---
 
     def failed_device_ids(self) -> dict[int, str]:
-        """Each device whose stream failed, by id, with the reason the backend gave."""
+        """Each device (or loopback) whose stream failed, by id, with the reason the backend gave."""
         failed = self.host.failed_streams()
-        return {device_id: failed[device.key] for device_id, device in self._device_by_id.items()
-                if device.key in failed}
+        out = {device_id: failed[device.key] for device_id, device in self._device_by_id.items()
+               if device.key in failed}
+        for key, reason in failed.items():
+            if key.startswith('loopback::'):
+                loop_id = self._node_to_id.get(f"loopback:{key[len('loopback::'):]}")
+                if loop_id is not None:
+                    out[loop_id] = reason
+        return out
 
     def hosts_plugins(self) -> bool:
         """Whether this backend hosts VST3 plugins (the native one does)."""
@@ -1437,6 +1597,10 @@ class AudioEngine:
             if bus_id is None:
                 return None
             return bus_id, self._bus_meta.get(bus_id, {}).get('direction', 'output')
+
+        if key.startswith('loopback::'):
+            loop_id = self._node_to_id.get(f"loopback:{key[len('loopback::'):]}")
+            return (loop_id, 'input') if loop_id is not None else None
 
         device_key, _, role = key.rpartition('::')
         device_id = self._node_to_id.get(f"device:{device_key}")

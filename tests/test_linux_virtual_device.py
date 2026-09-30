@@ -217,8 +217,14 @@ class TestOriginLabelling:
         if not devices:
             pytest.skip("no enumerated devices on this machine")
 
+        from tonesphere.core.engine import LOOPBACK_ID_BASE
+
         for entry in devices:
-            if entry["id"] not in engine._system_virtual_devices:
+            if entry["id"] >= LOOPBACK_ID_BASE:
+                # An output's whole-system loopback: a source ToneSphere derives from the
+                # hardware, and labelled as that, not as another piece of hardware.
+                assert entry["origin"] == "loopback" and entry["name"].endswith("(loopback)")
+            elif entry["id"] not in engine._system_virtual_devices:
                 assert entry["origin"] == "hardware"
 
 
