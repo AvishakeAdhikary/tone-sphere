@@ -42,6 +42,7 @@ class TestMetersLandOnTheirOwnSide:
 
         window = MainWindow(ConfigManager(db_path=tmp_path / "settings.db"))
         try:
+            assert window.tasks.flush()
             duplex = {'id': 900, 'name': 'Interface', 'channels': 2, 'origin': 'hardware', 'host_api': 'ASIO'}
             window._add_strip({**duplex, 'direction': 'input'})
             window._add_strip({**duplex, 'direction': 'output'})
@@ -50,7 +51,7 @@ class TestMetersLandOnTheirOwnSide:
             monkeypatch.setattr(type(window.engine), 'is_running', property(lambda self: True))
             monkeypatch.setattr(window.engine, 'get_meters', lambda: meters)
 
-            window._update_meters()
+            window._apply_poll(window._gather_poll())
 
             assert window._strips[(900, 'input')].meter._peaks == [-6.0, -12.0]
             assert window._strips[(900, 'output')].meter._peaks == [-20.0, -30.0], \
@@ -63,6 +64,7 @@ class TestMetersLandOnTheirOwnSide:
 
         window = MainWindow(ConfigManager(db_path=tmp_path / "settings.db"))
         try:
+            assert window.tasks.flush()
             duplex = {'id': 901, 'name': 'Interface', 'channels': 2, 'origin': 'hardware', 'host_api': 'ASIO'}
             window._add_strip({**duplex, 'direction': 'input'})
             window._add_strip({**duplex, 'direction': 'output'})
@@ -71,7 +73,7 @@ class TestMetersLandOnTheirOwnSide:
             monkeypatch.setattr(type(window.engine), 'is_running', property(lambda self: True))
             monkeypatch.setattr(window.engine, 'get_meters', lambda: meters)
 
-            window._update_meters()
+            window._apply_poll(window._gather_poll())
 
             assert window._strips[(901, 'output')].meter._active is False
         finally:
@@ -102,6 +104,7 @@ class TestDiagnostics:
 
         dialog = DiagnosticsDialog(engine)
         try:
+            dialog.show_data(dialog.gather())
             latency = dialog.latency_section.values
             assert latency['measured'].text() == UNKNOWN
             assert latency['driver_in'].text() == UNKNOWN
@@ -120,9 +123,10 @@ class TestDiagnostics:
         engine._round_trip = trip
         dialog = DiagnosticsDialog(engine)
         try:
+            dialog.show_data(dialog.gather())
             assert '12.34' in dialog.latency_section.values['measured'].text()
             engine._round_trip = {**trip, 'block': engine.buffer_size * 2}
-            dialog.refresh()
+            dialog.show_data(dialog.gather())
             assert dialog.latency_section.values['measured'].text() == UNKNOWN, \
                 "a measurement at another block size does not describe this one"
             assert '12.34' in dialog.latency_section.values['last'].text()

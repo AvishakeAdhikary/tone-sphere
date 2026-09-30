@@ -201,15 +201,20 @@ def test_the_inserts_dialog_drives_a_real_plugin(engine, test_gain, monkeypatch)
     speaker = engine.default_output_id()
     dialog = InsertsDialog(engine, speaker, False, "speaker")
     try:
-        assert dialog.add(test_gain)
+        # Every call the dialog makes runs on its worker; flush waits for them and their results.
+        dialog.add(test_gain)
+        assert dialog.tasks.flush() and dialog.tasks.flush()
+        assert len(dialog.entries()) == 1, dialog.fault_label.text()
         panel = dialog.parameters
         assert panel.table.rowCount() >= 1 and panel.table.item(0, 0).text()
         panel.table.selectRow(0)
         panel.slider.setValue(SLIDER_STEPS // 4)
+        assert dialog.tasks.flush()
         instance = engine.plugin_instances(speaker, is_input=False)[0]
         assert instance.parameters()[0].normalized == pytest.approx(0.25, abs=1e-3)
         assert panel.table.item(0, 1).text() == instance.parameters()[0].display
         dialog.bypass_button.setChecked(True)
+        assert dialog.tasks.flush()
         assert engine.list_plugins(speaker, is_input=False)[0]['bypassed'] is True
     finally:
         dialog.done(0)

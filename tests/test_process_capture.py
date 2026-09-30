@@ -13,7 +13,6 @@ Marked `hardware` because it needs a real output device to render to; skipped en
 where the platform cannot do process loopback at all.
 """
 
-import asyncio
 import os
 import subprocess
 import sys
@@ -41,14 +40,13 @@ def dead_pid() -> int:
     return process.pid
 
 
-def _run(coroutine):
+def _run(result):
     """
-    Call a REST endpoint directly.
-
-    The endpoints are plain async functions, so this skips FastAPI's lifespan hook, which
-    would open real streams on a machine that may not have any.
+    An endpoint called directly. The endpoints are plain functions FastAPI runs in its
+    threadpool, so the call has already happened; calling them directly skips the lifespan
+    hook, which would open real streams on a machine that may not have any.
     """
-    return asyncio.run(coroutine)
+    return result
 
 
 def playing_engine():

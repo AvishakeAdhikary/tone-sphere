@@ -100,6 +100,7 @@
     "status.state.idle": "निष्क्रिय — कुछ भी जुड़ा नहीं",
     "status.state.stopped": "रुका हुआ",
     "status.state.unknown": "अज्ञात",
+    "status.working": "काम जारी है…",
     "status.pill.backend": "बैकएंड",
     "status.pill.rate": "रेट",
     "status.pill.buffer": "बफ़र",

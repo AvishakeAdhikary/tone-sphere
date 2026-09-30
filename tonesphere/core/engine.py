@@ -48,6 +48,7 @@ from tonesphere.network.jitter_buffer import JitterBuffer
 from tonesphere.network.send_worker import NetworkSendWorker
 from tonesphere.network.udp_transport import MalformedPacket, UdpAudioTransport
 from tonesphere.utils.logger import get_logger
+from tonesphere.utils.threads import synchronized
 
 logger = get_logger(__name__)
 
@@ -64,8 +65,18 @@ NETWORK_ID_BASE = 20000
 DEFAULT_UDP_PORT = 9002
 
 
+# write_to_bus is the data path of network playout and process-capture threads, which are
+# joined under the control lock when they stop; it reaches only the host, whose own lock
+# covers it.
+@synchronized(unlocked=('write_to_bus',))
 class AudioEngine:
-    """Routing engine over real audio hardware."""
+    """
+    Routing engine over real audio hardware.
+
+    Thread-safe: every public method runs under one control lock (`utils.threads`), so the
+    UI's worker thread, the REST API's threadpool, the CLI and the network threads can all
+    call it at once. None of them is the audio thread.
+    """
 
     def __init__(
         self,
@@ -1232,6 +1243,11 @@ class AudioEngine:
         self.channel_control_manager.swap_device_channels(device_id)
         self.apply_channel_controls(device_id)
 
+    def set_master_volume(self, volume: float) -> list[str]:
+        """The master gain, published to the running graph at once."""
+        self.master_volume = max(0.0, float(volume))
+        return self._publish_graph()
+
     def set_device_master_volume(self, device_id: int, volume: float):
         self.channel_control_manager.set_device_master_volume(device_id, volume)
         self.apply_channel_controls(device_id)
@@ -1362,6 +1378,16 @@ class AudioEngine:
             self._publish_graph()
 
     # --- Metering ---
+
+    def failed_device_ids(self) -> dict[int, str]:
+        """Each device whose stream failed, by id, with the reason the backend gave."""
+        failed = self.host.failed_streams()
+        return {device_id: failed[device.key] for device_id, device in self._device_by_id.items()
+                if device.key in failed}
+
+    def hosts_plugins(self) -> bool:
+        """Whether this backend hosts VST3 plugins (the native one does)."""
+        return hasattr(self.host, 'add_plugin')
 
     def get_meters(self) -> dict[int, dict[str, Any]]:
         """

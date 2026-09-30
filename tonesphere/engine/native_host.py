@@ -33,6 +33,7 @@ from tonesphere.engine.meters import MeterReading
 from tonesphere.native import NativeEngine, NativeError, NativeUnavailable
 from tonesphere.native.plan import BUS, INPUT, OUTPUT, Endpoint, PlanCompiler
 from tonesphere.utils.logger import get_logger
+from tonesphere.utils.threads import synchronized
 
 logger = get_logger(__name__)
 
@@ -179,6 +180,10 @@ class _Meters:
         self._clipped: set[str] = set()
 
     def read_summaries(self) -> dict[str, MeterReading]:
+        with self._host._lock:
+            return self._read_summaries()
+
+    def _read_summaries(self) -> dict[str, MeterReading]:
         out = {}
         now = time.monotonic()
         engine = self._host._engine
@@ -208,7 +213,14 @@ class _Meters:
         self._clipped.clear()
 
 
+@synchronized()
 class NativeHost:
+    """
+    Thread-safe: every public method takes the host's lock, the data paths
+    (`write_bus`, `read_available`) included, so a rate or block-size change can swap and
+    close the native engine while network and capture threads are writing into it.
+    """
+
     backend = 'native'
 
     def __init__(self, samplerate: int = 48000, blocksize: int = 256, host_api: HostApi | None = None,

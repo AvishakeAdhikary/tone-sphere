@@ -51,6 +51,7 @@ from tonesphere.engine.graph import (
 from tonesphere.engine.meters import MeterRegistry
 from tonesphere.engine.ringbuffer import AudioRingBuffer
 from tonesphere.utils.logger import get_logger
+from tonesphere.utils.threads import synchronized
 
 logger = get_logger(__name__)
 
@@ -340,9 +341,14 @@ class _DeviceStream:
         return self._source_scratch
 
 
+@synchronized()
 class AudioHost:
     """
     Owns the streams and runs the mix.
+
+    Thread-safe for control callers: every public method takes the host's lock. The
+    PortAudio callbacks never do — they read the route table swapped by reference — so
+    closing a stream under the lock cannot wait on a callback that waits on it.
 
     Lifecycle: `configure()` decides the topology from the graph, `start()` opens and
     starts streams, `apply_graph()` publishes routing changes without restarting
@@ -376,7 +382,7 @@ class AudioHost:
         self._routes = _RouteTable({})
 
         self._running = False
-        self._lock = threading.RLock()   # guards configure/start/stop only, never a callback
+        self._lock = threading.RLock()   # every public method; never a callback
         self._sd = None
 
         # Set when a callback hits something it cannot handle, so the control thread can

@@ -35,10 +35,13 @@ RATE = 48000
 BLOCK = 256
 
 
-def _run(coroutine):
-    """Call a REST endpoint function directly, the same shortcut `test_process_capture.py` uses."""
-    import asyncio
-    return asyncio.run(coroutine)
+def _run(result):
+    """
+    An endpoint called directly. The endpoints are plain functions FastAPI runs in its
+    threadpool, so the call has already happened; calling them directly skips the lifespan
+    hook, which would open real streams on a machine that may not have any.
+    """
+    return result
 
 
 class TestPlatformGuardIsHonest:

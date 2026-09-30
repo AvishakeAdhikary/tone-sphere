@@ -32,8 +32,8 @@ async def lifespan(app: FastAPI):
     audio_engine = UnifiedAudioEngine(config_manager)
 
     try:
-        audio_engine.initialize()
-        audio_engine.start_engine()
+        await asyncio.to_thread(audio_engine.initialize)
+        await asyncio.to_thread(audio_engine.start_engine)
         logger.info("Audio engine started successfully")
         yield
     except Exception as e:
@@ -42,7 +42,7 @@ async def lifespan(app: FastAPI):
     finally:
         # Shutdown
         if audio_engine:
-            audio_engine.stop_engine()
+            await asyncio.to_thread(audio_engine.stop_engine)
         logger.info("Audio engine stopped")
 
 # Create FastAPI app
@@ -67,7 +67,7 @@ app.add_middleware(
 # ==============================================================================
 
 @app.get("/")
-async def root():
+def root():
     """Root endpoint"""
     return {
         "message": "ToneSphere API",
@@ -76,7 +76,7 @@ async def root():
     }
 
 @app.get("/devices", response_model=list[DeviceInfo])
-async def get_devices():
+def get_devices():
     """Get all available audio devices"""
     if not audio_engine:
         raise HTTPException(status_code=500, detail="Audio engine not initialized")
@@ -85,7 +85,7 @@ async def get_devices():
     return [DeviceInfo(**device) for device in devices]
 
 @app.post("/devices/refresh")
-async def refresh_devices():
+def refresh_devices():
     """Refresh device list to detect newly launched applications"""
     if not audio_engine:
         raise HTTPException(status_code=500, detail="Audio engine not initialized")
@@ -103,7 +103,7 @@ async def refresh_devices():
         raise HTTPException(status_code=500, detail="Failed to refresh devices")
 
 @app.post("/devices/virtual")
-async def create_virtual_device(request: CreateVirtualDeviceRequest):
+def create_virtual_device(request: CreateVirtualDeviceRequest):
     """Create a new virtual audio device"""
     if not audio_engine:
         raise HTTPException(status_code=500, detail="Audio engine not initialized")
@@ -118,7 +118,7 @@ async def create_virtual_device(request: CreateVirtualDeviceRequest):
     return {"device_id": device_id, "message": "Virtual device created successfully"}
 
 @app.post("/routing")
-async def create_routing(request: CreateRoutingRequest):
+def create_routing(request: CreateRoutingRequest):
     """Create a routing connection"""
     if not audio_engine:
         raise HTTPException(status_code=500, detail="Audio engine not initialized")
@@ -132,7 +132,7 @@ async def create_routing(request: CreateRoutingRequest):
     return {"success": success, "message": message}
 
 @app.delete("/routing/{source_id}/{destination_id}")
-async def remove_routing(source_id: int, destination_id: int):
+def remove_routing(source_id: int, destination_id: int):
     """Remove a routing connection"""
     if not audio_engine:
         raise HTTPException(status_code=500, detail="Audio engine not initialized")
@@ -145,7 +145,7 @@ async def remove_routing(source_id: int, destination_id: int):
         raise HTTPException(status_code=404, detail="Routing not found")
 
 @app.put("/routing/volume")
-async def set_routing_volume(request: SetVolumeRequest):
+def set_routing_volume(request: SetVolumeRequest):
     """Set volume for a routing connection"""
     if not audio_engine:
         raise HTTPException(status_code=500, detail="Audio engine not initialized")
@@ -159,7 +159,7 @@ async def set_routing_volume(request: SetVolumeRequest):
     return {"message": "Volume updated successfully"}
 
 @app.get("/routing")
-async def get_routing_matrix():
+def get_routing_matrix():
     """Get current routing matrix"""
     if not audio_engine:
         raise HTTPException(status_code=500, detail="Audio engine not initialized")
@@ -167,7 +167,7 @@ async def get_routing_matrix():
     return audio_engine.get_routing_matrix()
 
 @app.get("/performance", response_model=PerformanceStats)
-async def get_performance_stats():
+def get_performance_stats():
     """Get engine performance statistics"""
     if not audio_engine:
         raise HTTPException(status_code=500, detail="Audio engine not initialized")
@@ -176,7 +176,7 @@ async def get_performance_stats():
     return PerformanceStats(**stats)
 
 @app.post("/engine/start")
-async def start_engine():
+def start_engine():
     """Start the audio engine"""
     if not audio_engine:
         raise HTTPException(status_code=500, detail="Audio engine not initialized")
@@ -188,7 +188,7 @@ async def start_engine():
         raise HTTPException(status_code=500, detail=f"Failed to start engine: {str(e)}") from e
 
 @app.post("/engine/stop")
-async def stop_engine():
+def stop_engine():
     """Stop the audio engine"""
     if not audio_engine:
         raise HTTPException(status_code=500, detail="Audio engine not initialized")
@@ -197,7 +197,7 @@ async def stop_engine():
     return {"message": "Audio engine stopped successfully"}
 
 @app.get("/engine/status")
-async def get_engine_status():
+def get_engine_status():
     """Get engine status"""
     if not audio_engine:
         return {"status": "not_initialized"}
@@ -222,8 +222,10 @@ async def websocket_endpoint(websocket: WebSocket):
         while True:
             # Send performance stats every second
             if audio_engine:
-                stats = audio_engine.get_performance_stats()
-                network_clients = audio_engine.get_network_clients()
+                # Off the event loop: the engine's lock can be held by a request that is
+                # reconfiguring devices, and the loop serves every other connection.
+                stats = await asyncio.to_thread(audio_engine.get_performance_stats)
+                network_clients = await asyncio.to_thread(audio_engine.get_network_clients)
 
                 await websocket.send_json({
                     "type": "performance_stats",
@@ -250,7 +252,7 @@ async def websocket_endpoint(websocket: WebSocket):
             pass
 
 @app.post("/network/start")
-async def start_network_streaming():
+def start_network_streaming():
     """Start network audio streaming"""
     if not audio_engine:
         raise HTTPException(status_code=500, detail="Audio engine not initialized")
@@ -259,7 +261,7 @@ async def start_network_streaming():
     return {"message": "Network streaming started"}
 
 @app.post("/network/stop")
-async def stop_network_streaming():
+def stop_network_streaming():
     """Stop network audio streaming"""
     if not audio_engine:
         raise HTTPException(status_code=500, detail="Audio engine not initialized")
@@ -268,7 +270,7 @@ async def stop_network_streaming():
     return {"message": "Network streaming stopped"}
 
 @app.get("/network/clients")
-async def get_network_clients():
+def get_network_clients():
     """Get connected network clients"""
     if not audio_engine:
         raise HTTPException(status_code=500, detail="Audio engine not initialized")
@@ -277,7 +279,7 @@ async def get_network_clients():
     return {"clients": clients, "count": len(clients)}
 
 @app.get("/drivers")
-async def get_available_drivers():
+def get_available_drivers():
     """Get available audio drivers"""
     if not audio_engine:
         raise HTTPException(status_code=500, detail="Audio engine not initialized")
@@ -288,7 +290,7 @@ async def get_available_drivers():
     }
 
 @app.post("/drivers/switch/{driver_type}")
-async def switch_driver(driver_type: str):
+def switch_driver(driver_type: str):
     """Switch to a different audio driver"""
     if not audio_engine:
         raise HTTPException(status_code=500, detail="Audio engine not initialized")
@@ -301,7 +303,7 @@ async def switch_driver(driver_type: str):
 
 # Channel Control Endpoints
 @app.get("/devices/{device_id}/channels")
-async def get_device_channels(device_id: int):
+def get_device_channels(device_id: int):
     """Get channel information for a device"""
     if not audio_engine:
         raise HTTPException(status_code=500, detail="Audio engine not initialized")
@@ -313,7 +315,7 @@ async def get_device_channels(device_id: int):
     raise HTTPException(status_code=404, detail="Device not found or no channel control")
 
 @app.put("/devices/{device_id}/channels/{channel}/volume")
-async def set_channel_volume(device_id: int, channel: int, volume: float):
+def set_channel_volume(device_id: int, channel: int, volume: float):
     """Set volume for specific channel"""
     if not audio_engine:
         raise HTTPException(status_code=500, detail="Audio engine not initialized")
@@ -324,7 +326,7 @@ async def set_channel_volume(device_id: int, channel: int, volume: float):
     raise HTTPException(status_code=400, detail="Channel control not available")
 
 @app.put("/devices/{device_id}/channels/{channel}/mute")
-async def set_channel_mute(device_id: int, channel: int, muted: bool):
+def set_channel_mute(device_id: int, channel: int, muted: bool):
     """Mute/unmute specific channel"""
     if not audio_engine:
         raise HTTPException(status_code=500, detail="Audio engine not initialized")
@@ -335,7 +337,7 @@ async def set_channel_mute(device_id: int, channel: int, muted: bool):
     raise HTTPException(status_code=400, detail="Channel control not available")
 
 @app.put("/devices/{device_id}/channels/{channel}/solo")
-async def set_channel_solo(device_id: int, channel: int, solo: bool):
+def set_channel_solo(device_id: int, channel: int, solo: bool):
     """Solo specific channel"""
     if not audio_engine:
         raise HTTPException(status_code=500, detail="Audio engine not initialized")
@@ -346,7 +348,7 @@ async def set_channel_solo(device_id: int, channel: int, solo: bool):
     raise HTTPException(status_code=400, detail="Channel control not available")
 
 @app.put("/devices/{device_id}/channels/{channel}/pan")
-async def set_channel_pan(device_id: int, channel: int, pan: float):
+def set_channel_pan(device_id: int, channel: int, pan: float):
     """Set pan for specific channel"""
     if not audio_engine:
         raise HTTPException(status_code=500, detail="Audio engine not initialized")
@@ -357,7 +359,7 @@ async def set_channel_pan(device_id: int, channel: int, pan: float):
     raise HTTPException(status_code=400, detail="Channel control not available")
 
 @app.post("/devices/{device_id}/channels/swap")
-async def swap_channels(device_id: int):
+def swap_channels(device_id: int):
     """Swap L/R channels"""
     if not audio_engine:
         raise HTTPException(status_code=500, detail="Audio engine not initialized")
@@ -368,7 +370,7 @@ async def swap_channels(device_id: int):
     raise HTTPException(status_code=400, detail="Channel control not available")
 
 @app.put("/devices/{device_id}/master/volume")
-async def set_device_master_volume(device_id: int, volume: float):
+def set_device_master_volume(device_id: int, volume: float):
     """Set master volume for device"""
     if not audio_engine:
         raise HTTPException(status_code=500, detail="Audio engine not initialized")
@@ -379,7 +381,7 @@ async def set_device_master_volume(device_id: int, volume: float):
     raise HTTPException(status_code=400, detail="Channel control not available")
 
 @app.put("/devices/{device_id}/master/mute")
-async def set_device_master_mute(device_id: int, muted: bool):
+def set_device_master_mute(device_id: int, muted: bool):
     """Mute/unmute entire device"""
     if not audio_engine:
         raise HTTPException(status_code=500, detail="Audio engine not initialized")
@@ -391,7 +393,7 @@ async def set_device_master_mute(device_id: int, muted: bool):
 
 # Sample Rate Control Endpoints
 @app.get("/engine/sample-rate")
-async def get_sample_rate():
+def get_sample_rate():
     """Get current sample rate"""
     if not audio_engine:
         raise HTTPException(status_code=500, detail="Audio engine not initialized")
@@ -399,7 +401,7 @@ async def get_sample_rate():
     return {"sample_rate": audio_engine.sample_rate}
 
 @app.put("/engine/sample-rate")
-async def set_sample_rate(sample_rate: int):
+def set_sample_rate(sample_rate: int):
     """Set sample rate (requires engine restart)"""
     if not audio_engine:
         raise HTTPException(status_code=500, detail="Audio engine not initialized")
@@ -411,7 +413,7 @@ async def set_sample_rate(sample_rate: int):
 
 # Network Audio Routing Endpoints
 @app.post("/network/connect")
-async def connect_to_network(host: str, port: int = 9001):
+def connect_to_network(host: str, port: int = 9001):
     """Connect to another ToneSphere instance"""
     if not audio_engine:
         raise HTTPException(status_code=500, detail="Audio engine not initialized")
@@ -425,7 +427,7 @@ async def connect_to_network(host: str, port: int = 9001):
     raise HTTPException(status_code=400, detail="Network routing not available")
 
 @app.post("/network/disconnect/{conn_id}")
-async def disconnect_from_network(conn_id: str):
+def disconnect_from_network(conn_id: str):
     """Disconnect from network instance"""
     if not audio_engine:
         raise HTTPException(status_code=500, detail="Audio engine not initialized")
@@ -436,7 +438,7 @@ async def disconnect_from_network(conn_id: str):
     raise HTTPException(status_code=400, detail="Network routing not available")
 
 @app.get("/network/connections")
-async def get_network_connections():
+def get_network_connections():
     """Get all network connections"""
     if not audio_engine:
         raise HTTPException(status_code=500, detail="Audio engine not initialized")
@@ -449,7 +451,7 @@ async def get_network_connections():
     return {"incoming": audio_engine.get_network_clients(), "outgoing": []}
 
 @app.post("/network/send/{device_id}")
-async def send_device_to_network(
+def send_device_to_network(
     device_id: int, target: str | None = None, transport: str = "tcp"
 ):
     """
@@ -470,7 +472,7 @@ async def send_device_to_network(
     return {"message": message, "sends": audio_engine.engine.list_network_sends()}
 
 @app.delete("/network/send/{device_id}")
-async def disable_network_send(device_id: int):
+def disable_network_send(device_id: int):
     """Stop sending a device's audio, and remove the route it was using"""
     if not audio_engine:
         raise HTTPException(status_code=500, detail="Audio engine not initialized")
@@ -482,7 +484,7 @@ async def disable_network_send(device_id: int):
     return {"message": f"Device {device_id} is no longer sending to the network"}
 
 @app.get("/network/sends")
-async def list_network_sends():
+def list_network_sends():
     """Active network send routes"""
     if not audio_engine:
         raise HTTPException(status_code=500, detail="Audio engine not initialized")
@@ -490,7 +492,7 @@ async def list_network_sends():
     return {"sends": audio_engine.engine.list_network_sends()}
 
 @app.post("/network/receive/{device_id}")
-async def register_network_receive(
+def register_network_receive(
     device_id: int,
     transport: str = "tcp",
     target_latency_ms: float = 40.0,
@@ -513,7 +515,7 @@ async def register_network_receive(
     return {"message": message}
 
 @app.delete("/network/receive/{device_id}")
-async def unregister_network_receive(device_id: int):
+def unregister_network_receive(device_id: int):
     """Stop a device receiving network audio, and stop its playout thread"""
     if not audio_engine:
         raise HTTPException(status_code=500, detail="Audio engine not initialized")
@@ -527,7 +529,7 @@ async def unregister_network_receive(device_id: int):
     }
 
 @app.post("/network/udp/start")
-async def start_udp_transport(bind_host: str = "127.0.0.1", bind_port: int = 9002):
+def start_udp_transport(bind_host: str = "127.0.0.1", bind_port: int = 9002):
     """
     Bind the realtime UDP socket.
 
@@ -547,7 +549,7 @@ async def start_udp_transport(bind_host: str = "127.0.0.1", bind_port: int = 900
     }
 
 @app.post("/network/udp/stop")
-async def stop_udp_transport():
+def stop_udp_transport():
     """Close the UDP socket and stop the send worker and every playout thread"""
     if not audio_engine:
         raise HTTPException(status_code=500, detail="Audio engine not initialized")
@@ -556,7 +558,7 @@ async def stop_udp_transport():
     return {"message": "UDP transport stopped"}
 
 @app.post("/network/udp/peer")
-async def add_udp_peer(name: str, host: str, port: int = 9002):
+def add_udp_peer(name: str, host: str, port: int = 9002):
     """
     Register where UDP audio should be sent.
 
@@ -574,7 +576,7 @@ async def add_udp_peer(name: str, host: str, port: int = 9002):
     }
 
 @app.delete("/network/udp/peer/{name}")
-async def remove_udp_peer(name: str):
+def remove_udp_peer(name: str):
     """Remove a UDP peer"""
     if not audio_engine:
         raise HTTPException(status_code=500, detail="Audio engine not initialized")
@@ -584,7 +586,7 @@ async def remove_udp_peer(name: str):
     return {"message": f"Removed UDP peer '{name}'"}
 
 @app.get("/network/udp/peers")
-async def get_udp_peers():
+def get_udp_peers():
     """Registered UDP peers"""
     if not audio_engine:
         raise HTTPException(status_code=500, detail="Audio engine not initialized")
@@ -592,7 +594,7 @@ async def get_udp_peers():
     return {"peers": audio_engine.engine.get_udp_peers()}
 
 @app.post("/network/quality")
-async def set_network_quality(quality: str):
+def set_network_quality(quality: str):
     """Set the quality preset for both transports"""
     if not audio_engine:
         raise HTTPException(status_code=500, detail="Audio engine not initialized")
@@ -603,7 +605,7 @@ async def set_network_quality(quality: str):
     return {"message": message}
 
 @app.get("/network/statistics")
-async def get_network_statistics():
+def get_network_statistics():
     """
     Network statistics for both transports.
 
@@ -619,7 +621,7 @@ async def get_network_statistics():
 
 # Virtual Device Management Endpoints
 @app.get("/virtual-devices")
-async def list_virtual_devices():
+def list_virtual_devices():
     """List all virtual devices"""
     if not audio_engine:
         raise HTTPException(status_code=500, detail="Audio engine not initialized")
@@ -627,7 +629,7 @@ async def list_virtual_devices():
     return audio_engine.list_virtual_devices()
 
 @app.get("/virtual-devices/counts")
-async def get_virtual_device_counts():
+def get_virtual_device_counts():
     """Get virtual device counts and limits"""
     if not audio_engine:
         raise HTTPException(status_code=500, detail="Audio engine not initialized")
@@ -635,7 +637,7 @@ async def get_virtual_device_counts():
     return audio_engine.get_virtual_device_counts()
 
 @app.post("/virtual-devices/input")
-async def create_virtual_input(channels: int = 2):
+def create_virtual_input(channels: int = 2):
     """Create a new virtual input device"""
     if not audio_engine:
         raise HTTPException(status_code=500, detail="Audio engine not initialized")
@@ -647,7 +649,7 @@ async def create_virtual_input(channels: int = 2):
         raise HTTPException(status_code=400, detail="Failed to create virtual input (limit reached?)")
 
 @app.post("/virtual-devices/output")
-async def create_virtual_output(channels: int = 2):
+def create_virtual_output(channels: int = 2):
     """Create a new virtual output device"""
     if not audio_engine:
         raise HTTPException(status_code=500, detail="Audio engine not initialized")
@@ -659,7 +661,7 @@ async def create_virtual_output(channels: int = 2):
         raise HTTPException(status_code=400, detail="Failed to create virtual output (limit reached?)")
 
 @app.delete("/virtual-devices/{device_id}")
-async def delete_virtual_device(device_id: int):
+def delete_virtual_device(device_id: int):
     """Delete a virtual device"""
     if not audio_engine:
         raise HTTPException(status_code=500, detail="Audio engine not initialized")
@@ -671,7 +673,7 @@ async def delete_virtual_device(device_id: int):
         raise HTTPException(status_code=404, detail="Virtual device not found or cannot be deleted")
 
 @app.put("/virtual-devices/{device_id}/sample-rate")
-async def update_virtual_device_sample_rate(device_id: int, sample_rate: int):
+def update_virtual_device_sample_rate(device_id: int, sample_rate: int):
     """Update virtual device sample rate"""
     if not audio_engine:
         raise HTTPException(status_code=500, detail="Audio engine not initialized")
@@ -686,7 +688,7 @@ async def update_virtual_device_sample_rate(device_id: int, sample_rate: int):
         raise HTTPException(status_code=404, detail="Virtual device not found")
 
 @app.put("/virtual-devices/{device_id}/channels")
-async def update_virtual_device_channels(device_id: int, channels: int):
+def update_virtual_device_channels(device_id: int, channels: int):
     """Update virtual device channels"""
     if not audio_engine:
         raise HTTPException(status_code=500, detail="Audio engine not initialized")
@@ -702,7 +704,7 @@ async def update_virtual_device_channels(device_id: int, channels: int):
 
 # Linux Virtual Sink Endpoints (Track 2)
 @app.post("/virtual-devices/system/linux")
-async def create_linux_virtual_sink(request: CreateLinuxSinkRequest):
+def create_linux_virtual_sink(request: CreateLinuxSinkRequest):
     """
     Create an OS-visible virtual sink on Linux: a PulseAudio/PipeWire null-sink bridged
     into ALSA, so other applications — not just ToneSphere — can select it.
@@ -741,7 +743,7 @@ async def create_linux_virtual_sink(request: CreateLinuxSinkRequest):
     }
 
 @app.delete("/virtual-devices/system/{device_id}")
-async def remove_linux_virtual_sink(device_id: int):
+def remove_linux_virtual_sink(device_id: int):
     """Tear down a Linux virtual sink's routing node, then the OS-level sink itself."""
     if not audio_engine:
         raise HTTPException(status_code=500, detail="Audio engine not initialized")
@@ -754,7 +756,7 @@ async def remove_linux_virtual_sink(device_id: int):
 
 # macOS CoreAudio HAL Device Endpoints (Track 3)
 @app.get("/virtual-devices/system/macos")
-async def get_macos_hal_status():
+def get_macos_hal_status():
     """
     What is actually true about the ToneSphere CoreAudio HAL plug-in on this machine.
 
@@ -767,7 +769,7 @@ async def get_macos_hal_status():
     return plugin_status()
 
 @app.post("/virtual-devices/system/macos")
-async def attach_macos_hal_device():
+def attach_macos_hal_device():
     """
     Claim the installed ToneSphere HAL device as an OS-visible ToneSphere endpoint.
 
@@ -803,7 +805,7 @@ async def attach_macos_hal_device():
     }
 
 @app.delete("/virtual-devices/system/macos/{device_id}")
-async def release_macos_hal_device(device_id: int):
+def release_macos_hal_device(device_id: int):
     """
     Stop claiming the HAL device. The device itself stays: uninstalling the plug-in needs
     sudo and a coreaudiod restart, so this endpoint honestly does not pretend to do it.
@@ -824,7 +826,7 @@ async def release_macos_hal_device(device_id: int):
 
 # Per-Application Capture Endpoints
 @app.get("/app-capture")
-async def get_app_capture_status():
+def get_app_capture_status():
     """
     What per-application capture can do here, and which applications are playing.
 
@@ -842,7 +844,7 @@ async def get_app_capture_status():
     return status
 
 @app.post("/app-capture")
-async def start_app_capture(request: StartProcessCaptureRequest):
+def start_app_capture(request: StartProcessCaptureRequest):
     """
     Capture a process's audio into a new bus, returning the bus id.
 
@@ -867,7 +869,7 @@ async def start_app_capture(request: StartProcessCaptureRequest):
     }
 
 @app.get("/app-capture/{bus_id}")
-async def get_one_app_capture(bus_id: int):
+def get_one_app_capture(bus_id: int):
     """Measured statistics for one running capture."""
     if not audio_engine:
         raise HTTPException(status_code=500, detail="Audio engine not initialized")
@@ -879,7 +881,7 @@ async def get_one_app_capture(bus_id: int):
     return captures[0]
 
 @app.delete("/app-capture/{bus_id}")
-async def stop_app_capture(bus_id: int):
+def stop_app_capture(bus_id: int):
     """Stop a capture and remove the bus it fed."""
     if not audio_engine:
         raise HTTPException(status_code=500, detail="Audio engine not initialized")
@@ -891,14 +893,14 @@ async def stop_app_capture(bus_id: int):
 
 # Logging Control Endpoints
 @app.post("/logging/enable")
-async def enable_file_logging():
+def enable_file_logging():
     """Enable file logging"""
     from tonesphere.utils.logger import enable_file_logging
     enable_file_logging()
     return {"message": "File logging enabled"}
 
 @app.get("/logging/stats")
-async def get_logging_stats():
+def get_logging_stats():
     """Get logging statistics"""
     from tonesphere.utils.logger import get_log_stats
     return get_log_stats()

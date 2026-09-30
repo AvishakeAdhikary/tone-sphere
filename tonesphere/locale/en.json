@@ -100,6 +100,7 @@
     "status.state.idle": "Idle — nothing patched",
     "status.state.stopped": "Stopped",
     "status.state.unknown": "Unknown",
+    "status.working": "Working…",
     "status.pill.backend": "BACKEND",
     "status.pill.rate": "RATE",
     "status.pill.buffer": "BUFFER",

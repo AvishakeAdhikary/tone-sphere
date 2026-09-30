@@ -72,6 +72,41 @@ API and CLI did not change when the engine underneath them did. It:
 - carries channel-strip state, plugin instances and insert parameters across restarts and
   across sample-rate or block-size changes (which rebuild the engine).
 
+## Threads
+
+Every thread in ToneSphere, and what it may touch:
+
+| Thread | Runs | Touches |
+|---|---|---|
+| Audio (native: one per WASAPI stream, the ASIO driver's, the clock) | the compiled plan | preallocated native state only; never Python |
+| Qt main | the window | widgets, and snapshots handed to it; **never the engine** |
+| Engine worker (`ui/tasks.py`, one per window) | every UI action, in the order made | the engine, under its control lock |
+| Pollers (`ui/tasks.py`) | meters at 30 Hz, statistics at 2 Hz | the engine's read methods, under its lock |
+| REST threadpool (FastAPI, `def` handlers) and the WebSocket feed (`asyncio.to_thread`) | API requests | the engine, under its lock |
+| Network: UDP receive, playout, send; TCP server and clients | network audio | `write_to_bus` / `read_available` — the host's lock only |
+| Process capture, one per captured application | per-app audio | `write_to_bus` — the host's lock only |
+| VST3 plugin thread (native) | every non-real-time call into a plugin | the plugin |
+
+The rule (`utils/threads.py`): each object that owns engine state — `AudioEngine`,
+`NativeHost`, the PortAudio `AudioHost` — has one reentrant lock, and a class decorator
+makes every public method and property take it. The only exception is `write_to_bus`, the
+data path of network and capture threads: those threads are joined, under the control
+lock, when they stop, so they must never wait on it; they take only the host's lock. The
+order is fixed — engine lock, then host lock — and nothing holding a host lock calls back
+into the engine. The main thread never calls the engine at all: an action is queued on the
+worker, which afterwards gathers what the window must redraw and hands that snapshot back
+through a queued signal.
+
+What this guarantees is consistency, not real-time behaviour: a network thread can wait
+while the worker reconfigures devices, and the ring behind it absorbs that. The audio
+thread takes none of these locks and is unaffected. Tests: `tests/test_threading.py`
+(every public method locked; no engine call on the main thread while the window is driven
+through its actions; the window keeps painting, gaps under 100 ms, while the engine holds
+its lock for 1.5 s) and `tests/native/test_control_threads.py` (six threads for 5 s —
+bus writes and network reads during engine rebuilds, bus and route churn, gains,
+statistics — then a 1 kHz tone crosses the graph unchanged; without the locks the same
+test fails at once with a `KeyError` in the network read path).
+
 ## The real-time engine
 
 One `Engine` per open configuration. Its audio thread belongs to whichever backend is

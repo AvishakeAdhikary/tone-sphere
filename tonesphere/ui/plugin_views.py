@@ -8,11 +8,15 @@ user installed it, and deserves to know why it is not offered.
 
 Parameter values shown here are the plugin's own: its display text, read back after every
 change, not a number this window computed.
+
+Nothing here calls the engine or a plugin on the main thread: a plugin answers on its own
+thread and can be slow to, so every call goes through the engine worker (`ui/tasks.py`)
+and the result is shown when it arrives.
 """
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QThread, QTimer, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
@@ -33,6 +37,7 @@ from PySide6.QtWidgets import (
 )
 
 from tonesphere.i18n import tr
+from tonesphere.ui.tasks import EngineTasks
 from tonesphere.ui.theme import Colors, Spacing
 from tonesphere.utils.logger import get_logger
 
@@ -56,23 +61,6 @@ def status_text(status: str) -> str:
     }.get(status, status)
 
 
-class ScanWorker(QThread):
-    scanned = Signal(list)
-    failed = Signal(str)
-
-    def __init__(self, engine, roots: list[Path], parent=None):
-        super().__init__(parent)
-        self._engine = engine
-        self._roots = roots
-
-    def run(self):
-        try:
-            self.scanned.emit(self._engine.scan_plugins(self._roots))
-        except Exception as e:  # a scan failure is shown to the user, not raised into Qt
-            logger.warning(f"plugin scan failed: {e}")
-            self.failed.emit(str(e))
-
-
 class PluginBrowser(QDialog):
     """
     Every VST3 module in the standard folders and the user's own, with what the scan found.
@@ -89,7 +77,9 @@ class PluginBrowser(QDialog):
         self._engine = engine
         self._config = config_manager
         self._picking = picking
-        self._worker: ScanWorker | None = None
+        self._tasks = EngineTasks(self, name='plugin-scan')
+        self._scanning = False
+        self._closed = False
         self._rows: list[object | None] = []
 
         self.setWindowTitle(tr('plugins.browser.title'))
@@ -178,18 +168,26 @@ class PluginBrowser(QDialog):
     # --- Scanning ---
 
     def scan(self):
-        if self._worker is not None and self._worker.isRunning():
+        if self._scanning:
             return
+        self._scanning = True
         self.scan_button.setEnabled(False)
         self.status_label.setText(tr('plugins.browser.scanning'))
-        self._worker = ScanWorker(self._engine, self.roots(), self)
-        self._worker.scanned.connect(self.show_results)
-        self._worker.failed.connect(self._scan_failed)
-        self._worker.finished.connect(lambda: self.scan_button.setEnabled(True))
-        self._worker.start()
+        roots = self.roots()
+        self._tasks.submit(lambda: self._engine.scan_plugins(roots), self._scanned, self._scan_failed)
 
-    def _scan_failed(self, message: str):
-        self.status_label.setText(tr('plugins.browser.scan_failed', reason=message))
+    def _scanned(self, results: list):
+        self._scanning = False
+        if not self._closed:
+            self.scan_button.setEnabled(True)
+            self.show_results(results)
+
+    def _scan_failed(self, error: BaseException):
+        self._scanning = False
+        logger.warning(f"plugin scan failed: {error}")
+        if not self._closed:
+            self.scan_button.setEnabled(True)
+            self.status_label.setText(tr('plugins.browser.scan_failed', reason=str(error)))
 
     def show_results(self, results: list):
         self.table.setRowCount(0)
@@ -238,22 +236,21 @@ class PluginBrowser(QDialog):
         self.chosen.emit(info)
         self.accept()
 
-    def closeEvent(self, event):
-        if self._worker is not None:
-            self._worker.wait()
-        super().closeEvent(event)
-
     def done(self, result):
-        if self._worker is not None:
-            self._worker.wait()
+        # A scan still running finishes on its own thread; its result is then dropped.
+        self._closed = True
         super().done(result)
 
 
 class ParameterPanel(QWidget):
-    """One plugin's parameters, filtered by name, and a slider for the selected one."""
+    """
+    One plugin's parameters, filtered by name, and a slider for the selected one. Reading
+    and setting both go through `tasks`: a plugin answers on its own thread.
+    """
 
-    def __init__(self, parent: QWidget | None = None):
+    def __init__(self, tasks: EngineTasks, parent: QWidget | None = None):
         super().__init__(parent)
+        self._tasks = tasks
         self._instance = None
         self._setter = None
         self._parameters: list = []
@@ -292,7 +289,15 @@ class ParameterPanel(QWidget):
         """`setter(param_id, normalized)` sends a change through the engine's parameter queue."""
         self._instance = instance
         self._setter = setter
-        self._parameters = instance.parameters() if instance is not None else []
+        if instance is None:
+            self._show_parameters(None, [])
+            return
+        self._tasks.submit(instance.parameters, lambda params: self._show_parameters(instance, params))
+
+    def _show_parameters(self, instance, parameters: list):
+        if instance is not self._instance:
+            return   # another plugin was selected while these were being read
+        self._parameters = parameters
         self.table.setRowCount(0)
         for p in self._parameters:
             row = self.table.rowCount()
@@ -335,17 +340,27 @@ class ParameterPanel(QWidget):
         normalized = value / SLIDER_STEPS
         if p.step_count > 0:
             normalized = round(normalized * p.step_count) / p.step_count
-        self._setter(p.id, normalized)
-        self.refresh(row)
+        instance, setter = self._instance, self._setter
+
+        def change():
+            setter(p.id, normalized)
+            return instance.parameters()
+
+        self._tasks.submit(change, lambda params: self._read_back(instance, row, params))
 
     def refresh(self, row: int | None = None):
         """Read the plugin's own values back: what it says, not what was sent."""
-        if self._instance is None:
+        instance = self._instance
+        if instance is not None:
+            self._tasks.submit(instance.parameters, lambda params: self._read_back(instance, row, params))
+
+    def _read_back(self, instance, row: int | None, parameters: list):
+        if instance is not self._instance:
             return
-        self._parameters = self._instance.parameters()
+        self._parameters = parameters
         rows = [row] if row is not None else range(len(self._parameters))
         for r in rows:
-            if r < len(self._parameters):
+            if r < len(self._parameters) and self.table.item(r, 1) is not None:
                 self.table.item(r, 1).setText(self._parameters[r].display)
         if row is not None and row < len(self._parameters):
             self.value_label.setText(self._parameters[row].display)
@@ -357,12 +372,15 @@ class InsertsDialog(QDialog):
     changed = Signal()
 
     def __init__(self, engine, device_id: int, is_input: bool, device_name: str, config_manager=None,
-                 parent: QWidget | None = None):
+                 parent: QWidget | None = None, tasks: EngineTasks | None = None):
         super().__init__(parent)
         self._engine = engine
         self._device_id = device_id
         self._is_input = is_input
         self._config = config_manager
+        self._tasks = tasks or EngineTasks(self, name='inserts')
+        self._entries: list[dict] = []
+        self._closed = False
 
         side = tr('device.direction.input') if is_input else tr('device.direction.output')
         self.setWindowTitle(tr('plugins.inserts.title', device=device_name, side=side))
@@ -407,7 +425,7 @@ class InsertsDialog(QDialog):
         left_layout.addWidget(self.fault_label)
         splitter.addWidget(left)
 
-        self.parameters = ParameterPanel()
+        self.parameters = ParameterPanel(self._tasks)
         splitter.addWidget(self.parameters)
         splitter.setSizes([340, 520])
         layout.addWidget(splitter, stretch=1)
@@ -421,12 +439,26 @@ class InsertsDialog(QDialog):
 
         self.refresh()
 
+    @property
+    def tasks(self) -> EngineTasks:
+        return self._tasks
+
     def entries(self) -> list[dict]:
-        return self._engine.list_plugins(self._device_id, self._is_input)
+        """The chain as last read from the engine."""
+        return list(self._entries)
+
+    def _submit(self, fn, done=None, failed=None):
+        """Results for a closed dialog are dropped."""
+        self._tasks.submit(fn, lambda r: None if self._closed or done is None else done(r),
+                           lambda e: None if self._closed or failed is None else failed(e))
 
     def refresh(self, select: int | None = None):
-        entries = self.entries()
         current = self.chain.currentRow() if select is None else select
+        self._submit(lambda: self._engine.list_plugins(self._device_id, self._is_input),
+                     lambda entries: self._show_entries(entries, current))
+
+    def _show_entries(self, entries: list[dict], current: int):
+        self._entries = entries
         self.chain.blockSignals(True)
         self.chain.clear()
         for e in entries:
@@ -444,12 +476,14 @@ class InsertsDialog(QDialog):
             self.chain.addItem(item)
         self.chain.blockSignals(False)
         if entries:
-            self.chain.setCurrentRow(min(max(current, 0), len(entries) - 1))
+            row = min(max(current, 0), len(entries) - 1)
+            self.chain.setCurrentRow(row)
+            self._row_changed(row)
         else:
             self._row_changed(-1)
 
     def _row_changed(self, row: int):
-        entries = self.entries()
+        entries = self._entries
         valid = 0 <= row < len(entries)
         self.remove_button.setEnabled(valid)
         self.bypass_button.setEnabled(valid and not (valid and entries[row]['crashed']))
@@ -462,46 +496,69 @@ class InsertsDialog(QDialog):
         if not valid:
             self.parameters.show_plugin(None, None)
             return
-        instance = self._engine.plugin_instances(self._device_id, self._is_input)[row]
-        self.parameters.show_plugin(
-            instance, lambda pid, value, index=row: self._engine.set_plugin_parameter(
-                self._device_id, index, pid, value, self._is_input))
+        device, is_input = self._device_id, self._is_input
+
+        def show(instance):
+            if self.chain.currentRow() == row:
+                self.parameters.show_plugin(instance, lambda pid, value: self._engine.set_plugin_parameter(
+                    device, row, pid, value, is_input))
+
+        self._submit(lambda: self._engine.plugin_instances(device, is_input)[row], show)
 
     def _browse(self):
         browser = PluginBrowser(self._engine, self._config, picking=True, parent=self)
         browser.chosen.connect(self.add)
         browser.exec()
 
-    def add(self, info) -> bool:
-        ok, message = self._engine.add_plugin(self._device_id, info, self._is_input)
-        if not ok:
-            self.fault_label.setText(tr('plugins.inserts.add_failed', reason=message))
-            return False
-        self.refresh(select=len(self.entries()) - 1)
-        self.changed.emit()
-        return True
+    def add(self, info):
+        """Insert `info` at the end of the chain; the result shows when the plugin has opened."""
+        def added(result):
+            ok, message = result
+            if not ok:
+                self.fault_label.setText(tr('plugins.inserts.add_failed', reason=message))
+                return
+            self.refresh(select=len(self._entries))
+            self.changed.emit()
+
+        self._submit(lambda: self._engine.add_plugin(self._device_id, info, self._is_input), added,
+                     lambda e: self.fault_label.setText(tr('plugins.inserts.add_failed', reason=str(e))))
 
     def _remove(self):
         row = self.chain.currentRow()
-        if row >= 0 and self._engine.remove_plugin(self._device_id, row, self._is_input):
-            self.refresh(select=row)
-            self.changed.emit()
+        if row < 0:
+            return
+
+        def removed(ok):
+            if ok:
+                self.refresh(select=row)
+                self.changed.emit()
+
+        self._submit(lambda: self._engine.remove_plugin(self._device_id, row, self._is_input), removed)
 
     def _bypass(self, bypassed: bool):
         row = self.chain.currentRow()
-        if row >= 0:
-            self._engine.set_plugin_bypassed(self._device_id, row, bypassed, self._is_input)
+        if row < 0:
+            return
+
+        def done(_ok):
             self.refresh(select=row)
             self.changed.emit()
 
+        self._submit(lambda: self._engine.set_plugin_bypassed(self._device_id, row, bypassed, self._is_input), done)
+
     def _open_editor(self):
         row = self.chain.currentRow()
-        instances = self._engine.plugin_instances(self._device_id, self._is_input)
-        if not 0 <= row < len(instances):
+        if row < 0:
             return
-        from tonesphere.plugins import PluginError
 
-        try:
-            instances[row].open_editor()
-        except PluginError as e:
-            self.fault_label.setText(tr('plugins.inserts.editor_failed', reason=str(e)))
+        def open_editor():
+            instances = self._engine.plugin_instances(self._device_id, self._is_input)
+            if 0 <= row < len(instances):
+                instances[row].open_editor()
+
+        self._submit(open_editor, None,
+                     lambda e: self.fault_label.setText(tr('plugins.inserts.editor_failed', reason=str(e))))
+
+    def done(self, result):
+        self._closed = True
+        super().done(result)

@@ -33,11 +33,13 @@ import pytest
 PLUGIN_SOURCE = Path(__file__).resolve().parents[1] / "native" / "coreaudio-plugin"
 
 
-def _run(coroutine):
-    """Call a REST endpoint function directly, the same shortcut the sibling tests use."""
-    import asyncio
-
-    return asyncio.run(coroutine)
+def _run(result):
+    """
+    An endpoint called directly. The endpoints are plain functions FastAPI runs in its
+    threadpool, so the call has already happened; calling them directly skips the lifespan
+    hook, which would open real streams on a machine that may not have any.
+    """
+    return result
 
 
 class TestConstantsMatchTheCPlugin:

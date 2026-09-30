@@ -354,6 +354,11 @@ class HardwareBar(QFrame):
 
         layout.addStretch()
 
+        self.busy = QLabel("")
+        self.busy.setObjectName("Dim")
+        self.busy.setFont(Type.font(Type.SMALL))
+        layout.addWidget(self.busy)
+
         self.message = QLabel("")
         self.message.setObjectName("Dim")
         self.message.setFont(Type.font(Type.SMALL))
@@ -364,6 +369,10 @@ class HardwareBar(QFrame):
         line.setFrameShape(QFrame.Shape.VLine)
         line.setStyleSheet(f"color: {Colors.BORDER.name()};")
         return line
+
+    def set_busy(self, busy: bool):
+        """Whether the engine worker has an action queued or running."""
+        self.busy.setText(tr('status.working') if busy else "")
 
     def update_state(self, state: str, stats: dict):
         """Reflect engine state and measurements. Called on a UI timer."""

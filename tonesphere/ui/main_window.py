@@ -7,10 +7,16 @@ value the engine did not measure.
 
 All engine access happens here. The widgets emit intent and know nothing about audio, which
 keeps them testable and keeps the audio layer free of Qt.
+
+No engine call runs on the main thread (`ui/tasks.py`). An action is submitted to the
+engine worker, which also gathers what the window needs to redraw - the device list, the
+routing matrix - and the main thread renders that snapshot when it arrives. Meters and
+statistics come from a poller thread the same way. So the window keeps repainting while a
+device takes seconds to open, and the control lock is never waited on here.
 """
 
 
-from PySide6.QtCore import QPointF, Qt, QTimer
+from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence
 from PySide6.QtWidgets import (
     QComboBox,
@@ -32,6 +38,7 @@ from tonesphere.engine.graph import db_to_linear
 from tonesphere.i18n import active_locale, available_locales, locale_info, set_active_locale, tr
 from tonesphere.ui.routing_view import RoutingScene, RoutingView
 from tonesphere.ui.strip import ChannelStripWidget, HardwareBar, MasterStrip
+from tonesphere.ui.tasks import EnginePoller, EngineTasks
 from tonesphere.ui.theme import METRICS, Colors, Spacing, Type
 from tonesphere.utils.config import ConfigManager
 from tonesphere.utils.logger import get_logger
@@ -42,6 +49,7 @@ logger = get_logger(__name__)
 METER_INTERVAL_MS = 33
 # Statistics change slowly and cost more to gather, so they run at a lower rate.
 STATS_INTERVAL_MS = 500
+STATS_EVERY = max(1, STATS_INTERVAL_MS // METER_INTERVAL_MS)
 
 
 class MainWindow(QMainWindow):
@@ -56,7 +64,7 @@ class MainWindow(QMainWindow):
         # window's own settings store.
         i18n.use_config(self.config_manager)
         self.engine = UnifiedAudioEngine(self.config_manager)
-        self.engine.initialize()
+        self.tasks = EngineTasks(self)
 
         # Keyed by side as well as id: a duplex device (an ASIO driver) is one id with an
         # input strip and an output strip, each metered on its own.
@@ -64,6 +72,15 @@ class MainWindow(QMainWindow):
         self._node_positions: dict[int, QPointF] = {}
         self._inserts_dialogs: dict[tuple[int, bool], object] = {}
         self._diagnostics = None
+        # What the engine last reported, as rendered: the window draws from these, never
+        # from the engine directly.
+        self._view: dict = {'devices': [], 'matrix': {}, 'drivers': [], 'active_driver': None,
+                            'plugin_host': False, 'insert_counts': {}, 'sample_rate': None,
+                            'buffer_size': None}
+        self._state = 'stopped'
+        self._running = False
+        self._tick = 0
+        self._stats_due = True
 
         self.setWindowTitle(tr('app.name'))
         self.resize(1360, 880)
@@ -71,17 +88,68 @@ class MainWindow(QMainWindow):
 
         self._build_ui()
         self._build_menu()
-        self._rebuild_from_engine()
+        self.tasks.busy.connect(self.hardware_bar.set_busy)
 
-        self._meter_timer = QTimer(self)
-        self._meter_timer.timeout.connect(self._update_meters)
-        self._meter_timer.start(METER_INTERVAL_MS)
+        # Enumeration opens every endpoint to read its format: seconds on some machines.
+        self._run(self.engine.initialize, refresh='all')
+        self._poller = EnginePoller(self._gather_poll, METER_INTERVAL_MS, self)
+        self._poller.polled.connect(self._apply_poll)
 
-        self._stats_timer = QTimer(self)
-        self._stats_timer.timeout.connect(self._update_stats)
-        self._stats_timer.start(STATS_INTERVAL_MS)
+    # --- The engine worker ---
 
-        self._update_stats()
+    def _run(self, fn, *args, refresh: str | None = None, done=None, error_title: str | None = None):
+        """
+        Run `fn(*args)` on the engine worker. `refresh` 'routing' or 'all' has the worker
+        also gather what the window must redraw afterwards; `done(result)` then runs here,
+        on the main thread, and a failure is shown under `error_title` (or only logged).
+        """
+        def job():
+            result = fn(*args)
+            return result, self._gather_view(refresh) if refresh else None
+
+        def finished(value):
+            result, view = value
+            if view is not None:
+                self._apply_view(view)
+            self._stats_due = True
+            if done is not None:
+                done(result)
+
+        def failed(error):
+            self._stats_due = True
+            if error_title is not None:
+                self._error(error_title, str(error))
+            if refresh:
+                self._run(lambda: None, refresh=refresh)
+
+        self.tasks.submit(job, finished, failed)
+
+    def _gather_view(self, refresh: str) -> dict:
+        """On the worker: everything the window draws from, read under the engine's lock."""
+        view = {'matrix': self.engine.get_routing_matrix()}
+        if refresh == 'all':
+            devices = self.engine.get_devices()
+            plugin_host = self.engine.hosts_plugins()
+            counts = {}
+            if plugin_host:
+                for d in devices:
+                    if d['origin'] != 'in_process_bus':
+                        entries = self.engine.list_plugins(d['id'], d['direction'] == 'input')
+                        counts[(d['id'], d['direction'] == 'input')] = (
+                            len(entries), any(e['crashed'] for e in entries))
+            view.update(devices=devices, drivers=self.engine.get_available_drivers(),
+                        active_driver=self.engine.get_driver_info().get('active_driver'),
+                        plugin_host=plugin_host, insert_counts=counts,
+                        sample_rate=self.engine.sample_rate, buffer_size=self.engine.buffer_size)
+        return view
+
+    def _apply_view(self, view: dict):
+        rebuild = 'devices' in view
+        self._view.update(view)
+        if rebuild:
+            self._rebuild_from_engine()
+        else:
+            self._sync_cables()
 
     # --- Construction ---
 
@@ -141,9 +209,6 @@ class MainWindow(QMainWindow):
         self.buffer_combo.setMinimumWidth(90)
         for size in (64, 128, 256, 512, 1024):
             self.buffer_combo.addItem(tr('transport.buffer_frames', frames=size), size)
-        index = self.buffer_combo.findData(self.engine.buffer_size)
-        if index >= 0:
-            self.buffer_combo.setCurrentIndex(index)
         self.buffer_combo.setToolTip(tr('transport.buffer_tooltip'))
         self.buffer_combo.currentIndexChanged.connect(self._change_buffer)
         self.buffer_caption = self._labelled(
@@ -185,7 +250,7 @@ class MainWindow(QMainWindow):
         self.rate_combo.clear()
         for rate in self.SAMPLE_RATES:
             self.rate_combo.addItem(tr('transport.rate_khz', khz=f"{rate / 1000:g}"), rate)
-        index = self.rate_combo.findData(self.engine.sample_rate)
+        index = self.rate_combo.findData(self._view['sample_rate'])
         if index >= 0:
             self.rate_combo.setCurrentIndex(index)
         self.rate_combo.blockSignals(False)
@@ -290,7 +355,7 @@ class MainWindow(QMainWindow):
 
         self.master_strip = MasterStrip()
         self.master_strip.gain_changed.connect(self._set_master_gain)
-        self.master_strip.clip_cleared.connect(self.engine.clear_clip_indicators)
+        self.master_strip.clip_cleared.connect(self._clear_clips)
         row.addWidget(self.master_strip)
 
         layout.addLayout(row, stretch=1)
@@ -374,8 +439,9 @@ class MainWindow(QMainWindow):
     def _rebuild_from_engine(self):
         """Rebuild strips and nodes from the engine's current device list."""
         self._populate_backends()
+        self._select_format()
 
-        devices = self.engine.get_devices()
+        devices = self._view['devices']
 
         self._clear_strips()
         self.routing_scene.clear_content()
@@ -390,14 +456,23 @@ class MainWindow(QMainWindow):
         self._sync_cables()
         self.routing_view.fit_content()
 
+    def _select_format(self):
+        """Show the rate and buffer the engine reported, without that selection acting as a change."""
+        index = self.buffer_combo.findData(self._view['buffer_size'])
+        if index >= 0:
+            self.buffer_combo.blockSignals(True)
+            self.buffer_combo.setCurrentIndex(index)
+            self.buffer_combo.blockSignals(False)
+        self._fill_rates()
+
     def _populate_backends(self):
         self.backend_combo.blockSignals(True)
         self.backend_combo.clear()
 
-        for name in self.engine.get_available_drivers():
+        for name in self._view['drivers']:
             self.backend_combo.addItem(name)
 
-        active = self.engine.get_driver_info().get('active_driver')
+        active = self._view['active_driver']
         if active:
             index = self.backend_combo.findText(active)
             if index >= 0:
@@ -412,7 +487,7 @@ class MainWindow(QMainWindow):
         self._strips.clear()
 
     def _hosts_plugins(self, device: dict) -> bool:
-        return device['origin'] != 'in_process_bus' and hasattr(self.engine.engine.host, 'add_plugin')
+        return device['origin'] != 'in_process_bus' and self._view['plugin_host']
 
     def _add_strip(self, device: dict):
         direction_key = f"device.direction.{device['direction']}"
@@ -434,8 +509,9 @@ class MainWindow(QMainWindow):
         # Before the stretch, so strips stay left-aligned.
         self.strip_layout.insertWidget(self.strip_layout.count() - 1, strip)
         self._strips[(device['id'], device['direction'])] = strip
-        if strip.inserts_button.isEnabled():
-            self._refresh_insert_count(device['id'], is_input)
+        counted = self._view['insert_counts'].get((device['id'], is_input))
+        if strip.inserts_button.isEnabled() and counted is not None:
+            strip.set_insert_count(*counted)
 
     def _place_nodes(self, inputs: list[dict], outputs: list[dict]):
         """
@@ -476,7 +552,7 @@ class MainWindow(QMainWindow):
     def _sync_cables(self):
         """Redraw cables from the engine's routing matrix."""
         wanted = {}
-        for route in self.engine.get_routing_matrix().values():
+        for route in self._view['matrix'].values():
             key = (route['source_id'], route['destination_id'])
             wanted[key] = route
 
@@ -494,43 +570,27 @@ class MainWindow(QMainWindow):
     # --- Engine actions ---
 
     def _toggle_engine(self):
-        try:
-            if self.engine.is_running or self.engine.state == 'idle':
-                self.engine.stop_engine()
-            else:
-                self.engine.start_engine()
-        except Exception as e:
-            self._error(tr('dialog.engine_error'), str(e))
-
-        self._update_stats()
+        stop = self._running or self._state == 'idle'
+        self._run(self.engine.stop_engine if stop else self.engine.start_engine,
+                  error_title=tr('dialog.engine_error'))
 
     def _switch_backend(self, name: str):
         if not name:
             return
-        try:
-            if self.engine.switch_driver(name):
-                self._rebuild_from_engine()
-        except Exception as e:
-            self._error(tr('dialog.backend_error'), str(e))
+        self._run(self.engine.switch_driver, name, refresh='all', error_title=tr('dialog.backend_error'))
 
     def _toggle_exclusive(self, exclusive: bool):
-        self.engine.set_exclusive_mode(exclusive)
-        self._update_stats()
+        self._run(self.engine.set_exclusive_mode, exclusive)
 
     def _change_buffer(self, index: int):
         size = self.buffer_combo.itemData(index)
         if size:
-            self.engine.set_buffer_size(int(size))
-            self._update_stats()
+            self._run(self.engine.set_buffer_size, int(size))
 
     def _change_rate(self, index: int):
         rate = self.rate_combo.itemData(index)
         if rate:
-            try:
-                self.engine.set_sample_rate(int(rate))
-            except Exception as e:
-                self._error(tr('dialog.rate_error'), str(e))
-            self._update_stats()
+            self._run(self.engine.set_sample_rate, int(rate), error_title=tr('dialog.rate_error'))
 
     # --- Views ---
 
@@ -538,7 +598,7 @@ class MainWindow(QMainWindow):
         from tonesphere.ui.diagnostics_view import DiagnosticsDialog
 
         if self._diagnostics is None:
-            self._diagnostics = DiagnosticsDialog(self.engine.engine, self)
+            self._diagnostics = DiagnosticsDialog(self.engine.engine, self, tasks=self.tasks)
             self._diagnostics.finished.connect(lambda _result: setattr(self, '_diagnostics', None))
         self._diagnostics.show()
         self._diagnostics.raise_()
@@ -556,7 +616,8 @@ class MainWindow(QMainWindow):
         if dialog is None:
             strip = self._strips.get((device_id, 'input' if is_input else 'output'))
             name = strip._name if strip is not None else str(device_id)
-            dialog = InsertsDialog(self.engine.engine, device_id, is_input, name, self.config_manager, self)
+            dialog = InsertsDialog(self.engine.engine, device_id, is_input, name, self.config_manager, self,
+                                   tasks=self.tasks)
             dialog.changed.connect(lambda d=device_id, i=is_input: self._refresh_insert_count(d, i))
             dialog.finished.connect(lambda _result, k=key: self._inserts_dialogs.pop(k, None))
             self._inserts_dialogs[key] = dialog
@@ -564,51 +625,49 @@ class MainWindow(QMainWindow):
         dialog.raise_()
 
     def _refresh_insert_count(self, device_id: int, is_input: bool):
-        strip = self._strips.get((device_id, 'input' if is_input else 'output'))
-        if strip is None:
-            return
-        entries = self.engine.engine.list_plugins(device_id, is_input)
-        strip.set_insert_count(len(entries), any(e['crashed'] for e in entries))
+        def counted(entries):
+            self._view['insert_counts'][(device_id, is_input)] = (
+                len(entries), any(e['crashed'] for e in entries))
+            strip = self._strips.get((device_id, 'input' if is_input else 'output'))
+            if strip is not None:
+                strip.set_insert_count(*self._view['insert_counts'][(device_id, is_input)])
+
+        self._run(self.engine.list_plugins, device_id, is_input, done=counted)
 
     def _rescan(self):
-        self.engine.refresh_devices()
-        self._rebuild_from_engine()
+        self._run(self.engine.refresh_devices, refresh='all')
 
     def _create_monitor_patch(self):
-        success, message = self.engine.create_monitor_patch(muted=True)
+        def created(result):
+            success, message = result
+            if not success:
+                self._error(tr('dialog.monitor_error'), message)
+                return
+            answer = QMessageBox.question(
+                self, tr('dialog.unmute_title'),
+                tr('dialog.unmute_body', patch=message),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer == QMessageBox.StandardButton.Yes:
+                self._run(lambda: self.engine.set_routing_mute(
+                    self.engine.default_input_id(), self.engine.default_output_id(), False), refresh='routing')
 
-        if not success:
-            self._error(tr('dialog.monitor_error'), message)
-            return
-
-        self._sync_cables()
-
-        answer = QMessageBox.question(
-            self, tr('dialog.unmute_title'),
-            tr('dialog.unmute_body', patch=message),
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-
-        if answer == QMessageBox.StandardButton.Yes:
-            source = self.engine.default_input_id()
-            dest = self.engine.default_output_id()
-            self.engine.set_routing_mute(source, dest, False)
-            self._sync_cables()
+        self._run(self.engine.create_monitor_patch, True, refresh='routing', done=created)
 
     def _add_bus(self):
-        count = len(self.engine.list_virtual_devices()) + 1
-        bus_id = self.engine.create_virtual_input(tr('mixer.bus_name', number=count), channels=2)
+        def create():
+            count = len(self.engine.list_virtual_devices()) + 1
+            return self.engine.create_virtual_input(tr('mixer.bus_name', number=count), channels=2)
 
-        if bus_id is None:
-            self._error(tr('dialog.add_bus_error'), tr('dialog.bus_limit'))
-            return
+        def created(bus_id):
+            if bus_id is None:
+                self._error(tr('dialog.add_bus_error'), tr('dialog.bus_limit'))
 
-        self._rebuild_from_engine()
+        self._run(create, refresh='all', done=created)
 
     def _clear_routing(self):
-        self.engine.clear_all_routing()
-        self._sync_cables()
+        self._run(self.engine.clear_all_routing, refresh='routing')
 
     def _auto_arrange(self):
         self._node_positions.clear()
@@ -617,62 +676,75 @@ class MainWindow(QMainWindow):
     # --- Routing actions ---
 
     def _connect_nodes(self, source_id: int, dest_id: int):
-        success, message = self.engine.create_routing(source_id, dest_id, 1.0)
+        def connected(result):
+            success, message = result
+            if not success:
+                self._error(tr('dialog.patch_error'), message)
 
-        if not success:
-            self._error(tr('dialog.patch_error'), message)
-            return
-
-        self._sync_cables()
-        self._update_stats()
+        self._run(self.engine.create_routing, source_id, dest_id, 1.0, refresh='routing', done=connected)
 
     def _disconnect_nodes(self, source_id: int, dest_id: int):
-        self.engine.remove_routing(source_id, dest_id)
-        self._sync_cables()
+        self._run(self.engine.remove_routing, source_id, dest_id, refresh='routing')
 
     def _set_route_gain(self, source_id: int, dest_id: int, gain_db: float):
-        self.engine.set_routing_volume_db(source_id, dest_id, gain_db)
-        self._sync_cables()
+        self._run(self.engine.set_routing_volume_db, source_id, dest_id, gain_db, refresh='routing')
 
     def _set_route_mute(self, source_id: int, dest_id: int, muted: bool):
-        self.engine.set_routing_mute(source_id, dest_id, muted)
-        self._sync_cables()
+        self._run(self.engine.set_routing_mute, source_id, dest_id, muted, refresh='routing')
 
     # --- Strip actions ---
 
     def _set_device_gain(self, device_id: int, gain_db: float):
-        self.engine.set_device_master_volume(device_id, db_to_linear(gain_db))
+        self._run(self.engine.set_device_master_volume, device_id, db_to_linear(gain_db))
 
     def _set_device_pan(self, device_id: int, pan: float):
         # Channel 0 carries the strip's pan for a stereo device; per-channel pan is
         # available through the engine for anyone who needs it.
-        self.engine.set_channel_pan(device_id, 0, pan)
+        self._run(self.engine.set_channel_pan, device_id, 0, pan)
 
     def _set_device_mute(self, device_id: int, muted: bool):
-        self.engine.set_device_master_mute(device_id, muted)
+        self._run(self.engine.set_device_master_mute, device_id, muted)
 
     def _set_device_solo(self, device_id: int, soloed: bool):
-        self.engine.set_channel_solo(device_id, 0, soloed)
+        self._run(self.engine.set_channel_solo, device_id, 0, soloed)
 
     def _set_master_gain(self, gain_db: float):
-        self.engine.master_volume = db_to_linear(gain_db)
+        self._run(self.engine.set_master_volume, db_to_linear(gain_db))
+
+    def _clear_clips(self):
+        self._run(self.engine.clear_clip_indicators)
 
     # --- Periodic updates ---
 
-    def _update_meters(self):
+    def _gather_poll(self) -> dict:
         """
-        Refresh meters at 30 Hz.
+        On the poller thread: meters every tick, statistics every STATS_EVERY ticks or
+        straight after an action. Blocks on the engine's lock if it must; the main thread
+        only ever sees the result.
+        """
+        self._tick += 1
+        running = self.engine.is_running
+        poll = {'running': running, 'meters': self.engine.get_meters() if running else None}
+        if self._stats_due or self._tick % STATS_EVERY == 0:
+            self._stats_due = False
+            poll['stats'] = self.engine.get_performance_stats()
+            poll['state'] = self.engine.state
+            poll['failed'] = self.engine.failed_device_ids()
+        return poll
 
-        Reads values the audio callback stored in plain slots. The callback never touches
-        Qt, and this never blocks the callback.
-        """
-        if not self.engine.is_running:
+    def _apply_poll(self, poll: dict):
+        self._running = poll['running']
+        self._update_meters(poll['meters'])
+        if 'stats' in poll:
+            self._update_stats(poll['stats'], poll['state'], poll['failed'])
+
+    def _update_meters(self, meters: dict | None):
+        """Show one poll's meters. Values the audio thread measured; never computed here."""
+        if meters is None:
             for strip in self._strips.values():
                 strip.set_inactive()
             self.master_strip.set_inactive()
             return
-
-        meters = self.engine.get_meters()
 
         for (device_id, direction), strip in self._strips.items():
             reading = meters.get(device_id, {}).get('sides', {}).get(direction)
@@ -712,10 +784,9 @@ class MainWindow(QMainWindow):
             return 0.0
         return min(1.0, (db + 60.0) / 60.0)
 
-    def _update_stats(self):
-        stats = self.engine.get_performance_stats()
-        state = self.engine.state
-
+    def _update_stats(self, stats: dict, state: str, failed: dict[int, str]):
+        self._state = state
+        self._last_stats = stats
         self.hardware_bar.update_state(state, stats)
 
         self.engine_button.setText(
@@ -727,10 +798,8 @@ class MainWindow(QMainWindow):
         )
         self.engine_button.setStyleSheet("")   # force a restyle for the new object name
 
-        failed = stats.get('failed_streams') or {}
         for (device_id, _direction), strip in self._strips.items():
-            device = self.engine.engine.get_device_info(device_id)
-            reason = failed.get(device.key) if device else None
+            reason = failed.get(device_id)
             strip.set_failed(reason)
 
             node = self.routing_scene.nodes.get(device_id)
@@ -782,7 +851,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(tr('app.name'))
 
         self.engine_button.setText(
-            tr('transport.stop_engine') if self.engine.is_running or self.engine.state == 'idle'
+            tr('transport.stop_engine') if self._running or self._state == 'idle'
             else tr('transport.start_engine')
         )
         self.backend_caption.setText(tr('transport.caption.backend'))
@@ -831,13 +900,15 @@ class MainWindow(QMainWindow):
         # which is also how they pick up the new language's tr() output — see
         # _change_language's docstring for why this is reused rather than duplicated.
         self._rebuild_from_engine()
-        self._update_stats()
+        self._stats_due = True
 
     def _show_about(self):
-        from tonesphere import __version__
+        self._run(lambda: (self.engine.get_driver_info(), self.engine.get_performance_stats(),
+                           self.engine.buffer_size, self.engine.sample_rate),  # on the worker
+                  done=lambda result: self._about(*result))
 
-        info = self.engine.get_driver_info()
-        stats = self.engine.get_performance_stats()
+    def _about(self, info: dict, stats: dict, buffer_size: int, sample_rate: int):
+        from tonesphere import __version__
 
         reported = stats.get('reported_latency_ms')
         measured = stats.get('measured_round_trip_ms')
@@ -858,7 +929,7 @@ class MainWindow(QMainWindow):
             tr('about.portaudio', version=info.get('portaudio_version', tr('about.unknown'))),
             tr('about.backend', backend=info.get('active_driver') or tr('about.not_selected')),
             tr('about.exclusive', exclusive=tr('about.on') if info.get('exclusive_mode') else tr('about.off')),
-            tr('about.buffer', frames=self.engine.buffer_size, rate=self.engine.sample_rate),
+            tr('about.buffer', frames=buffer_size, rate=sample_rate),
             tr('about.latency', reported=reported_text, nominal=nominal_text, measured=measured_text),
             tr('about.dropouts', xruns=stats.get('xruns', 0)),
             "",
@@ -878,12 +949,17 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, tr('about.title'), "\n".join(lines))
 
     def closeEvent(self, event):
-        self._meter_timer.stop()
-        self._stats_timer.stop()
+        self._poller.stop()
         for dialog in list(self._inserts_dialogs.values()) + ([self._diagnostics] if self._diagnostics else []):
             dialog.close()
-        try:
-            self.engine.cleanup()
-        except Exception as e:
-            logger.warning(f"Error during shutdown: {e}")
+
+        def cleanup():
+            try:
+                self.engine.cleanup()
+            except Exception as e:
+                logger.warning(f"Error during shutdown: {e}")
+
+        # The one place the main thread waits on the worker: the window is going away, and
+        # the engine must be stopped and its devices released before the process exits.
+        self.tasks.close(final=cleanup)
         super().closeEvent(event)

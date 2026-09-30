@@ -55,6 +55,12 @@ The boundary between them:
   execution plan; native validates it again, preallocates everything **off** the audio
   thread, and publishes it by atomic pointer swap. The audio thread never parses,
   allocates for, or analyses topology.
+- **The control plane is threaded and thread-safe** (`docs/ARCHITECTURE.md`, *Threads*).
+  `AudioEngine` and both hosts take one lock per object on every public method
+  (`utils/threads.synchronized`); a new public method gets it automatically, and an
+  exception must be named at the decorator with its reason. The Qt main thread never calls
+  the engine: UI actions go through `ui/tasks.EngineTasks`, readings through
+  `EnginePoller`. REST handlers are plain `def`s, run in FastAPI's threadpool.
 - Continuous controls (gain, pan, mute, solo, trim, polarity) are atomic targets smoothed
   on the audio thread. Plugin parameter changes cross in bounded SPSC queues. Meters and
   statistics come back through preallocated slots the control plane polls.

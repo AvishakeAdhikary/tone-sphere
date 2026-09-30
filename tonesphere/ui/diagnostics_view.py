@@ -6,9 +6,12 @@ Latency is broken into the parts that are actually different kinds of number: To
 own block (arithmetic), what the drivers report, what the plugins report, and the round
 trip timed by sending a sweep out and hearing it back. Only the last is a measurement, and
 until one has been taken at the current rate and block it reads `--`.
+
+Like the main window, this dialog never calls the engine on the main thread: its readings
+are gathered by a poller thread and the measurement runs on the engine worker
+(`ui/tasks.py`).
 """
 
-from PySide6.QtCore import QThread, QTimer, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -22,6 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from tonesphere.i18n import tr
+from tonesphere.ui.tasks import EnginePoller, EngineTasks
 from tonesphere.ui.theme import Colors, Spacing, Type
 from tonesphere.utils.formatting import UNKNOWN
 
@@ -42,23 +46,6 @@ def percent(fraction: float | None) -> str:
 
 def count(value: int | None) -> str:
     return UNKNOWN if value is None else str(value)
-
-
-class MeasureWorker(QThread):
-    measured = Signal(dict)
-    failed = Signal(str)
-
-    def __init__(self, engine, output_id: int, input_id: int | None, parent=None):
-        super().__init__(parent)
-        self._engine = engine
-        self._output = output_id
-        self._input = input_id
-
-    def run(self):
-        try:
-            self.measured.emit(self._engine.measure_round_trip(self._output, self._input))
-        except Exception as e:  # shown to the user: a device that would not open, a stopped backend
-            self.failed.emit(str(e))
 
 
 class _Section(QGroupBox):
@@ -91,10 +78,12 @@ class _Section(QGroupBox):
 
 
 class DiagnosticsDialog(QDialog):
-    def __init__(self, engine, parent: QWidget | None = None):
+    def __init__(self, engine, parent: QWidget | None = None, tasks: EngineTasks | None = None):
         super().__init__(parent)
         self._engine = engine
-        self._worker: MeasureWorker | None = None
+        self._tasks = tasks or EngineTasks(self, name='diagnostics')
+        self._measuring = False
+        self._closed = False
 
         self.setWindowTitle(tr('diag.title'))
         self.resize(760, 780)
@@ -143,11 +132,9 @@ class DiagnosticsDialog(QDialog):
         close.addWidget(self.close_button)
         layout.addLayout(close)
 
-        self._timer = QTimer(self)
-        self._timer.timeout.connect(self.refresh)
-        self._timer.start(REFRESH_MS)
         self._populate_devices()
-        self.refresh()
+        self._poller = EnginePoller(self.gather, REFRESH_MS, self, name='diagnostics-poll')
+        self._poller.polled.connect(self.show_data)
 
     def _build_measure(self) -> QWidget:
         box = QGroupBox(tr('diag.section.measure'))
@@ -179,7 +166,16 @@ class DiagnosticsDialog(QDialog):
         return box
 
     def _populate_devices(self):
-        devices = self._engine.get_devices()
+        from tonesphere.engine.devices import HostApi
+
+        def gather():
+            host = self._engine.host
+            supported = getattr(host, 'backend', 'portaudio') == 'native' and host.host_api == HostApi.WASAPI
+            return self._engine.get_devices(), self._engine.default_output_id(), supported
+
+        self._tasks.submit(gather, lambda result: self._alive() and self._show_devices(*result))
+
+    def _show_devices(self, devices: list[dict], default_out: int | None, supported: bool):
         self.output_combo.clear()
         self.input_combo.clear()
         self.input_combo.addItem(tr('diag.measure_loopback'), None)
@@ -190,42 +186,51 @@ class DiagnosticsDialog(QDialog):
                 self.output_combo.addItem(d['name'], d['id'])
             else:
                 self.input_combo.addItem(d['name'], d['id'])
-        default_out = self._engine.default_output_id()
         index = self.output_combo.findData(default_out)
         if index >= 0:
             self.output_combo.setCurrentIndex(index)
-        from tonesphere.engine.devices import HostApi
-
-        host = self._engine.host
-        supported = getattr(host, 'backend', 'portaudio') == 'native' and host.host_api == HostApi.WASAPI
         self.measure_button.setEnabled(supported and self.output_combo.count() > 0)
         if not supported:
             self.measure_status.setText(tr('diag.measure_unsupported'))
 
+    def _alive(self) -> bool:
+        """A result can arrive after the dialog closed; it is then dropped."""
+        return not self._closed
+
     def measure(self):
-        if self._worker is not None and self._worker.isRunning():
+        output, listen = self.output_combo.currentData(), self.input_combo.currentData()
+        if self._measuring or output is None:
             return
-        output = self.output_combo.currentData()
-        if output is None:
-            return
+        self._measuring = True
         self.measure_button.setEnabled(False)
         self.measure_status.setText(tr('diag.measuring'))
-        self._worker = MeasureWorker(self._engine, output, self.input_combo.currentData(), self)
-        self._worker.measured.connect(self._measured)
-        self._worker.failed.connect(self._measure_failed)
-        self._worker.finished.connect(lambda: self.measure_button.setEnabled(True))
-        self._worker.start()
+        self._tasks.submit(lambda: self._engine.measure_round_trip(output, listen),
+                           lambda result: self._alive() and self._measured(result),
+                           lambda error: self._alive() and self._measure_failed(str(error)))
 
     def _measured(self, result: dict):
+        self._measuring = False
+        self.measure_button.setEnabled(True)
         self.measure_status.setText(result['note'])
-        self.refresh()
 
     def _measure_failed(self, message: str):
+        self._measuring = False
+        self.measure_button.setEnabled(True)
         self.measure_status.setText(tr('diag.measure_failed', reason=message))
 
-    def refresh(self):
+    def gather(self) -> dict:
+        """On the poller thread: everything shown, read under the engine's lock."""
         stats = self._engine.get_performance_stats()
-        state = self._engine.state
+        return {
+            'stats': stats,
+            'state': self._engine.state,
+            'rings': self._engine.get_ring_statistics().get('native') if stats.get('running') else None,
+            'configured_exclusive': self._engine.host.exclusive,
+            'virtual': self._engine.virtual_device_status(),
+        }
+
+    def show_data(self, data: dict):
+        stats, state = data['stats'], data['state']
 
         e = self.engine_section
         e.set('state', {
@@ -239,7 +244,7 @@ class DiagnosticsDialog(QDialog):
         e.set('host_api', stats.get('host_api') or UNKNOWN)
         rate, block = stats.get('samplerate'), stats.get('blocksize')
         # Running, the streams say what they got; stopped, the configuration is all there is.
-        exclusive = stats.get('exclusive') if stats.get('running') else self._engine.host.exclusive
+        exclusive = stats.get('exclusive') if stats.get('running') else data['configured_exclusive']
         e.set('format', tr('diag.format_value', rate=rate or UNKNOWN, block=block or UNKNOWN,
                            mode=tr('diag.exclusive') if exclusive else tr('diag.shared')))
         e.set('streams', tr('diag.streams_value', live=stats.get('live_stream_count', 0),
@@ -263,7 +268,7 @@ class DiagnosticsDialog(QDialog):
         allocations = stats.get('audio_thread_allocations')
         t.set('allocations', count(allocations),
               None if allocations is None else (Colors.OK if allocations == 0 else Colors.ERROR))
-        rings = self._engine.get_ring_statistics().get('native') if stats.get('running') else None
+        rings = data['rings']
         t.set('rings', tr('diag.rings_value', overruns=rings['overruns'], underruns=rings['underruns'])
               if rings else UNKNOWN)
         t.set('drift', count(stats.get('drift_corrections')) if stats.get('backend') != 'native' else UNKNOWN)
@@ -280,7 +285,9 @@ class DiagnosticsDialog(QDialog):
         lat.set('measured', ms(measured), Colors.OK if measured is not None else None)
         lat.set('last', self._describe(stats.get('round_trip')))
 
-        status = self._engine.virtual_device_status()
+        self._show_virtual(data['virtual'])
+
+    def _show_virtual(self, status: dict):
         v = self.virtual_section
         if not status['platform_supported']:
             v.set('status', tr('diag.virtual_windows_only'))
@@ -302,7 +309,6 @@ class DiagnosticsDialog(QDialog):
                   confidence=f"{trip['confidence']:.1f}", note=trip['note'])
 
     def done(self, result):
-        self._timer.stop()
-        if self._worker is not None:
-            self._worker.wait()
+        self._closed = True
+        self._poller.stop()
         super().done(result)

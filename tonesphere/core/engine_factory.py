@@ -325,6 +325,39 @@ class UnifiedAudioEngine:
     def set_routing_invert(self, source_id: int, destination_id: int, invert: bool):
         self.engine.set_routing_invert(source_id, destination_id, invert)
 
+    def set_master_volume(self, volume: float):
+        return self.engine.set_master_volume(volume)
+
+    def failed_device_ids(self) -> dict[int, str]:
+        return self.engine.failed_device_ids()
+
+    # --- Plugins ---
+
+    def hosts_plugins(self) -> bool:
+        return self.engine.hosts_plugins()
+
+    def scan_plugins(self, paths=None) -> list:
+        return self.engine.scan_plugins(paths)
+
+    def add_plugin(self, device_id: int, info, is_input: bool = True) -> tuple[bool, str]:
+        return self.engine.add_plugin(device_id, info, is_input)
+
+    def remove_plugin(self, device_id: int, index: int, is_input: bool = True) -> bool:
+        return self.engine.remove_plugin(device_id, index, is_input)
+
+    def plugin_instances(self, device_id: int, is_input: bool = True) -> list:
+        return self.engine.plugin_instances(device_id, is_input)
+
+    def list_plugins(self, device_id: int, is_input: bool = True) -> list[dict[str, Any]]:
+        return self.engine.list_plugins(device_id, is_input)
+
+    def set_plugin_bypassed(self, device_id: int, index: int, bypassed: bool, is_input: bool = True) -> bool:
+        return self.engine.set_plugin_bypassed(device_id, index, bypassed, is_input)
+
+    def set_plugin_parameter(self, device_id: int, index: int, param_id: int, normalized: float,
+                             is_input: bool = True):
+        return self.engine.set_plugin_parameter(device_id, index, param_id, normalized, is_input)
+
     # --- Properties ---
 
     @property
@@ -345,5 +378,4 @@ class UnifiedAudioEngine:
 
     @master_volume.setter
     def master_volume(self, value: float):
-        self.engine.master_volume = value
-        self.engine._publish_graph()
+        self.engine.set_master_volume(value)
