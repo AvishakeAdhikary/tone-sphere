@@ -68,6 +68,9 @@ if (native_bin / 'tonesphere_asio.dll').is_file():
               (str(project_root / 'sdks' / 'asiosdk' / 'LICENSE.txt'), 'licenses/asio-sdk')]
 if (native_bin / 'tonesphere_native.dll').is_file():
     datas += [(str(project_root / 'sdks' / 'vst3sdk' / 'LICENSE.txt'), 'licenses/vst3-sdk')]
+if (native_bin / 'opus.dll').is_file():
+    # libopus, BSD 3-clause: its notice travels with the binary.
+    datas += [(str(project_root / 'sdks' / 'opus' / 'COPYING'), 'licenses/opus')]
 
 hiddenimports = [
     # sounddevice reaches PortAudio through cffi, which PyInstaller cannot see statically.

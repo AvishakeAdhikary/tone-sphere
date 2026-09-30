@@ -92,15 +92,19 @@ def drain(engine: AudioEngine, source_id: int, dest_id: int) -> np.ndarray | Non
 
 
 def link(sender: AudioEngine, receiver: AudioEngine, source_id: int,
-         dest_id: int, target_latency_ms: float = 20.0) -> None:
-    """Point one engine's send at the other's receive, over loopback."""
+         dest_id: int, target_latency_ms: float = 20.0, jitter_mode: str = 'fixed') -> None:
+    """
+    Point one engine's send at the other's receive, over loopback. The jitter buffer is
+    fixed here: these tests prove the transport's wiring sample for sample, and a burst fed
+    by the test would rightly make an adaptive buffer shrink by dropping a packet.
+    """
     # Port 0 on both: an explicit port would collide with a parallel test run or with
     # anything already holding 9002, and neither engine needs a predictable one here.
     started, message = receiver.start_udp_transport('127.0.0.1', 0)
     assert started, message
 
     ok, message = receiver.register_network_receive(
-        dest_id, transport='udp', target_latency_ms=target_latency_ms
+        dest_id, transport='udp', target_latency_ms=target_latency_ms, jitter_mode=jitter_mode
     )
     assert ok, message
 
@@ -291,6 +295,58 @@ class TestKnownSignalSurvivesUdp:
             return np.zeros((0, 2), dtype=np.float32)
 
         return np.concatenate(collected)[:wanted]
+
+
+class TestKnownSignalSurvivesTcp:
+    def test_a_sine_sent_over_tcp_arrives_sample_for_sample(self, sender, receiver):
+        """
+        The TCP send path end to end: a bus on one engine, the TCP router, a connection
+        to the other engine's server, and a bus there — the same samples out as in, and
+        in order, since TCP delivers both or nothing.
+        """
+        source = sender.create_virtual_input('guitar', channels=2)
+        destination = receiver.create_virtual_input('from-network', channels=2)
+        monitor = receiver.create_virtual_output('monitor', channels=2)
+        assert receiver.create_routing(destination, monitor)[0] is True
+
+        receiver.network_router.port = 0
+        receiver.start_network_streaming()
+        ok, message = receiver.register_network_receive(destination, transport='tcp')
+        assert ok, message
+        ok, message = sender.send_device_audio_to_network(source, transport='tcp')
+        assert ok, message
+        sender._tcp_send_worker.stop()   # paced by the test, as in the UDP proof
+        assert sender.network_router.connect_to('127.0.0.1', receiver.network_router.port)
+        for _ in range(200):
+            if receiver.network_router.clients:
+                break
+            time.sleep(0.01)
+
+        blocks = 40
+        signal = sine(blocks * BLOCK, freq=1000.0, amplitude=0.5)
+        for index in range(blocks):
+            assert sender.write_to_bus(source, signal[index * BLOCK:(index + 1) * BLOCK]) == BLOCK
+            sender._tcp_send_worker.tick()
+
+        captured = TestKnownSignalSurvivesUdp._collect(receiver, destination, monitor, len(signal))
+        print("tcp send:", sender.get_network_statistics()['tcp_send'])
+        print("tcp receive:", receiver.get_network_statistics()['tcp_receive'])
+        assert len(captured) == len(signal), f"{len(captured)} of {len(signal)} frames arrived"
+        np.testing.assert_allclose(captured, signal, atol=1e-6)
+        assert dominant_frequency(captured[:, 0]) == pytest.approx(1000.0, abs=2.0)
+        received = receiver.get_network_statistics()['tcp_receive'][str(destination)]
+        assert received['frames_written'] == len(signal) and received['frames_dropped'] == 0
+
+    def test_a_sender_at_another_rate_is_counted_not_played(self, sender, receiver):
+        from tonesphere.network.audio_router import AudioPacket
+
+        destination = receiver.create_virtual_input('from-network', channels=2)
+        assert receiver.register_network_receive(destination, transport='tcp')[0]
+        callback = receiver.network_router.receive_callbacks[destination]
+        block = sine(BLOCK, freq=1000.0)
+        callback(block, AudioPacket(destination, 2, 44100, BLOCK, 'pcm_float32', 0.0, b''))
+        stats = receiver.get_network_statistics()['tcp_receive'][str(destination)]
+        assert stats['wrong_rate'] == 1 and stats['frames_written'] == 0
 
 
 class TestPlayoutLatency:
@@ -587,18 +643,23 @@ class TestSendTeardown:
 
 
 class TestRefusalsAreHonest:
-    def test_tcp_send_says_it_is_unwired_rather_than_reporting_success(self, engine):
-        """
-        This method used to log a warning and return None, so a REST caller got a success
-        response for audio that never moved. Refusing is the honest answer.
-        """
+    def test_an_unknown_send_transport_is_refused(self, engine):
+        source = engine.create_virtual_input('guitar')
+
+        ok, message = engine.send_device_audio_to_network(source, transport='carrier-pigeon')
+
+        assert ok is False
+        assert 'Unknown transport' in message
+        assert engine.list_network_sends() == []
+
+    def test_tcp_send_with_nothing_connected_says_nothing_leaves(self, engine):
         source = engine.create_virtual_input('guitar')
 
         ok, message = engine.send_device_audio_to_network(source, transport='tcp')
 
-        assert ok is False
-        assert 'not wired' in message
-        assert engine.list_network_sends() == []
+        assert ok is True
+        assert 'nothing is connected' in message
+        assert engine.list_network_sends()[0]['transport'] == 'tcp'
 
     def test_an_unknown_source_is_refused(self, engine):
         ok, message = engine.send_device_audio_to_network(999_999, transport='udp')
@@ -689,7 +750,9 @@ class TestStatistics:
 
         assert stats['transport']['running'] is False
         assert stats['transport']['bound_port'] is None
-        assert stats['transport']['opus_available'] is False
+        from tonesphere.network import opus
+
+        assert stats['transport']['opus_available'] is opus.available()
         assert stats['send'] == {'running': False, 'routes': {}}
         assert stats['receive'] == {}
 
@@ -753,3 +816,95 @@ class TestStatistics:
 
         assert ok is False
         assert 'lossless' in message
+
+
+class JitterRelay:
+    """A UDP relay that holds each datagram for a random 0..`jitter_ms` before forwarding it."""
+
+    def __init__(self, destination: tuple[str, int], jitter_ms: float, seed: int = 3):
+        import random
+        import socket
+        import threading
+
+        self._rng = random.Random(seed)
+        self._jitter = jitter_ms / 1000.0
+        self._destination = destination
+        self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._sock.bind(('127.0.0.1', 0))
+        self._sock.settimeout(0.001)
+        self.address = self._sock.getsockname()
+        self._held: list = []
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def _run(self):
+        import heapq
+
+        while not self._stop.is_set():
+            try:
+                data, _ = self._sock.recvfrom(65536)
+                heapq.heappush(self._held, (time.monotonic() + self._rng.uniform(0, self._jitter), id(data), data))
+            except OSError:
+                pass
+            now = time.monotonic()
+            while self._held and self._held[0][0] <= now:
+                self._sock.sendto(heapq.heappop(self._held)[2], self._destination)
+
+    def close(self):
+        self._stop.set()
+        self._thread.join(2)
+        self._sock.close()
+
+
+class TestAdaptiveJitterOverRealSockets:
+    def test_the_buffer_grows_to_the_jitter_a_real_relay_adds(self, sender, receiver):
+        """
+        Real time, real sockets: a sender paced by its own worker, a relay adding 0..30 ms
+        to every datagram, and the receiver's adaptive buffer. It must grow to cover the
+        jitter it measures, lose almost nothing, and carry the 1 kHz tone through.
+        """
+        source = sender.create_virtual_input('guitar', channels=2)
+        destination = receiver.create_virtual_input('from-network', channels=2)
+        monitor = receiver.create_virtual_output('monitor', channels=2)
+        assert receiver.create_routing(destination, monitor)[0] is True
+        assert receiver.start_udp_transport('127.0.0.1', 0)[0]
+        assert receiver.register_network_receive(destination, transport='udp', target_latency_ms=10.0,
+                                                 jitter_mode='adaptive')[0]
+        relay = JitterRelay(receiver.udp_transport.bound_address, jitter_ms=30.0)
+        try:
+            assert sender.start_udp_transport('127.0.0.1', 0)[0]
+            assert sender.send_device_audio_to_network(source, transport='udp')[0]
+            sender.add_udp_peer('relay', *relay.address)
+
+            seconds = 5.0
+            signal = sine(int(RATE * seconds), freq=1000.0, amplitude=0.5)
+            written, collected = 0, []
+            started = time.monotonic()
+            # Statistics are taken while the stream still flows: once the sender runs out,
+            # every empty slot would count as lost, which says nothing about the buffer.
+            while time.monotonic() - started < seconds:
+                due = min(len(signal), int((time.monotonic() - started) * RATE))
+                if written < due:
+                    written += sender.write_to_bus(source, signal[written:due])
+                piece = drain(receiver, destination, monitor)
+                if piece is not None:
+                    collected.append(piece)
+                time.sleep(0.001)
+            stats = receiver.get_network_statistics()['udp']['receive'][str(destination)]['jitter_buffer']
+        finally:
+            relay.close()
+
+        heard = np.concatenate(collected)[:, 0]
+        loss = stats['packets_lost'] / max(1, stats['packets_played_on_time'] + stats['packets_lost'])
+        print(f"\nthrough a 0..30 ms jitter relay: target {stats['target_latency_ms']} ms, measured jitter "
+              f"{stats['jitter_ms']} ms, {stats['stretches']} stretches, {stats['shrinks']} shrinks, "
+              f"lost {stats['packets_lost']} ({loss:.2%}), {len(heard)} frames")
+        assert stats['mode'] == 'adaptive'
+        assert stats['target_latency_ms'] >= 20.0, "the target did not grow to the jitter"
+        assert loss < 0.03
+        # Each stretch is an audible held slot: it grows the buffer once, then stops. (The
+        # first version here stretched 700 times in 5 s, because the sender was reading one
+        # block per late timer wake and delivering a third less audio than it was given.)
+        assert stats['stretches'] < 0.05 * stats['packets_played_on_time']
+        assert dominant_frequency(heard[len(heard) // 2:]) == pytest.approx(1000.0, abs=5.0)

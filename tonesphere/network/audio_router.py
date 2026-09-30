@@ -49,6 +49,7 @@ class NetworkQuality(Enum):
     MEDIUM = "medium"    # Balanced
     HIGH = "high"        # Low compression, high quality
     LOSSLESS = "lossless"  # No compression
+    OPUS = "opus"        # Opus at 128 kb/s: lossy, about a twentieth of float32's bandwidth; UDP only
 
 
 @dataclass
@@ -114,9 +115,10 @@ class NetworkAudioRouter:
     Handles sending and receiving audio over network with routing
     """
 
-    def __init__(self, port: int = 9001, quality: NetworkQuality = NetworkQuality.HIGH):
+    def __init__(self, port: int = 9001, quality: NetworkQuality = NetworkQuality.HIGH, sample_rate: int = 48000):
         self.port = port
         self.quality = quality
+        self.sample_rate = sample_rate
         self.is_running = False
 
         # Server components
@@ -152,6 +154,8 @@ class NetworkAudioRouter:
             self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self.server_socket.bind(('0.0.0.0', self.port))
+            # Port 0 asks the system for a free one; this is the one it gave.
+            self.port = self.server_socket.getsockname()[1]
             self.server_socket.listen(10)
             self.is_running = True
 
@@ -296,8 +300,10 @@ class NetworkAudioRouter:
 
     def _receive_loop(self, conn_id: str, sock: socket.socket):
         """Receive loop for outgoing connections"""
+        # While the connection exists, not while this router's server runs: a send-only
+        # instance never starts a server, and its connections used to close on opening.
         try:
-            while self.is_running and conn_id in self.connections:
+            while conn_id in self.connections:
                 packet = self._receive_packet(sock)
                 if packet is None:
                     break
@@ -314,40 +320,27 @@ class NetworkAudioRouter:
             self.disconnect_from(conn_id)
 
     def send_audio(self, device_id: int, audio_data: np.ndarray,
-                   sample_rate: int, target: str | None = None):
+                   sample_rate: int, target: str | None = None) -> int:
         """
-        Send audio over network
-
-        Args:
-            device_id: Source device ID
-            audio_data: Audio data (frames, channels)
-            sample_rate: Sample rate
-            target: Target client/connection ID (None = broadcast)
+        Send one block to `target` (a connection id), or to every connected client and
+        connection. Returns how many sockets took it: 0 means nothing left this machine.
         """
         try:
-            # Create packet
             packet = self._encode_audio(device_id, audio_data, sample_rate)
             packet_bytes = packet.to_bytes()
+        except Exception as e:
+            logger.error(f"Error encoding audio: {e}")
+            return 0
 
-            # Update stats
+        if target:
+            sockets = [self.connections[target]] if target in self.connections else []
+        else:
+            sockets = list(self.clients.values()) + list(self.connections.values())
+        delivered = sum(1 for sock in sockets if self._send_packet(sock, packet_bytes))
+        if delivered:
             self.stats['packets_sent'] += 1
             self.stats['bytes_sent'] += len(packet_bytes)
-
-            # Send to target or broadcast
-            if target:
-                if target in self.connections:
-                    self._send_packet(self.connections[target], packet_bytes)
-            else:
-                # Broadcast to all clients
-                for client_socket in self.clients.values():
-                    self._send_packet(client_socket, packet_bytes)
-
-                # Broadcast to all connections
-                for conn_socket in self.connections.values():
-                    self._send_packet(conn_socket, packet_bytes)
-
-        except Exception as e:
-            logger.error(f"Error sending audio: {e}")
+        return delivered
 
     def _encode_audio(self, device_id: int, audio_data: np.ndarray,
                      sample_rate: int) -> AudioPacket:
@@ -355,6 +348,9 @@ class NetworkAudioRouter:
         frames, channels = audio_data.shape
 
         # Convert based on quality
+        if self.quality == NetworkQuality.OPUS:
+            raise ValueError("Opus is carried over UDP only: its packets need the jitter buffer's order and "
+                             "its loss concealment, which TCP's stream has no use for")
         if self.quality == NetworkQuality.LOSSLESS:
             # Float32 PCM
             data_bytes = audio_data.astype(np.float32).tobytes()
@@ -413,12 +409,14 @@ class NetworkAudioRouter:
         audio_data = audio_data.reshape((packet.frames, packet.channels))
         return audio_data
 
-    def _send_packet(self, sock: socket.socket, packet_bytes: bytes):
+    def _send_packet(self, sock: socket.socket, packet_bytes: bytes) -> bool:
         """Send packet over socket"""
         try:
             sock.sendall(packet_bytes)
+            return True
         except Exception as e:
             logger.error(f"Error sending packet: {e}")
+            return False
 
     def _receive_packet(self, sock: socket.socket) -> AudioPacket | None:
         """Receive packet from socket"""
@@ -488,6 +486,10 @@ class NetworkAudioRouter:
                 return None
             data += chunk
         return data
+
+    def send_block(self, device_id: int, block: np.ndarray, target: str | None, quality) -> bool:
+        """The send worker's interface (`UdpAudioTransport.send_block`): one block, to the TCP peers."""
+        return self.send_audio(device_id, block, self.sample_rate, target) > 0
 
     def register_receive_callback(self, device_id: int, callback: Callable):
         """Register callback for receiving audio for a device"""

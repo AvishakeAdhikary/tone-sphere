@@ -63,7 +63,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libegl1 libxkbcommon-x11-0 libxcb-cursor0 \
             libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libgl1 \
-            libportaudio2
+            libportaudio2 libopus0
+
+      - name: Install libopus (macOS)
+        # Opus is loaded with ctypes from the system library (tonesphere/network/opus.py);
+        # Windows builds it from Xiph's pinned source, Linux gets libopus0 above.
+        if: runner.os == 'macOS'
+        run: brew install opus
 
       - name: Start a headless PulseAudio server (Linux)
         # Unlike `hardware` (needs a real sound card, which no CI runner has),
@@ -233,7 +239,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libegl1 libxkbcommon-x11-0 libxcb-cursor0 \
             libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libgl1 \
-            libportaudio2
+            libportaudio2 libopus0
 
       - name: Build the native engine (Windows)
         if: runner.os == 'Windows'

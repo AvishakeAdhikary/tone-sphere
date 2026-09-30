@@ -10,6 +10,7 @@ uv run python scripts/fetch_sdks.py
 | Directory | SDK | Pinned by | Licence | Used by |
 |---|---|---|---|---|
 | `vst3sdk/` | Steinberg VST3 SDK 3.8.1 | git tag `v3.8.1_build_84` of `github.com/steinbergmedia/vst3sdk` | MIT (from 3.8.0 on) | `native/vst3/` (the host), `native/test_plugin/` |
+| `opus/` | libopus 1.5.2 (Xiph) | SHA-256 of `opus-1.5.2.tar.gz` from `downloads.xiph.org` (`65c1d2f7…9a7ce1`) | BSD 3-clause | `opus.dll` (Windows), loaded by `tonesphere/network/opus.py`; its `COPYING` ships in `licenses/opus` |
 | `asiosdk/` | Steinberg ASIO SDK 2.3.4 | SHA-256 of `ASIO-SDK_2.3.4_2025-10-15.zip` from `download.steinberg.net` (the target of `steinberg.net/asiosdk`) | Dual: proprietary Steinberg ASIO licence **or** GPL version 3 | `native/asio/` only |
 
 ## Why they are fetched, not committed
@@ -34,6 +35,10 @@ which `AGENTS.md` makes binding:
 
 `fetch_sdks.py` refuses a zip whose checksum differs from the pin, and refuses to extract
 one whose licence no longer offers GPLv3.
+
+**libopus.** BSD 3-clause. Built by `native/CMakeLists.txt` into its own `opus.dll` with
+Xiph's defaults (no deep-learning PLC or DRED models); on Linux and macOS the system's
+libopus is used instead. Distributions that include `opus.dll` carry its notice.
 
 ## Supplying an SDK by hand
 

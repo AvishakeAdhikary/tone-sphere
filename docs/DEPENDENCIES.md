@@ -56,7 +56,8 @@ These are not Python packages; they are fetched or installed by the build, never
 | EWDK (MSVC build tools, Windows SDK, WDK) | Microsoft, official ISO | Microsoft EWDK licence (driver development and supporting components; see `docs/BUILDING_WINDOWS.md`) | Compiling the native DLLs and the driver |
 | VST3 SDK 3.8.x | `github.com/steinbergmedia/vst3sdk`, pinned tag, via `scripts/fetch_sdks.py` | MIT | The native VST3 host and the test plugin |
 | ASIO SDK 2.3.x | steinberg.net, pinned checksum, via `scripts/fetch_sdks.py` | GPLv3 (Steinberg's open-source option) | `native/asio/` only — see `sdks/README.md` |
+| libopus 1.5.2 | Xiph's release tarball, pinned checksum, via `scripts/fetch_sdks.py` (Windows, built into `opus.dll`); the system package elsewhere (`libopus0` on Debian/Ubuntu, Homebrew `opus` on macOS) | BSD 3-clause | The `opus` network quality, through ctypes (`tonesphere/network/opus.py`) — no Python binding: none ships libopus for all three platforms, and five C calls need none |
 | Windows-driver-samples (SimpleAudioSample) | `github.com/microsoft/Windows-driver-samples` | MS-PL | Starting point for `driver/windows_virtual_audio/` |
 
 The native layer must not pull in JUCE, .NET, a GUI toolkit or any framework beyond the
-two Steinberg SDKs and the Windows SDK.
+two Steinberg SDKs, libopus and the Windows SDK.

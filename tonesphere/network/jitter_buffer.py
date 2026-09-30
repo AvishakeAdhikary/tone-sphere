@@ -23,13 +23,31 @@ None, and that is counted as priming, never as loss — a buffer that has not st
 not a buffer that is dropping audio, and conflating the two would make a healthy startup
 look like a broken link.
 
-Adaptive latency is deliberately not attempted. `target_latency_ms` is one fixed, exposed
-number, because an estimator that reacts to measured jitter is hard to pin down with a
-deterministic test, and an untested adaptive control loop in the audio path is worse than
-a slightly conservative constant.
+Adaptive depth
+--------------
+`mode='fixed'` holds `target_latency_ms` and nothing else. `mode='adaptive'` measures how
+late packets actually arrive and sizes the buffer to that. Each packet's transit is its
+arrival time (this machine's clock) minus its send time (the sender's timestamp, or its
+sequence number times the packet duration when there is none — the same thing for a sender
+that sends at the audio rate); a clock offset between the machines cancels, because only
+differences are used. Its *delay* is how much later than the fastest packet of the last
+two seconds it arrived: a buffer that deep would have had it in time. The target is the
+99th percentile of those delays plus one packet, kept between `min_latency_ms` and
+`max_latency_ms`. RFC 3550's interarrival jitter is kept too, for the statistics.
+
+The buffer then moves towards the target by whole packets, and never silently: when its
+smoothed depth falls half a packet below the target, one pull holds the stream for a slot
+(a concealment, counted as a *stretch*, not as a loss; at most one in four pulls); when it
+sits more than one and a
+half packets above, one due packet is dropped (a *shrink*), at most once a second, so the
+latency comes down slowly and only when the link has been calm. The estimator is driven by
+an injectable clock, so `tests/test_jitter_buffer.py` runs it against scripted arrival
+schedules, deterministically.
 """
 
 import threading
+import time
+from collections import deque
 
 import numpy as np
 
@@ -37,6 +55,17 @@ SEQUENCE_MODULUS = 2 ** 32
 
 CONCEAL_SILENCE = 'silence'
 CONCEAL_REPEAT = 'repeat'
+
+MODE_FIXED = 'fixed'
+MODE_ADAPTIVE = 'adaptive'
+
+DELAY_WINDOW_S = 2.0
+DELAY_QUANTILE = 0.99
+SHRINK_INTERVAL_S = 1.0
+DEPTH_SMOOTHING = 1.0 / 8.0
+# A held slot shows in the depth only once the next packet lands, so stretches are spaced
+# to let the smoothed depth see each one before deciding on another.
+STRETCH_SPACING_PULLS = 4
 
 
 def sequence_distance(origin: int, other: int) -> int:
@@ -78,6 +107,11 @@ class JitterBuffer:
         max_concealment_repeats: int = 3,
         resync_gap_packets: int = 32,
         conceal: str = CONCEAL_SILENCE,
+        mode: str = MODE_FIXED,
+        decoder=None,
+        min_latency_ms: float = 10.0,
+        max_latency_ms: float = 200.0,
+        clock=time.monotonic,
     ):
         if frames_per_packet < 1:
             raise ValueError("frames_per_packet must be at least 1")
@@ -85,6 +119,8 @@ class JitterBuffer:
             raise ValueError("channels must be at least 1")
         if conceal not in (CONCEAL_SILENCE, CONCEAL_REPEAT):
             raise ValueError(f"conceal must be {CONCEAL_SILENCE!r} or {CONCEAL_REPEAT!r}")
+        if mode not in (MODE_FIXED, MODE_ADAPTIVE):
+            raise ValueError(f"mode must be {MODE_FIXED!r} or {MODE_ADAPTIVE!r}")
 
         self.frames_per_packet = frames_per_packet
         self.channels = channels
@@ -110,6 +146,20 @@ class JitterBuffer:
             -(-int(round(target_latency_ms * sample_rate)) // (frames_per_packet * 1000)),
         )
 
+        self.mode = mode
+        # A stateful codec's decoder (Opus): packets are held encoded and decoded as they
+        # play, in sequence, and a missing one is concealed by the codec rather than here.
+        self._decoder = decoder
+        self.min_latency_ms = min_latency_ms
+        self.max_latency_ms = max(max_latency_ms, min_latency_ms)
+        self._clock = clock
+        self._delays: deque[tuple[float, float]] = deque()   # (arrival, transit)
+        self._last_transit: float | None = None
+        self._jitter_s = 0.0
+        self._depth = float(self.target_packets)
+        self._last_shrink = -1e9
+        self._pulls_since_stretch = STRETCH_SPACING_PULLS
+
         self._packets: dict[int, np.ndarray] = {}
         self._next_sequence: int | None = None
         self._priming = True
@@ -132,11 +182,15 @@ class JitterBuffer:
             'resynced_packets_skipped': 0,
             'priming_pulls': 0,
             'peak_buffered_packets': 0,
+            'stretches': 0,
+            'shrinks': 0,
+            'codec_concealments': 0,
+            'decode_errors': 0,
         }
 
     # --- Producer side ---
 
-    def push(self, sequence: int, frames: np.ndarray) -> bool:
+    def push(self, sequence: int, frames: np.ndarray, timestamp_us: int | None = None) -> bool:
         """
         Insert one arrived packet. Returns whether it was kept.
 
@@ -147,18 +201,24 @@ class JitterBuffer:
         geometry is a *mismatch*, and writing it into a bus sized for something else would
         be noise.
         """
-        block = np.ascontiguousarray(frames, dtype=np.float32)
-        if block.ndim == 1:
-            block = block.reshape(-1, 1)
+        encoded = self._decoder is not None and isinstance(frames, (bytes, bytearray))
+        if encoded:
+            block = bytes(frames)
+        else:
+            block = np.ascontiguousarray(frames, dtype=np.float32)
+            if block.ndim == 1:
+                block = block.reshape(-1, 1)
 
         with self._lock:
             self._stats['packets_pushed'] += 1
 
-            if block.shape != (self.frames_per_packet, self.channels):
+            if not encoded and block.shape != (self.frames_per_packet, self.channels):
                 self._stats['packets_wrong_shape'] += 1
                 return False
 
             sequence %= SEQUENCE_MODULUS
+            if self.mode == MODE_ADAPTIVE:
+                self._measure(sequence, timestamp_us)
 
             if self._next_sequence is None:
                 # The first packet ever seen defines where playout starts. Any earlier
@@ -200,6 +260,44 @@ class JitterBuffer:
             )
             return True
 
+    def _measure(self, sequence: int, timestamp_us: int | None):
+        """One arrival's transit into the delay window and the RFC 3550 jitter estimate."""
+        arrival = self._clock()
+        sent = timestamp_us / 1e6 if timestamp_us else sequence * self.packet_duration_ms / 1000.0
+        transit = arrival - sent
+        if self._last_transit is not None:
+            self._jitter_s += (abs(transit - self._last_transit) - self._jitter_s) / 16.0
+        self._last_transit = transit
+        self._delays.append((arrival, transit))
+        while self._delays and arrival - self._delays[0][0] > DELAY_WINDOW_S:
+            self._delays.popleft()
+
+    def _adaptive_target_packets(self) -> int:
+        """The 99th-percentile delay of the window, plus a packet, in whole packets."""
+        transits = [t for _, t in self._delays]
+        if len(transits) < 8:
+            target_ms = self.target_latency_ms
+        else:
+            fastest = min(transits)
+            late = np.quantile(np.array(transits) - fastest, DELAY_QUANTILE) * 1000.0
+            target_ms = late + self.packet_duration_ms
+        target_ms = min(max(target_ms, self.min_latency_ms), self.max_latency_ms)
+        return max(1, int(np.ceil(target_ms / self.packet_duration_ms - 1e-9)))
+
+    def _adapt(self) -> str | None:
+        """Called once per pull after priming: 'stretch', 'shrink' or None."""
+        self.target_packets = self._adaptive_target_packets()
+        self._depth += (len(self._packets) - self._depth) * DEPTH_SMOOTHING
+        self._pulls_since_stretch += 1
+        if self._depth < self.target_packets - 0.5 and self._pulls_since_stretch >= STRETCH_SPACING_PULLS:
+            self._pulls_since_stretch = 0
+            return 'stretch'
+        now = self._clock()
+        if self._depth > self.target_packets + 1.5 and now - self._last_shrink >= SHRINK_INTERVAL_S:
+            self._last_shrink = now
+            return 'shrink'
+        return None
+
     # --- Consumer side ---
 
     def pull(self) -> np.ndarray | None:
@@ -217,12 +315,33 @@ class JitterBuffer:
                 return None
 
             if self._priming:
+                if self.mode == MODE_ADAPTIVE:
+                    self.target_packets = self._adaptive_target_packets()
                 if len(self._packets) < self.target_packets:
                     self._stats['priming_pulls'] += 1
                     return None
                 self._priming = False
+                self._depth = float(len(self._packets))
+
+            if self.mode == MODE_ADAPTIVE:
+                action = self._adapt()
+                if action == 'stretch':
+                    # Hold the stream one slot: what plays is a concealment, but no packet
+                    # is skipped and none is counted lost.
+                    self._stats['stretches'] += 1
+                    if self._decoder is not None:
+                        return self._decode(None)
+                    if self.conceal == CONCEAL_REPEAT and self._last_block is not None:
+                        return self._last_block
+                    return self._silence
+                if action == 'shrink' and self._next_sequence in self._packets:
+                    del self._packets[self._next_sequence]
+                    self._next_sequence = (self._next_sequence + 1) % SEQUENCE_MODULUS
+                    self._stats['shrinks'] += 1
 
             block = self._packets.pop(self._next_sequence, None)
+            if isinstance(block, bytes):
+                block = self._decode(block)
 
             if block is not None:
                 self._stats['packets_played_on_time'] += 1
@@ -260,6 +379,8 @@ class JitterBuffer:
         self._stats['resynced_packets_skipped'] += gap
 
         block = self._packets.pop(nearest)
+        if isinstance(block, bytes):
+            block = self._decode(block)
         self._stats['packets_played_on_time'] += 1
         self._next_sequence = (nearest + 1) % SEQUENCE_MODULUS
         self._last_block = block
@@ -279,6 +400,10 @@ class JitterBuffer:
         self._stats['packets_lost'] += 1
         self._next_sequence = (self._next_sequence + 1) % SEQUENCE_MODULUS
 
+        if self._decoder is not None:
+            self._stats['codec_concealments'] += 1
+            return self._decode(None)
+
         if (self.conceal == CONCEAL_REPEAT
                 and self._last_block is not None
                 and self._concealment_run < self.max_concealment_repeats):
@@ -288,6 +413,18 @@ class JitterBuffer:
 
         self._stats['silence_insertions'] += 1
         return self._silence
+
+    def _decode(self, payload: bytes | None) -> np.ndarray:
+        """One packet through the codec, or its concealment of a lost one; silence if it fails."""
+        try:
+            block = self._decoder.decode(payload)
+        except Exception:   # noqa: BLE001 - a corrupt packet must not stop playout
+            self._stats['decode_errors'] += 1
+            return self._silence
+        if block.shape != (self.frames_per_packet, self.channels):
+            self._stats['decode_errors'] += 1
+            return self._silence
+        return block
 
     def reset(self):
         """Forget everything and prime again — for a peer that has restarted."""
@@ -322,8 +459,14 @@ class JitterBuffer:
                 'frames_per_packet': self.frames_per_packet,
                 'channels': self.channels,
                 'packet_duration_ms': round(self.packet_duration_ms, 3),
-                'target_latency_ms': self.target_latency_ms,
+                'mode': self.mode,
+                'target_latency_ms': (round(self.target_packets * self.packet_duration_ms, 3)
+                                      if self.mode == MODE_ADAPTIVE else self.target_latency_ms),
                 'target_packets': self.target_packets,
+                # Interarrival jitter (RFC 3550), measured in adaptive mode only; None, not 0,
+                # where nothing was measured.
+                'jitter_ms': round(self._jitter_s * 1000.0, 3) if self.mode == MODE_ADAPTIVE and self._delays
+                else None,
                 'buffered_packets': buffered,
                 'buffered_latency_ms': round(buffered * self.packet_duration_ms, 3),
                 'priming': self._priming,

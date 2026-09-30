@@ -156,8 +156,9 @@ instrument plugins are not offered. Those plugins are not ours:
 ## 6. Third-party components
 
 The Application is built on third-party software, including PortAudio (through
-`sounddevice`), Qt (through PySide6), NumPy, FastAPI, Steinberg's VST3 SDK (MIT) and, in
-Windows builds, Steinberg's ASIO SDK (GPLv3; see section 3). The project's
+`sounddevice`), Qt (through PySide6), NumPy, FastAPI, Steinberg's VST3 SDK (MIT), Xiph's
+libopus (BSD 3-clause) and, in Windows builds from GitHub, Steinberg's ASIO SDK (GPLv3; see
+section 3). The project's
 `docs/DEPENDENCIES.md` lists them with their licences. Each of those components is governed
 by its own licence, and those licences continue to apply to those components. Nothing in
 this agreement restricts a right you have in a third-party component under its own licence.

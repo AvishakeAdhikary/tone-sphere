@@ -47,7 +47,7 @@ from tonesphere.native import NativeError
 from tonesphere.network.audio_router import NetworkAudioRouter, NetworkQuality
 from tonesphere.network.jitter_buffer import JitterBuffer
 from tonesphere.network.send_worker import NetworkSendWorker
-from tonesphere.network.udp_transport import MalformedPacket, UdpAudioTransport
+from tonesphere.network.udp_transport import CODEC_OPUS, MalformedPacket, UdpAudioTransport
 from tonesphere.utils.logger import get_logger
 from tonesphere.utils.threads import synchronized
 
@@ -106,7 +106,7 @@ class AudioEngine:
         # they were simply never connected to any audio.
         self.routing_matrix = AudioRoutingMatrix()
         self.channel_control_manager = ChannelControlManager()
-        self.network_router = NetworkAudioRouter(quality=NetworkQuality.HIGH)
+        self.network_router = NetworkAudioRouter(quality=NetworkQuality.HIGH, sample_rate=sample_rate)
 
         # Both transports live at once rather than one replacing the other: TCP is right
         # for a bulk feed that must not lose a sample and can afford buffering, UDP for
@@ -131,7 +131,9 @@ class AudioEngine:
         self._network_sinks: dict[int, dict[str, Any]] = {}
         self._next_network_id = NETWORK_ID_BASE
         self._send_worker: NetworkSendWorker | None = None
+        self._tcp_send_worker: NetworkSendWorker | None = None
         self._udp_receives: dict[int, dict[str, Any]] = {}
+        self._tcp_receives: dict[int, dict[str, int]] = {}
 
         # OS-level virtual endpoints: Linux null-sinks (Track 2) and the macOS CoreAudio
         # HAL device (Track 3). Both are, once they exist, ordinary PortAudio devices —
@@ -304,6 +306,8 @@ class AudioEngine:
             # have its stream dropped by one. `cleanup()` is the terminal call, so nothing
             # is left running past it.
             self.stop_udp_transport()
+            if self._tcp_send_worker is not None:
+                self._tcp_send_worker.stop()
             self.network_router.stop_server()
 
             # Same reasoning as the network transports: a Linux virtual sink is an
@@ -1810,8 +1814,10 @@ class AudioEngine:
             # The network side paces itself from the rate, so leaving it on the old one
             # would send at the wrong speed and slowly under- or overrun the peer.
             self.udp_transport.sample_rate = sample_rate
-            if self._send_worker is not None:
-                self._send_worker.sample_rate = sample_rate
+            self.network_router.sample_rate = sample_rate
+            for worker in (self._send_worker, self._tcp_send_worker):
+                if worker is not None:
+                    worker.sample_rate = sample_rate
 
             if was_running:
                 self.start_engine()
@@ -1829,8 +1835,11 @@ class AudioEngine:
             self.buffer_size = buffer_size
             self.host.blocksize = buffer_size
 
-            if self._send_worker is not None:
-                self._send_worker.frames_per_read = buffer_size
+            for worker in (self._send_worker, self._tcp_send_worker):
+                if worker is not None:
+                    worker.frames_per_read = buffer_size
+            if self._tcp_send_worker is not None:
+                self._tcp_send_worker.packet_frames = buffer_size
 
             if was_running:
                 self.start_engine()
@@ -1909,8 +1918,16 @@ class AudioEngine:
             return False, f"Unknown quality '{quality}' — choose one of: {options}"
 
         with self._lock:
-            self.network_router.quality = preset
             self.udp_transport.quality = preset
+            if preset == NetworkQuality.OPUS:
+                from tonesphere.network import opus
+
+                if not opus.available():
+                    self.udp_transport.quality = NetworkQuality.HIGH
+                    return False, f"Opus is unavailable here: {opus.unavailable_reason()}"
+                return True, (f"UDP quality set to Opus ({opus.version()}); TCP keeps "
+                              f"{self.network_router.quality.value}, since Opus is carried over UDP only")
+            self.network_router.quality = preset
         return True, f"Network quality set to {preset.value}"
 
     # --- Network send (the direction that was never wired) ---
@@ -1931,15 +1948,14 @@ class AudioEngine:
 
         Once it is a graph node, the host allocates it a ring like any other route and the
         send worker is an ordinary consumer of that ring.
+
+        `transport='udp'` is the realtime path (datagrams, a jitter buffer at the far end);
+        `'tcp'` sends the same ring through the TCP router, one engine block per packet, to
+        every connected client and connection (or `target`, a connection id): nothing is
+        lost, and the far end is as late as TCP makes it.
         """
-        if transport != 'udp':
-            # The TCP path has a working receive side and no send side, and this is not
-            # the change that gives it one. Refused rather than logged-and-ignored, which
-            # is what this method did before.
-            return False, (
-                "TCP send is still not wired to the audio path — only its receive side is. "
-                "Use transport='udp' for the realtime path."
-            )
+        if transport not in ('udp', 'tcp'):
+            return False, f"Unknown transport '{transport}' — use 'udp' or 'tcp'"
 
         with self._lock:
             source = self._node_for(device_id)
@@ -1953,7 +1969,7 @@ class AudioEngine:
                     f"(sink {existing}); disable it first to change the target"
                 )
 
-            if not self.udp_transport.is_running:
+            if transport == 'udp' and not self.udp_transport.is_running:
                 # Port 0: a send-only peer does not need a predictable port, and asking
                 # for one it does not need is one more thing that can already be in use.
                 started, message = self.start_udp_transport(bind_port=0)
@@ -1978,15 +1994,21 @@ class AudioEngine:
                 'source': str(source),
                 'dest': str(node),
                 'target': target,
-                'transport': 'udp',
+                'transport': transport,
             }
 
-            worker = self._ensure_send_worker()
+            worker = self._ensure_send_worker() if transport == 'udp' else self._ensure_tcp_send_worker()
             worker.add_route(
                 sink_id=sink_id, device_id=device_id,
                 source_key=str(source), dest_key=str(node), target=target,
             )
             worker.start()
+
+            if transport == 'tcp':
+                peers = len(self.network_router.clients) + len(self.network_router.connections)
+                where = f"connection '{target}'" if target else f"{peers} TCP peer(s)"
+                note = "" if peers else " — nothing is connected yet, so nothing is leaving this machine"
+                return True, f"Device {device_id} is sending over TCP to {where}{note}"
 
             peers = len(self.udp_transport.peers())
             where = f"peer '{target}'" if target else f"{peers} peer(s)"
@@ -2002,10 +2024,11 @@ class AudioEngine:
 
             self.remove_routing(device_id, sink_id)
 
-            if self._send_worker is not None:
-                self._send_worker.remove_route(sink_id)
-                if self._send_worker.route_count == 0:
-                    self._send_worker.stop()
+            worker = self._tcp_send_worker if self._network_sinks[sink_id]['transport'] == 'tcp' else self._send_worker
+            if worker is not None:
+                worker.remove_route(sink_id)
+                if worker.route_count == 0:
+                    worker.stop()
 
             node = self._id_to_node.pop(sink_id, None)
             if node is not None:
@@ -2040,6 +2063,15 @@ class AudioEngine:
             )
         return self._send_worker
 
+    def _ensure_tcp_send_worker(self) -> NetworkSendWorker:
+        if self._tcp_send_worker is None:
+            self._tcp_send_worker = NetworkSendWorker(
+                transport=self.network_router, reader=self.host.read_available,
+                sample_rate=self.sample_rate, frames_per_read=self.buffer_size,
+                packet_frames=self.buffer_size, name='tcp-audio-send',
+            )
+        return self._tcp_send_worker
+
     # --- Network receive ---
 
     def register_network_receive(
@@ -2048,6 +2080,7 @@ class AudioEngine:
         transport: str = 'tcp',
         target_latency_ms: float = 40.0,
         conceal: str = 'silence',
+        jitter_mode: str = 'adaptive',
     ) -> tuple[bool, str]:
         """
         Feed audio arriving from the network into a bus.
@@ -2060,10 +2093,37 @@ class AudioEngine:
         packets go into a `JitterBuffer` and a paced thread drains it. The buffer's
         geometry is taken from the first packet that actually arrives rather than assumed,
         because the sender's channel count and packet size are its choice, not ours.
+        `jitter_mode` 'adaptive' (the default) sizes the buffer to the jitter it measures,
+        starting from `target_latency_ms`; 'fixed' holds `target_latency_ms`.
         """
         if transport == 'tcp':
+            stats = self._tcp_receives.setdefault(device_id, {'packets': 0, 'frames_written': 0,
+                                                              'frames_dropped': 0, 'wrong_rate': 0})
+
             def receive_callback(audio_data: np.ndarray, packet):
-                self.write_to_bus(device_id, audio_data)
+                stats['packets'] += 1
+                if packet.sample_rate != self.sample_rate:
+                    # Played at this engine's rate it would be the wrong pitch; counted, not played.
+                    stats['wrong_rate'] += 1
+                    return
+                # TCP must not lose what it carried, so a full bus is waited on rather than
+                # dropped: this receive thread stops reading, the socket's window fills, and
+                # the sender slows to the rate the engine consumes. Only a bus that takes
+                # nothing for a second (nothing routed out of it) drops the rest.
+                remaining, stalled_since = audio_data, None
+                while len(remaining):
+                    written = self.write_to_bus(device_id, remaining)
+                    stats['frames_written'] += written
+                    remaining = remaining[written:]
+                    if written:
+                        stalled_since = None
+                    elif stalled_since is None:
+                        stalled_since = time.monotonic()
+                    elif time.monotonic() - stalled_since > 1.0:
+                        stats['frames_dropped'] += len(remaining)
+                        return
+                    if len(remaining):
+                        time.sleep(0.002)
 
             self.network_router.register_receive_callback(device_id, receive_callback)
             return True, f"Device {device_id} will receive TCP audio"
@@ -2091,8 +2151,10 @@ class AudioEngine:
                 'buffer': None,
                 'target_latency_ms': target_latency_ms,
                 'conceal': conceal,
+                'jitter_mode': jitter_mode,
                 'packets_received': 0,
                 'packets_rejected': 0,
+                'packets_wrong_rate': 0,
                 'frames_written': 0,
                 'writes_refused': 0,
                 'late_wakes': 0,
@@ -2140,10 +2202,19 @@ class AudioEngine:
         """
         def handler(packet):
             try:
-                audio = packet.decode()
+                # Opus is decoded at playout, in sequence, so a lost packet is concealed by
+                # Opus itself: the jitter buffer holds its encoded payloads.
+                audio = packet.payload if packet.codec == CODEC_OPUS else packet.decode()
             except MalformedPacket as e:
                 state['packets_rejected'] += 1
                 state['error'] = f"undecodable packet: {e}"
+                return
+
+            if packet.sample_rate != self.sample_rate:
+                # Played at this engine's rate it would be the wrong pitch and speed; refused
+                # and counted, where an earlier version played it anyway.
+                state['packets_wrong_rate'] += 1
+                state['error'] = f"sender at {packet.sample_rate} Hz, this engine at {self.sample_rate} Hz"
                 return
 
             buffer = state['buffer']
@@ -2153,17 +2224,24 @@ class AudioEngine:
                 # First packet, or a sender that changed its geometry mid-stream. Either
                 # way the buffer's existing contents describe a different signal, so it is
                 # rebuilt and re-primed rather than fed blocks it cannot align.
+                decoder = None
+                if packet.codec == CODEC_OPUS:
+                    from tonesphere.network import opus
+
+                    decoder = opus.Decoder(packet.sample_rate, packet.channels)
                 buffer = JitterBuffer(
                     frames_per_packet=packet.frame_count,
                     channels=packet.channels,
                     sample_rate=self.sample_rate,
                     target_latency_ms=state['target_latency_ms'],
                     conceal=state['conceal'],
+                    mode=state['jitter_mode'],
+                    decoder=decoder,
                 )
                 state['buffer'] = buffer
 
             state['packets_received'] += 1
-            buffer.push(packet.sequence, audio)
+            buffer.push(packet.sequence, audio, timestamp_us=packet.timestamp_us)
 
         return handler
 
@@ -2269,6 +2347,7 @@ class AudioEngine:
                 'device_id': device_id,
                 'packets_received': state['packets_received'],
                 'packets_rejected': state['packets_rejected'],
+                'packets_wrong_rate': state['packets_wrong_rate'],
                 'frames_written': state['frames_written'],
                 'writes_refused': state['writes_refused'],
                 'late_wakes': state['late_wakes'],
@@ -2278,6 +2357,10 @@ class AudioEngine:
                 # no buffer and therefore nothing measured about one.
                 'jitter_buffer': buffer.statistics() if buffer is not None else None,
             }
+
+        stats['tcp_send'] = (self._tcp_send_worker.statistics() if self._tcp_send_worker is not None
+                             else {'running': False, 'routes': {}})
+        stats['tcp_receive'] = {str(k): dict(v) for k, v in self._tcp_receives.items()}
 
         send = (
             self._send_worker.statistics() if self._send_worker is not None

@@ -41,6 +41,26 @@ else()
     message(STATUS "VST3 host: not built (no VST3 SDK at ${TS_VST3_SDK}; run scripts/fetch_sdks.py)")
 endif()
 
+# libopus (BSD 3-clause), fetched into sdks/opus by scripts/fetch_sdks.py and built as its
+# own opus.dll, which tonesphere/network/opus.py loads with ctypes: the codec is used from
+# the network threads, never from the audio thread, so it has no reason to be inside the
+# engine DLL. Default options: no deep-learning PLC or DRED models, float API.
+set(TS_OPUS "${CMAKE_CURRENT_SOURCE_DIR}/../sdks/opus" CACHE PATH "libopus source root")
+if(EXISTS "${TS_OPUS}/CMakeLists.txt")
+    set(TS_SAVED_SHARED ${BUILD_SHARED_LIBS})
+    set(BUILD_SHARED_LIBS ON)
+    set(OPUS_BUILD_TESTING OFF CACHE BOOL "" FORCE)
+    set(OPUS_BUILD_PROGRAMS OFF CACHE BOOL "" FORCE)
+    set(OPUS_INSTALL_PKG_CONFIG_MODULE OFF CACHE BOOL "" FORCE)
+    set(OPUS_INSTALL_CMAKE_CONFIG_MODULE OFF CACHE BOOL "" FORCE)
+    add_subdirectory("${TS_OPUS}" opus)
+    set(BUILD_SHARED_LIBS ${TS_SAVED_SHARED})
+    set_target_properties(opus PROPERTIES OUTPUT_NAME opus RUNTIME_OUTPUT_DIRECTORY "${TS_OUTPUT_DIR}")
+    message(STATUS "libopus: building ${TS_OPUS} as opus.dll")
+else()
+    message(STATUS "libopus: not built (no source at ${TS_OPUS}; run scripts/fetch_sdks.py opus)")
+endif()
+
 add_library(tonesphere_native SHARED
     engine/abi.cpp
     engine/engine.cpp

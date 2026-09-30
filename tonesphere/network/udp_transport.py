@@ -41,19 +41,14 @@ computes what actually fits and `send_worker.py` accumulates across reads to fil
 
 Opus
 ----
-Deliberately not implemented, and refused rather than silently substituted.
-
-`CODEC_OPUS` is reserved in the wire format so a future encoder does not need a protocol
-bump, and both encode and decode raise `CodecUnavailable` for it. The reason is a verified
-packaging fact rather than a preference: neither Python binding ships a libopus binary for
-all three platforms this project tests on. `PyOgg` publishes only `win32`/`win_amd64`
-wheels (checked against PyPI's own file list for every release) — on Linux and macOS it
-installs from its sdist and falls back to `ctypes.util.find_library`, exactly the system
-package step it was supposed to avoid — and its released version does not expose an
-encoder class at all. `opuslib` publishes no wheels whatsoever and needs a system libopus
-everywhere. Claiming Opus off a codec path that could only be exercised on one of three
-CI platforms is the kind of untested capability claim this project exists to avoid, so it
-is left undone and said so.
+The `opus` quality sends each 10 ms of audio as one Opus packet (`network/opus.py`: libopus
+through ctypes — built from Xiph's pinned release on Windows, the system library on Linux
+and macOS). An encoder is kept per sending device, since Opus is stateful. The receiver
+holds the packets encoded in its jitter buffer and decodes them as they play, in sequence,
+so a lost packet is concealed by Opus's own PLC. Where libopus is missing, or the rate is
+not one Opus runs at (8, 12, 16, 24 or 48 kHz), Opus is refused with the reason: it is
+never quietly replaced by PCM. The wire format was reserved for it from the start, so no
+protocol version changed.
 """
 
 import socket
@@ -78,7 +73,7 @@ HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
 
 CODEC_PCM_FLOAT32 = 0
 CODEC_PCM_INT16 = 1
-# Reserved so adding Opus later needs no protocol version bump. Refused, not substituted.
+# One 10 ms Opus frame per packet (`network/opus.py`).
 CODEC_OPUS = 2
 
 CODEC_NAMES = {
@@ -116,11 +111,7 @@ SOCKET_BUFFER_BYTES = 1 << 20  # 1 MiB
 
 SEQUENCE_MODULUS = 2 ** 32
 
-OPUS_UNAVAILABLE_REASON = (
-    "Opus is not implemented. No Python binding ships a libopus binary for Windows, "
-    "Linux and macOS alike (PyOgg publishes Windows-only wheels; opuslib publishes none), "
-    "so the codec could only be tested on one of three platforms. Use a PCM quality."
-)
+OPUS_STREAM_ONLY = "Opus packets are decoded in stream order by the receiver's jitter buffer, not one by one"
 
 
 class MalformedPacket(ValueError):
@@ -135,19 +126,24 @@ def bytes_per_sample(codec: int) -> int:
     dtype = _CODEC_DTYPES.get(codec)
     if dtype is None:
         raise CodecUnavailable(
-            OPUS_UNAVAILABLE_REASON if codec == CODEC_OPUS else f"Unknown codec {codec}"
+            "Opus has no fixed sample size" if codec == CODEC_OPUS else f"Unknown codec {codec}"
         )
     return dtype.itemsize
 
 
-def frames_per_packet(codec: int, channels: int, limit: int = MAX_PAYLOAD_BYTES) -> int:
+def frames_per_packet(codec: int, channels: int, limit: int = MAX_PAYLOAD_BYTES, sample_rate: int = 48000) -> int:
     """
-    How many frames of `channels`-wide audio fit in one datagram.
+    How many frames of `channels`-wide audio fit in one datagram — or, for Opus, one 10 ms
+    frame, which is what an Opus packet holds.
 
     Never zero: a single frame of 8-channel float32 is 32 bytes, so the floor is only
     reachable with an absurd `limit`, and returning 0 would make the sender loop forever
     on an accumulator it can never drain.
     """
+    if codec == CODEC_OPUS:
+        from tonesphere.network import opus
+
+        return opus.frame_size(sample_rate)
     frame_bytes = bytes_per_sample(codec) * max(channels, 1)
     return max(1, limit // frame_bytes)
 
@@ -159,6 +155,8 @@ def codec_for_quality(quality: NetworkQuality) -> tuple[int, int]:
     Deliberately the same mapping `NetworkAudioRouter` uses, so LOW/MEDIUM/HIGH/LOSSLESS
     mean the same thing to a user whichever transport they picked.
     """
+    if quality == NetworkQuality.OPUS:
+        return CODEC_OPUS, 0
     if quality == NetworkQuality.LOSSLESS:
         return CODEC_PCM_FLOAT32, 0
     if quality == NetworkQuality.HIGH:
@@ -169,8 +167,10 @@ def codec_for_quality(quality: NetworkQuality) -> tuple[int, int]:
 
 
 def opus_available() -> bool:
-    """False, always, in this build. See OPUS_UNAVAILABLE_REASON and the module docstring."""
-    return False
+    """Whether libopus loads here (`network/opus.py`)."""
+    from tonesphere.network import opus
+
+    return opus.available()
 
 
 @dataclass(frozen=True)
@@ -245,12 +245,10 @@ class UdpPacket:
         if frame_count < 1:
             raise MalformedPacket("frame count of 0")
 
-        if codec not in _CODEC_DTYPES:
-            reason = (
-                "sender used Opus, which this build cannot decode"
-                if codec == CODEC_OPUS else f"unknown codec {codec}"
-            )
-            raise MalformedPacket(reason)
+        if codec == CODEC_OPUS and not opus_available():
+            raise MalformedPacket("sender used Opus, and libopus is not available here")
+        if codec not in _CODEC_DTYPES and codec != CODEC_OPUS:
+            raise MalformedPacket(f"unknown codec {codec}")
 
         return cls(
             codec=codec, channels=channels, flags=flags, sample_rate=sample_rate,
@@ -266,6 +264,9 @@ class UdpPacket:
         malformed packet, not something to reshape as best we can — a partial block written
         into a bus is a click, and a wrongly-shaped one is noise.
         """
+        if self.codec == CODEC_OPUS:
+            raise CodecUnavailable(OPUS_STREAM_ONLY)
+
         data = self.payload
 
         if self.compressed:
@@ -322,7 +323,8 @@ def encode_block(
         codec = quality_codec
 
     if codec == CODEC_OPUS:
-        raise CodecUnavailable(OPUS_UNAVAILABLE_REASON)
+        raise CodecUnavailable("Opus is stateful: send it through UdpAudioTransport.send_block, "
+                               "which keeps an encoder per stream")
     if codec not in _CODEC_DTYPES:
         raise CodecUnavailable(f"Unknown codec {codec}")
 
@@ -379,6 +381,7 @@ class UdpAudioTransport:
 
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
+        self._opus_encoders: dict[tuple[int, int, int], object] = {}
         self._lock = threading.RLock()
 
         # Every one of these is a count of something that happened. Nothing here is
@@ -607,14 +610,34 @@ class UdpAudioTransport:
         target: str | None = None,
         quality: NetworkQuality | None = None,
     ) -> int:
+        quality = self.quality if quality is None else quality
+        if codec_for_quality(quality)[0] == CODEC_OPUS:
+            return self.send_packet(self._encode_opus(device_id, audio), target)
         packet = encode_block(
             device_id=device_id,
             audio=audio,
             sample_rate=self.sample_rate,
             sequence=self.next_sequence(device_id),
-            quality=self.quality if quality is None else quality,
+            quality=quality,
         )
         return self.send_packet(packet, target)
+
+    def _encode_opus(self, device_id: int, audio: np.ndarray) -> UdpPacket:
+        """One 10 ms block through this device's own encoder: Opus carries state across frames."""
+        from tonesphere.network import opus
+
+        block = np.atleast_2d(np.asarray(audio, dtype=np.float32))
+        frames, channels = block.shape
+        key = (device_id, channels, self.sample_rate)
+        with self._lock:
+            encoder = self._opus_encoders.get(key)
+            if encoder is None:
+                encoder = self._opus_encoders[key] = opus.Encoder(self.sample_rate, channels)
+        return UdpPacket(
+            codec=CODEC_OPUS, channels=channels, flags=0, sample_rate=self.sample_rate,
+            device_id=device_id, sequence=self.next_sequence(device_id),
+            timestamp_us=time.monotonic_ns() // 1000, frame_count=frames, payload=encoder.encode(block),
+        )
 
     # --- Statistics ---
 
