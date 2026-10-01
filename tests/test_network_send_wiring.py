@@ -88,6 +88,8 @@ def unstalled(run, attempts: int = 3):
     across one stall each). `run(sender, receiver)` returns `(result, worst_gap_ms,
     budget_ms)`; a run whose feeding thread paused longer than its budget is repeated with
     fresh engines, and only an unstalled run's result is checked — as strictly as before.
+    A pause up to three buffer depths costs a packet or two, inside the loss each test allows
+    (macOS timers routinely overshoot a few milliseconds); the failures seen were ~140 ms.
     """
     stalls = []
     for _ in range(attempts):
@@ -97,7 +99,7 @@ def unstalled(run, attempts: int = 3):
         finally:
             s.cleanup()
             r.cleanup()
-        if gap_ms <= budget_ms:
+        if gap_ms <= 3 * budget_ms:
             return result
         stalls.append(f"{gap_ms:.0f} ms against a {budget_ms:.0f} ms buffer")
     pytest.fail(f"the test's own feeding thread stalled in every attempt ({'; '.join(stalls)}): the machine "

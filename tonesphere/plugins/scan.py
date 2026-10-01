@@ -146,16 +146,22 @@ def scan_module(path: Path, timeout: float = SCAN_TIMEOUT_S) -> ScanResult:
     if arch != 'x64':
         return ScanResult(str(path), WRONG_ARCHITECTURE, f"built for {arch}; ToneSphere is x64", architecture=arch)
 
-    with tempfile.TemporaryDirectory(prefix='tonesphere-scan-') as folder:
+    with tempfile.TemporaryDirectory(prefix='tonesphere-scan-', ignore_cleanup_errors=True) as folder:
         result_file = Path(folder) / 'result.json'
-        try:
-            # Bytes, not text: a plugin may write anything to its stdout or stderr.
-            done = subprocess.run(_scanner_command(path, result_file), capture_output=True, timeout=timeout,
-                                  cwd=None if getattr(sys, 'frozen', False) else SOURCE_ROOT,
-                                  creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
-        except subprocess.TimeoutExpired:
-            return ScanResult(str(path), TIMED_OUT, f"did not finish loading within {timeout:.0f} s",
-                              architecture=arch)
+        # The child's output goes to a file, never a pipe: a plugin that starts a helper
+        # process (Guitar Rig does) hands it the pipe, the pipe never closes, and waiting for
+        # it would time the scan out long after the plugin was read.
+        with open(Path(folder) / 'stderr.txt', 'w+b') as stderr_file:
+            try:
+                done = subprocess.run(_scanner_command(path, result_file), stdin=subprocess.DEVNULL,
+                                      stdout=subprocess.DEVNULL, stderr=stderr_file, timeout=timeout,
+                                      cwd=None if getattr(sys, 'frozen', False) else SOURCE_ROOT,
+                                      creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+            except subprocess.TimeoutExpired:
+                return ScanResult(str(path), TIMED_OUT, f"did not finish loading within {timeout:.0f} s",
+                                  architecture=arch)
+            stderr_file.seek(0)
+            stderr_bytes = stderr_file.read()
         try:
             report = json.loads(result_file.read_text(encoding='utf-8'))
         except (OSError, ValueError):
@@ -163,7 +169,7 @@ def scan_module(path: Path, timeout: float = SCAN_TIMEOUT_S) -> ScanResult:
 
     code = done.returncode & 0xFFFFFFFF
     if report is None:
-        stderr = done.stderr.decode('utf-8', errors='replace').strip().splitlines()
+        stderr = stderr_bytes.decode('utf-8', errors='replace').strip().splitlines()
         return ScanResult(str(path), CRASHED, f"the scanner process died (exit code 0x{code:08X}) while loading it"
                           + (f": {stderr[-1][:200]}" if stderr else ''), architecture=arch)
     if 'error' in report:

@@ -323,6 +323,11 @@ public:
     ComponentHandler handler{*this};
     bool has_input = false;
     int32 event_inputs = 0;  // event buses: an instrument has one, an effect usually none
+    // The channel count of every audio bus the plugin declares, main bus first. Each gets a
+    // buffer in every process() call: a host that passes only the main bus hands a plugin
+    // with a sidechain input fewer buffers than it reads.
+    std::vector<int32> input_bus_channels;
+    std::vector<int32> output_bus_channels;
     std::atomic<bool> crashed{false};
     std::atomic<uint32_t> restart_flags{0};
     std::atomic<uint32_t> latency{0};
@@ -511,9 +516,31 @@ public:
           instance_(std::move(instance)),
           scratch_(new float[static_cast<size_t>(channels_) * max_block]()) {
         for (uint32_t c = 0; c < channels_; ++c) out_ptrs_[c] = scratch_.get() + static_cast<size_t>(c) * max_block;
-        in_bus_.numChannels = static_cast<int32>(channels_);
-        out_bus_.numChannels = static_cast<int32>(channels_);
-        out_bus_.channelBuffers32 = out_ptrs_;
+        // Bus 0 carries the audio; every further bus gets silence in and a place to write
+        // out that nothing reads.
+        const auto& ins = instance_->input_bus_channels;
+        const auto& outs = instance_->output_bus_channels;
+        size_t spare = 0;
+        for (size_t b = 1; b < ins.size(); ++b) spare += static_cast<size_t>(ins[b]);
+        for (size_t b = 1; b < outs.size(); ++b) spare += static_cast<size_t>(outs[b]);
+        spare_.reset(new float[spare * max_block + 1]());
+        spare_ptrs_.resize(spare + 1);
+        float* next = spare_.get();
+        size_t ptr = 0;
+        auto bus = [&](int32 width) {
+            AudioBusBuffers b{};
+            b.numChannels = width;
+            b.channelBuffers32 = spare_ptrs_.data() + ptr;
+            for (int32 c = 0; c < width; ++c, ++ptr, next += max_block) spare_ptrs_[ptr] = next;
+            return b;
+        };
+        in_buses_.resize(std::max<size_t>(ins.size(), 1));
+        out_buses_.resize(std::max<size_t>(outs.size(), 1));
+        for (size_t b = 1; b < ins.size(); ++b) in_buses_[b] = bus(ins[b]);
+        for (size_t b = 1; b < outs.size(); ++b) out_buses_[b] = bus(outs[b]);
+        in_buses_[0].numChannels = static_cast<int32>(channels_);
+        out_buses_[0].numChannels = static_cast<int32>(channels_);
+        out_buses_[0].channelBuffers32 = out_ptrs_;
         context_.sampleRate = instance_->sample_rate;
         context_.tempo = 120.0;
         context_.timeSigNumerator = 4;
@@ -556,15 +583,15 @@ protected:
             events_.addEvent(e);
         }
 
-        in_bus_.channelBuffers32 = const_cast<float**>(ch);
+        in_buses_[0].channelBuffers32 = const_cast<float**>(ch);
         ProcessData data;
         data.processMode = kRealtime;
         data.symbolicSampleSize = kSample32;
         data.numSamples = static_cast<int32>(frames);
-        data.numInputs = p.has_input ? 1 : 0;
-        data.inputs = p.has_input ? &in_bus_ : nullptr;
-        data.numOutputs = 1;
-        data.outputs = &out_bus_;
+        data.numInputs = p.has_input ? static_cast<int32>(p.input_bus_channels.size()) : 0;
+        data.inputs = p.has_input ? in_buses_.data() : nullptr;
+        data.numOutputs = static_cast<int32>(std::max<size_t>(p.output_bus_channels.size(), 1));
+        data.outputs = out_buses_.data();
         data.inputParameterChanges = &changes_;
         data.inputEvents = p.event_inputs > 0 ? &events_ : nullptr;
         data.outputParameterChanges = &out_changes_;
@@ -596,8 +623,10 @@ private:
     std::shared_ptr<Instance> instance_;
     std::unique_ptr<float[]> scratch_;
     float* out_ptrs_[TS_MAX_CHANNELS] = {};
-    AudioBusBuffers in_bus_{};
-    AudioBusBuffers out_bus_{};
+    std::unique_ptr<float[]> spare_;     // silence in, and discarded output, for the extra buses
+    std::vector<float*> spare_ptrs_;
+    std::vector<AudioBusBuffers> in_buses_;
+    std::vector<AudioBusBuffers> out_buses_;
     FixedChanges changes_;
     FixedChanges out_changes_;
     FixedEvents events_;
@@ -684,7 +713,10 @@ TS_API int32_t ts_vst3_scan(const char* path, ts_vst3_class* out, int32_t capaci
             }
             ++result;
         }
-        guarded([&] { module.reset(); }, code);
+        // Left loaded on purpose: unloading runs the module's own teardown, where some
+        // commercial plugins fault after their classes were read perfectly well. The scanner
+        // process exits straight after this (plugins/scan.py), so nothing is leaked for long.
+        new VST3::Hosting::Module::Ptr(std::move(module));
     });
     if (result < 0) t_error = error;
     return result;
@@ -720,6 +752,9 @@ TS_API ts_result ts_vst3_open(const char* path, const char* class_uid, uint32_t 
             if (info.category() != kVstAudioEffectClass) { error = "class is not an audio processor"; return; }
 
             step = "initialize";
+            // IPluginFactory3's host context, before any instance exists: some plugins read
+            // the host's name and interfaces from it while creating their component.
+            raw->module->getFactory().setHostContext(&host_application());
             raw->provider = owned(new PlugProvider(raw->module->getFactory(), info, true));
             if (!raw->provider->initialize()) { error = "the plugin failed to initialise"; return; }
             raw->component = raw->provider->getComponentPtr();
@@ -756,6 +791,16 @@ TS_API ts_result ts_vst3_open(const char* path, const char* class_uid, uint32_t 
                 raw->component->activateBus(kAudio, kInput, 0, true);
             }
             raw->component->activateBus(kAudio, kOutput, 0, true);
+            for (int32 i = 0; i < ins; ++i) {
+                SpeakerArrangement a = 0;
+                raw->processor->getBusArrangement(kInput, i, a);
+                raw->input_bus_channels.push_back(SpeakerArr::getChannelCount(a));
+            }
+            for (int32 i = 0; i < outs; ++i) {
+                SpeakerArrangement a = 0;
+                raw->processor->getBusArrangement(kOutput, i, a);
+                raw->output_bus_channels.push_back(SpeakerArr::getChannelCount(a));
+            }
             raw->event_inputs = raw->component->getBusCount(kEvent, kInput);
             if (raw->event_inputs > 0) raw->component->activateBus(kEvent, kInput, 0, true);
 

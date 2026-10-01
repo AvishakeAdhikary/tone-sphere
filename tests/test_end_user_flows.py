@@ -58,7 +58,7 @@ def qt_app(monkeypatch):
 
 class TestMonitorChoosesTheInterface:
     def listing(self, engine):
-        return engine.get_devices()
+        return engine.get_devices(include_all_backends=True)
 
     def test_an_interface_is_preferred_over_the_laptops_own_devices(self, engine):
         devices = self.listing(engine)
@@ -85,7 +85,7 @@ class TestMonitorChoosesTheInterface:
         from tonesphere.ui.monitor_dialog import MonitorDialog
 
         named = ids(engine)
-        dialog = MonitorDialog(engine.get_devices(), None, None)
+        dialog = MonitorDialog(engine.get_devices(include_all_backends=True), None, None)
         assert dialog.choice() == (named['Line (AI-04)'], named['Speakers (AI-04)'], 0)
         assert dialog.warning.text() == ''
         dialog.input_combo.setCurrentIndex(dialog.input_combo.findData(
@@ -220,10 +220,16 @@ class TestTheWindowStartsReady:
         window = MainWindow(ConfigManager(db_path=tmp_path / 'settings.db'))
         try:
             assert window.tasks.flush(30)
-            window._view['devices'] = [{'id': 1, 'direction': 'input'}, {'id': 2, 'direction': 'output'}]
-            loud = {'peak_db': -3.0, 'rms_db': -6.0, 'peak_hold_db': -3.0, 'clipped': False}
-            quiet = {'peak_db': -40.0, 'rms_db': -43.0, 'peak_hold_db': -40.0, 'clipped': False}
-            window._update_meters({1: {**loud, 'sides': {'input': loud}}, 2: {**quiet, 'sides': {'output': quiet}}})
+            # Ids no real device has, so the machine's own strips take no part.
+            window._view['devices'] = [{'id': 9101, 'direction': 'input'}, {'id': 9102, 'direction': 'output'}]
+
+            def side(db):
+                return {'peak_db': db, 'rms_db': db - 3, 'peak_hold_db': db, 'clipped': False,
+                        'channel_peak_db': [db, db], 'channel_rms_db': [db - 3, db - 3],
+                        'channel_peak_hold_db': [db, db]}
+
+            window._update_meters({9101: {**side(-3.0), 'sides': {'input': side(-3.0)}},
+                                   9102: {**side(-40.0), 'sides': {'output': side(-40.0)}}})
             assert window.master_strip.meter._peaks[0] == pytest.approx(-40.0)
         finally:
             window.close()
