@@ -193,6 +193,22 @@ class TestChannelMapping:
         for left, right in levels:
             assert left == pytest.approx(1.0, abs=1e-4) and right == pytest.approx(1.0, abs=1e-4)
 
+    @pytest.mark.parametrize('picked, freq', [(0, 1000.0), (1, 440.0)])
+    def test_one_input_channel_taken_alone_reaches_both_ears(self, engine, picked, freq):
+        """A guitar on input 1 of a stereo interface: in both ears, not the left one only."""
+        engine.apply_plan([Node.source(SRC, 2), Node.sink(OUT, 2)], [Route(SRC, OUT, source_channel=picked)])
+        tone = np.column_stack([sine(BLOCK * 16, freq=1000.0, channels=1)[:, 0],
+                                sine(BLOCK * 16, freq=440.0, channels=1)[:, 0]]).astype(np.float32)
+        out = settled(run(engine, 16, {SRC: tone}, {OUT: 2})[OUT])
+        expected = settled(tone)[:, picked] / math.sqrt(2)
+        for ear in (0, 1):
+            assert dominant_frequency(out[:, ear]) == pytest.approx(freq, abs=20.0)
+            assert np.allclose(out[:, ear], expected, atol=1e-6), "each ear gets the picked channel at -3 dB"
+
+    def test_a_source_channel_that_does_not_exist_is_refused(self, engine):
+        with pytest.raises(NativeError, match='source channel 2 does not exist'):
+            engine.apply_plan([Node.source(SRC, 2), Node.sink(OUT, 2)], [Route(SRC, OUT, source_channel=2)])
+
     def test_stereo_balance_hard_right_removes_left_only(self, engine):
         engine.apply_plan([Node.source(SRC, 2), Node.sink(OUT, 2)], [Route(SRC, OUT, pan=1.0)])
         out = run(engine, 2, {SRC: np.ones((BLOCK * 2, 2), np.float32)}, {OUT: 2})[OUT]

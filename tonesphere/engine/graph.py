@@ -100,8 +100,7 @@ class Connection:
     muted: bool = False
     pan: float = 0.0
     invert: bool = False
-    source_channels: tuple[int, ...] | None = None
-    dest_channels: tuple[int, ...] | None = None
+    source_channel: int | None = None  # one channel of the source alone, as mono; None: all
 
     @property
     def effective_gain(self) -> float:

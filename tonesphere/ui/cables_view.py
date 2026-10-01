@@ -110,7 +110,6 @@ class CablesDialog(QDialog):
     def _show(self, status: dict):
         if self._closed:
             return
-        self._busy(False)
         self._cables = status['cables']
         selected = self.selected()
         self.table.setRowCount(0)
@@ -129,12 +128,16 @@ class CablesDialog(QDialog):
             for row, cable in enumerate(self._cables):
                 if cable['instance_id'] == selected['instance_id']:
                     self.table.selectRow(row)
+        self._driver_installed = status.get('driver_installed', True)
         if not status['platform_supported']:
             self.status.setText(tr('cables.windows_only'))
         elif status['error']:
             self.status.setText(status['error'])
+        elif not self._driver_installed:
+            self.status.setText(tr('cables.no_driver'))
         elif not self._cables:
             self.status.setText(tr('cables.none'))
+        self._busy(False)
         self._selection_changed()
 
     def selected(self) -> dict | None:
@@ -149,7 +152,7 @@ class CablesDialog(QDialog):
 
     def _busy(self, busy: bool):
         for b in (self.add_button, self.remove_driver_button):
-            b.setEnabled(not busy)
+            b.setEnabled(not busy and getattr(self, '_driver_installed', True))
         if busy:
             self.status.setText(tr('status.working'))
 

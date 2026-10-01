@@ -111,6 +111,7 @@ class PlanCompiler:
                 pan=connection.pan,
                 muted=connection.muted or silenced,
                 invert=connection.invert,
+                source_channel=-1 if connection.source_channel is None else connection.source_channel,
             ))
 
         compiled_inserts = []

@@ -442,6 +442,15 @@ class TestWhereTheDataLives:
     else, which is the worst place for one to appear first.
     """
 
+    @pytest.fixture(autouse=True)
+    def real_location(self, monkeypatch):
+        """These check where the data goes on each system, so without the suite's override."""
+        monkeypatch.delenv("TONESPHERE_DATA_DIR", raising=False)
+
+    def test_an_override_puts_it_anywhere(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("TONESPHERE_DATA_DIR", str(tmp_path / "data"))
+        assert paths.app_data_dir() == tmp_path / "data"
+
     def test_the_default_database_is_under_the_user_data_directory(self):
         assert ConfigManager().db_path == paths.app_data_dir() / "settings.db"
 

@@ -24,8 +24,13 @@ def app_data_dir() -> Path:
     The per-user directory for data this app writes.
 
     A pure path: nothing is created here, so importing a module that asks for the location
-    touches no disk. Callers create what they are about to write.
+    touches no disk. Callers create what they are about to write. TONESPHERE_DATA_DIR puts it
+    elsewhere (the test suite does, so no test reads or writes a real user's setup).
     """
+    override = os.environ.get('TONESPHERE_DATA_DIR')
+    if override:
+        return Path(override)
+
     if sys.platform == 'win32':
         local = os.environ.get('LOCALAPPDATA')
         base = Path(local) if local else Path.home() / 'AppData' / 'Local'

@@ -98,6 +98,7 @@ struct Node {
 struct Route {
     uint32_t source_index = 0;
     uint64_t key = 0;
+    int32_t source_channel = -1;  // -1: all; k: the source's channel k alone, as mono
     bool invert = false;
     std::atomic<float> pan{0.0f};
     // Audio-thread-owned cache of the pan law for `pan_seen`.

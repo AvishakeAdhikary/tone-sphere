@@ -20,7 +20,7 @@
     "transport.buffer_frames": "{frames} frames",
     "transport.buffer_tooltip": "Frames per callback. Smaller is lower latency with less margin before a\ndropout — watch the XRUNS counter after lowering it.",
     "transport.monitor": "Monitor Input",
-    "transport.monitor_tooltip": "Patch the default input straight to the default output",
+    "transport.monitor_tooltip": "Hear an input — your guitar, a microphone — on an output, right now",
     "transport.rescan": "Rescan",
     "transport.rescan_tooltip": "Re-enumerate audio hardware (F5)",
 
@@ -44,7 +44,7 @@
     "menu.engine.rescan": "Rescan Devices",
     "menu.engine.quit": "Quit",
     "menu.patch": "&Patch",
-    "menu.patch.monitor": "Monitor Input to Output",
+    "menu.patch.monitor": "Monitor Input…",
     "menu.patch.clear": "Clear All Routing",
     "menu.patch.auto_arrange": "Auto-arrange",
     "menu.help": "&Help",
@@ -58,8 +58,6 @@
     "dialog.patch_error": "Cannot patch",
     "dialog.add_bus_error": "Add bus",
     "dialog.bus_limit": "Bus limit reached",
-    "dialog.unmute_title": "Unmute monitoring?",
-    "dialog.unmute_body": "Patched {patch}\n\nIt is muted for now. If your input is a microphone and your output is speakers, unmuting will cause feedback.\n\nUnmute now?",
     "dialog.language_error": "Language",
     "dialog.language_not_saved": "The language has been changed for this session, but it could not be saved: {reason}",
 
@@ -78,7 +76,7 @@
     "about.not_measured": "not measured",
     "about.latency_reported": "{ms} ms reported",
     "about.latency_nominal": "{ms} ms nominal",
-    "about.asio_note": "ASIO is not available in this build.\nWASAPI exclusive is the low-latency path here.",
+    "about.asio_note": "ASIO: no ASIO driver is installed on this computer. Everything works on Windows audio (WASAPI);\nWASAPI exclusive is the low-latency path. An installed ASIO driver appears as an extra backend.",
     "about.bus_note": "Mix buses are in-process only and cannot be selected from other\napplications. The ToneSphere virtual cable driver that would allow it is built but\nnot yet verified or production-signed — see docs/VIRTUAL_AUDIO_DRIVER.md.",
     "about.translation_note": "This interface is shown in {language}. The translation was machine-made and has not been reviewed by a native speaker.",
 
@@ -319,6 +317,31 @@
     "cables.windows_only": "Virtual cables are a Windows driver; see docs/VIRTUAL_AUDIO_DRIVER.md for this platform.",
 
     "crash.title": "ToneSphere ran into a problem",
-    "crash.body": "Something went wrong: {error}\n\nA report was saved to:\n{path}\n\nPlease include it if you report this problem."
+    "crash.body": "Something went wrong: {error}\n\nA report was saved to:\n{path}\n\nPlease include it if you report this problem.",
+
+    "monitor.title": "Monitor Input",
+    "monitor.hint": "Choose what to hear and where. It starts as soon as you press Start: no muted cable, no extra step.",
+    "monitor.input": "Input",
+    "monitor.channel": "Channel",
+    "monitor.output": "Output",
+    "monitor.start": "Start",
+    "monitor.channel.all": "All channels (stereo)",
+    "monitor.channel.one": "Input {number} only, in both ears",
+    "monitor.feedback": "These are the computer's own microphone and speakers: they can howl with feedback. Use headphones, or keep the volume low.",
+    "monitor.on": "Monitoring {patch}",
+    "session.partial": "Last session restored, except: {detail}",
+    "backend.asio_unavailable": "ASIO — no ASIO driver installed",
+    "backend.asio_unavailable_tooltip": "Nothing needs ASIO: every feature works on Windows audio, and WASAPI exclusive gives low latency.\nInstall your interface's ASIO driver, or ASIO4ALL, and ASIO appears here.",
+    "menu.file": "&File",
+    "menu.file.save_preset": "Save Preset…",
+    "menu.file.load_preset": "Load Preset…",
+    "preset.saved": "Preset \"{name}\" saved",
+    "dialog.preset_error": "Preset",
+
+    "patchbay.drop_missed": "Let go of the cable on a device or bus to connect it.",
+    "patchbay.drop_not_input": "\"{name}\" is an input: it sends audio, nothing can be patched into it.",
+    "cable.menu.input_channel": "Input channel",
+
+    "cables.no_driver": "Virtual cables need the ToneSphere audio driver, which is not installed. It cannot be installed on a normal Windows computer yet: Windows only loads drivers Microsoft has signed, and this one is not signed. Everything else in ToneSphere works without it."
   }
 }
