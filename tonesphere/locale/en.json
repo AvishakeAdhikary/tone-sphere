@@ -316,6 +316,9 @@
     "cables.state.disabled": "disabled",
     "cables.state.problem": "not working (see Device Manager)",
     "cables.none": "No cables: the ToneSphere driver is not installed, or every cable was uninstalled.",
-    "cables.windows_only": "Virtual cables are a Windows driver; see docs/VIRTUAL_AUDIO_DRIVER.md for this platform."
+    "cables.windows_only": "Virtual cables are a Windows driver; see docs/VIRTUAL_AUDIO_DRIVER.md for this platform.",
+
+    "crash.title": "ToneSphere ran into a problem",
+    "crash.body": "Something went wrong: {error}\n\nA report was saved to:\n{path}\n\nPlease include it if you report this problem."
   }
 }

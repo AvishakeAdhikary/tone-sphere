@@ -15,8 +15,10 @@ statistics come from a poller thread the same way. So the window keeps repaintin
 device takes seconds to open, and the control lock is never waited on here.
 """
 
+import json
+from pathlib import Path
 
-from PySide6.QtCore import QPointF, Qt
+from PySide6.QtCore import QPointF, Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence
 from PySide6.QtWidgets import (
     QComboBox,
@@ -993,6 +995,38 @@ class MainWindow(QMainWindow):
             lines.append(tr('about.translation_note', language=current.native_name))
 
         QMessageBox.information(self, tr('about.title'), "\n".join(lines))
+
+    def report_when_ready(self, path: Path, timeout_ms: int = 120_000):
+        """
+        For the packaging smoke test: once the window is drawing a real device list, write
+        what a user would see — the backend, whether the native engine loaded, the devices —
+        to `path` and quit. A start that never gets there writes the timeout instead.
+        """
+        from PySide6.QtWidgets import QApplication
+
+        def write(report: dict, code: int):
+            path.write_text(json.dumps(report, indent=2), encoding='utf-8')
+            QApplication.exit(code)
+
+        def gather():
+            return {'driver': self.engine.get_driver_info(), 'hosts_plugins': self.engine.hosts_plugins()}
+
+        def done(info: dict):
+            write({'window_title': self.windowTitle(), 'visible': self.isVisible(),
+                   'devices': len(self._view.get('devices') or []), 'drivers': self._view.get('drivers'),
+                   'backend': info['driver'].get('backend', 'portaudio'), 'engine': info['driver'].get('engine'),
+                   'asio_available': info['driver'].get('asio_available'), 'hosts_plugins': info['hosts_plugins'],
+                   'error': info['driver'].get('error')}, 0)
+
+        def check():
+            if 'devices' in self._view:
+                poll.stop()
+                self._run(gather, done=done)
+
+        poll = QTimer(self)
+        poll.timeout.connect(check)
+        poll.start(250)
+        QTimer.singleShot(timeout_ms, lambda: write({'error': 'the window never showed a device list'}, 3))
 
     def closeEvent(self, event):
         self._poller.stop()

@@ -40,9 +40,9 @@ api:
 # Logging Configuration
 logging:
   level: 'INFO'               # Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL
-  enable_file_logging: false  # Enable logging to file
+  enable_file_logging: true   # Log to a file: a windowed app has no console to show errors in
   log_file: 'tonesphere.log'  # Log file name
-  log_dir: 'logs'             # Log directory
+  log_dir: ''                 # Empty: the 'logs' folder in ToneSphere's per-user data folder
   max_file_size_mb: 10        # Max log file size before rotation
   backup_count: 5             # Number of backup files to keep
   colored_console: true       # Use colored console output

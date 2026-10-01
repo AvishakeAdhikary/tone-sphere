@@ -1395,17 +1395,18 @@ class AudioEngine:
         node, _ = self._chain_node(device_id)
         return self.host.chain_for(node, is_input) if node is not None else []
 
-    def scan_plugins(self, paths: list[str] | None = None) -> list:
+    def scan_plugins(self, paths: list[str] | None = None, retry_failed: bool = False) -> list:
         """
         Scan VST3 folders (the standard ones by default), each module in a subprocess, with
         results cached by file size and time. Returns `plugins.scan.ScanResult`s, broken
-        and incompatible modules included, each with its reason.
+        and incompatible modules included, each with its reason. `retry_failed` scans
+        again the modules whose last scan failed.
         """
         from tonesphere.plugins import scan
         from tonesphere.utils.paths import app_data_dir
 
         cache = scan.ScanCache(app_data_dir() / 'plugin_cache.json')
-        return scan.scan(paths, cache)
+        return scan.scan(paths, cache, retry_failed=retry_failed)
 
     def add_plugin(self, device_id: int, info, is_input: bool = True) -> tuple[bool, str]:
         """Open a scanned plugin (`plugins.PluginInfo`) at the end of a device side's or bus's chain."""

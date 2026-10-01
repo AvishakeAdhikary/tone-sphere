@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=ToneSphere
+GenericName=Audio Mixer and Router
+Comment=Route, mix and process audio between your devices
+Exec=ToneSphere
+Icon=tonesphere
+Terminal=false
+Categories=AudioVideo;Audio;Mixer;
+Keywords=audio;mixer;router;guitar;monitor;

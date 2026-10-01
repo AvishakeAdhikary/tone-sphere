@@ -82,9 +82,9 @@ _DEFAULTS: dict[str, dict[str, Any]] = {
     },
     'logging': {
         'level': 'INFO',
-        'enable_file_logging': False,
+        'enable_file_logging': True,
         'log_file': 'tonesphere.log',
-        'log_dir': 'logs',
+        'log_dir': '',
         'max_file_size_mb': 10,
         'backup_count': 5,
         'colored_console': True,

@@ -68,6 +68,24 @@ def bundled_default_config() -> Path | None:
     return None
 
 
+def bundled_resource(relative: str) -> Path | None:
+    """
+    A file packaged with the app (`assets/...`, `config/...`), by its path from the
+    repository root: inside the frozen bundle or next to the package. Never relative to the
+    working directory, which for an installed app is wherever the shortcut says.
+    """
+    roots = []
+    bundle = getattr(sys, '_MEIPASS', None)
+    if bundle:
+        roots.append(Path(bundle))
+    roots.append(Path(__file__).resolve().parents[2])
+    for root in roots:
+        candidate = root / relative
+        if candidate.exists():
+            return candidate
+    return None
+
+
 def bundled_locale_dir() -> Path:
     """
     The directory holding the JSON translation catalogs.

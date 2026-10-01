@@ -2,7 +2,9 @@
 Application entry point for the Qt interface.
 """
 
+import os
 import sys
+from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QIcon, QPalette
@@ -12,6 +14,7 @@ from tonesphere.i18n import is_rtl
 from tonesphere.ui.theme import Colors, Type, stylesheet
 from tonesphere.utils.config import ConfigManager
 from tonesphere.utils.logger import get_logger
+from tonesphere.utils.paths import bundled_resource
 
 logger = get_logger(__name__)
 
@@ -76,13 +79,9 @@ def create_app(argv: list | None = None) -> QApplication:
     app.setStyleSheet(stylesheet())
     app.setFont(Type.font())
 
-    icon_path = "assets/images/ToneSphere.png"
-    try:
-        icon = QIcon(icon_path)
-        if not icon.isNull():
-            app.setWindowIcon(icon)
-    except Exception:
-        pass
+    icon_path = bundled_resource("assets/images/ToneSphere.png")
+    if icon_path is not None:
+        app.setWindowIcon(QIcon(str(icon_path)))
 
     return app
 
@@ -90,12 +89,20 @@ def create_app(argv: list | None = None) -> QApplication:
 def run(config_manager: ConfigManager | None = None) -> int:
     """Launch the interface. Returns the process exit code."""
     from tonesphere.ui.main_window import MainWindow
+    from tonesphere.utils.crash import install_qt_messages
 
     app = create_app()
+    install_qt_messages()
 
     # After the window exists, so the direction reaches its widgets too.
     window = MainWindow(config_manager)
     apply_layout_direction(app)
     window.show()
+
+    # The packaging smoke test launches a build exactly as a user would, with no arguments,
+    # and learns through this file that the window came up on a working engine.
+    report = os.environ.get('TONESPHERE_SMOKE_REPORT')
+    if report:
+        window.report_when_ready(Path(report))
 
     return app.exec()

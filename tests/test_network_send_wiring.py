@@ -48,15 +48,11 @@ def engine():
     e.cleanup()
 
 
-@pytest.fixture
-def sender():
-    e = AudioEngine(sample_rate=RATE, buffer_size=BLOCK, host_backend='portaudio')
-    yield e
-    e.cleanup()
+def new_sender() -> AudioEngine:
+    return AudioEngine(sample_rate=RATE, buffer_size=BLOCK, host_backend='portaudio')
 
 
-@pytest.fixture
-def receiver():
+def new_receiver() -> AudioEngine:
     # A larger buffer_size than the sender's `BLOCK` on purpose: it is what sets this
     # engine's ring capacity (`blocksize * RING_BLOCKS`, ~4 blocks), and the destination
     # route here is filled in real time by the playout thread while the test's own polling
@@ -67,9 +63,45 @@ def receiver():
     # routes through the host's per-route rings, which is what makes them deterministic.
     # They prove the network transport's wiring, which is the same whichever host carries
     # the audio; the native host's bus-to-network path is proven in tests/native.
-    e = AudioEngine(sample_rate=RATE, buffer_size=4096, host_backend='portaudio')
+    return AudioEngine(sample_rate=RATE, buffer_size=4096, host_backend='portaudio')
+
+
+@pytest.fixture
+def sender():
+    e = new_sender()
     yield e
     e.cleanup()
+
+
+@pytest.fixture
+def receiver():
+    e = new_receiver()
+    yield e
+    e.cleanup()
+
+
+def unstalled(run, attempts: int = 3):
+    """
+    For the real-time tests whose own thread feeds the sender: on a busy CI machine that
+    thread can be descheduled for longer than the receiver's buffer holds, and playout
+    starves through no fault of the transport (macOS runners, twice: 26 % and 4.9 % "lost"
+    across one stall each). `run(sender, receiver)` returns `(result, worst_gap_ms,
+    budget_ms)`; a run whose feeding thread paused longer than its budget is repeated with
+    fresh engines, and only an unstalled run's result is checked — as strictly as before.
+    """
+    stalls = []
+    for _ in range(attempts):
+        s, r = new_sender(), new_receiver()
+        try:
+            result, gap_ms, budget_ms = run(s, r)
+        finally:
+            s.cleanup()
+            r.cleanup()
+        if gap_ms <= budget_ms:
+            return result
+        stalls.append(f"{gap_ms:.0f} ms against a {budget_ms:.0f} ms buffer")
+    pytest.fail(f"the test's own feeding thread stalled in every attempt ({'; '.join(stalls)}): the machine "
+                f"was too busy to measure this, which says nothing either way about the transport")
 
 
 def node_key(engine: AudioEngine, device_id: int) -> str:
@@ -350,9 +382,7 @@ class TestKnownSignalSurvivesTcp:
 
 
 class TestPlayoutLatency:
-    def test_playout_adds_a_bounded_latency_around_the_configured_target(
-        self, sender, receiver
-    ):
+    def test_playout_adds_a_bounded_latency_around_the_configured_target(self):
         """
         The latency claim, measured rather than asserted.
 
@@ -368,46 +398,51 @@ class TestPlayoutLatency:
         """
         target_latency_ms = 20.0
 
-        source = sender.create_virtual_input('guitar', channels=2)
-        destination = receiver.create_virtual_input('from-network', channels=2)
-        monitor = receiver.create_virtual_output('monitor', channels=2)
-        receiver.create_routing(destination, monitor)
+        def run(sender, receiver):
+            source = sender.create_virtual_input('guitar', channels=2)
+            destination = receiver.create_virtual_input('from-network', channels=2)
+            monitor = receiver.create_virtual_output('monitor', channels=2)
+            receiver.create_routing(destination, monitor)
 
-        link(sender, receiver, source, destination, target_latency_ms)
+            link(sender, receiver, source, destination, target_latency_ms)
 
-        interval = BLOCK / RATE
-        first_out: float | None = None
-        started = time.monotonic()
-        deadline = started
+            interval = BLOCK / RATE
+            first_out: float | None = None
+            started = time.monotonic()
+            deadline = started
+            previous, worst_gap = started, 0.0
 
-        for index in range(60):
-            sender.write_to_bus(source, sine(BLOCK, phase=index * BLOCK))
-            sender._send_worker.tick()
+            for index in range(60):
+                now = time.monotonic()
+                worst_gap, previous = max(worst_gap, now - previous), now
+                sender.write_to_bus(source, sine(BLOCK, phase=index * BLOCK))
+                sender._send_worker.tick()
 
-            piece = drain(receiver, destination, monitor)
-            if piece is not None and first_out is None and rms(piece) > 1e-4:
-                first_out = time.monotonic()
+                piece = drain(receiver, destination, monitor)
+                if piece is not None and first_out is None and rms(piece) > 1e-4:
+                    first_out = time.monotonic()
 
-            deadline += interval
-            remaining = deadline - time.monotonic()
-            if remaining > 0:
-                time.sleep(remaining)
+                deadline += interval
+                remaining = deadline - time.monotonic()
+                if remaining > 0:
+                    time.sleep(remaining)
 
-        # Keep draining briefly in case the tone landed just after the feed ended.
-        poll_until = time.monotonic() + 0.5
-        while first_out is None and time.monotonic() < poll_until:
-            piece = drain(receiver, destination, monitor)
-            if piece is not None and rms(piece) > 1e-4:
-                first_out = time.monotonic()
-            else:
-                time.sleep(0.002)
+            # Keep draining briefly in case the tone landed just after the feed ended.
+            poll_until = time.monotonic() + 0.5
+            while first_out is None and time.monotonic() < poll_until:
+                piece = drain(receiver, destination, monitor)
+                if piece is not None and rms(piece) > 1e-4:
+                    first_out = time.monotonic()
+                else:
+                    time.sleep(0.002)
+
+            stats = receiver.get_network_statistics()['udp']['receive'][str(destination)]['jitter_buffer']
+            return (first_out, started, stats), worst_gap * 1000.0, target_latency_ms
+
+        first_out, started, buffer_stats = unstalled(run)
 
         assert first_out is not None, "no audio ever reached the destination bus"
-
         latency_ms = (first_out - started) * 1000.0
-        buffer_stats = (
-            receiver.get_network_statistics()['udp']['receive'][str(destination)]
-        )['jitter_buffer']
 
         # The buffer genuinely primes: a pass-through would show up here as a couple of
         # milliseconds, not as the target depth.
@@ -437,10 +472,8 @@ class TestPlayoutLatency:
             f"held against a {target_latency_ms:.0f} ms target"
         )
 
-        # A rate, not zero. The sender is paced by this test thread, so one scheduling
-        # stall longer than the buffer depth legitimately starves playout — on a shared
-        # CI runner that is a real possibility and not a transport defect. A systemic
-        # failure would be far above this.
+        # A rate, not zero: a scheduling stall shorter than the buffer can still cost a
+        # packet. A systemic failure would be far above this.
         pushed = buffer_stats['packets_pushed']
         assert buffer_stats['packets_lost'] <= pushed * 0.1, (
             f"{buffer_stats['packets_lost']} of {pushed} packets concealed"
@@ -858,43 +891,49 @@ class JitterRelay:
 
 
 class TestAdaptiveJitterOverRealSockets:
-    def test_the_buffer_grows_to_the_jitter_a_real_relay_adds(self, sender, receiver):
+    def test_the_buffer_grows_to_the_jitter_a_real_relay_adds(self):
         """
         Real time, real sockets: a sender paced by its own worker, a relay adding 0..30 ms
         to every datagram, and the receiver's adaptive buffer. It must grow to cover the
         jitter it measures, lose almost nothing, and carry the 1 kHz tone through.
         """
-        source = sender.create_virtual_input('guitar', channels=2)
-        destination = receiver.create_virtual_input('from-network', channels=2)
-        monitor = receiver.create_virtual_output('monitor', channels=2)
-        assert receiver.create_routing(destination, monitor)[0] is True
-        assert receiver.start_udp_transport('127.0.0.1', 0)[0]
-        assert receiver.register_network_receive(destination, transport='udp', target_latency_ms=10.0,
-                                                 jitter_mode='adaptive')[0]
-        relay = JitterRelay(receiver.udp_transport.bound_address, jitter_ms=30.0)
-        try:
-            assert sender.start_udp_transport('127.0.0.1', 0)[0]
-            assert sender.send_device_audio_to_network(source, transport='udp')[0]
-            sender.add_udp_peer('relay', *relay.address)
+        def run(sender, receiver):
+            source = sender.create_virtual_input('guitar', channels=2)
+            destination = receiver.create_virtual_input('from-network', channels=2)
+            monitor = receiver.create_virtual_output('monitor', channels=2)
+            assert receiver.create_routing(destination, monitor)[0] is True
+            assert receiver.start_udp_transport('127.0.0.1', 0)[0]
+            assert receiver.register_network_receive(destination, transport='udp', target_latency_ms=10.0,
+                                                     jitter_mode='adaptive')[0]
+            relay = JitterRelay(receiver.udp_transport.bound_address, jitter_ms=30.0)
+            try:
+                assert sender.start_udp_transport('127.0.0.1', 0)[0]
+                assert sender.send_device_audio_to_network(source, transport='udp')[0]
+                sender.add_udp_peer('relay', *relay.address)
 
-            seconds = 5.0
-            signal = sine(int(RATE * seconds), freq=1000.0, amplitude=0.5)
-            written, collected = 0, []
-            started = time.monotonic()
-            # Statistics are taken while the stream still flows: once the sender runs out,
-            # every empty slot would count as lost, which says nothing about the buffer.
-            while time.monotonic() - started < seconds:
-                due = min(len(signal), int((time.monotonic() - started) * RATE))
-                if written < due:
-                    written += sender.write_to_bus(source, signal[written:due])
-                piece = drain(receiver, destination, monitor)
-                if piece is not None:
-                    collected.append(piece)
-                time.sleep(0.001)
-            stats = receiver.get_network_statistics()['udp']['receive'][str(destination)]['jitter_buffer']
-        finally:
-            relay.close()
+                seconds = 5.0
+                signal = sine(int(RATE * seconds), freq=1000.0, amplitude=0.5)
+                written, collected = 0, []
+                started = time.monotonic()
+                previous, worst_gap = started, 0.0
+                # Statistics are taken while the stream still flows: once the sender runs out,
+                # every empty slot would count as lost, which says nothing about the buffer.
+                while time.monotonic() - started < seconds:
+                    now = time.monotonic()
+                    worst_gap, previous = max(worst_gap, now - previous), now
+                    due = min(len(signal), int((now - started) * RATE))
+                    if written < due:
+                        written += sender.write_to_bus(source, signal[written:due])
+                    piece = drain(receiver, destination, monitor)
+                    if piece is not None:
+                        collected.append(piece)
+                    time.sleep(0.001)
+                stats = receiver.get_network_statistics()['udp']['receive'][str(destination)]['jitter_buffer']
+            finally:
+                relay.close()
+            return (stats, collected), worst_gap * 1000.0, stats['target_latency_ms']
 
+        stats, collected = unstalled(run)
         heard = np.concatenate(collected)[:, 0]
         loss = stats['packets_lost'] / max(1, stats['packets_played_on_time'] + stats['packets_lost'])
         print(f"\nthrough a 0..30 ms jitter relay: target {stats['target_latency_ms']} ms, measured jitter "

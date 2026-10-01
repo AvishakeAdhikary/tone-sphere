@@ -5,9 +5,15 @@ Loading a plugin module runs the plugin's own code (its DLL initialisation and i
 factory), so every module is scanned in a subprocess with a timeout. A module that
 crashes, hangs or is built for another architecture is recorded with the reason, and
 never loaded into the main process by the scanner. Results are cached by path, size and
-modification time, so an unchanged plugin is not reloaded on every start.
+modification time, so an unchanged plugin is not reloaded on every start; a failed scan is
+cached too, and retried when the user asks for a scan.
 
-    python -m tonesphere.plugins.scan <path.vst3>     # scan one module, print JSON
+The result crosses back in a file, not on stdout: a windowed build of ToneSphere has no
+stdout at all, so a scanner that printed its result reported every plugin as crashed there.
+And the parent believes that result over the subprocess's exit code: big commercial modules
+can fault in their own teardown after their classes were read perfectly well.
+
+    python -m tonesphere.plugins.scan <path.vst3> [--result <file.json>]
 """
 
 import json
@@ -15,13 +21,15 @@ import os
 import struct
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from tonesphere.plugins import PluginError, PluginInfo, classes_in
 
-SCAN_TIMEOUT_S = 30.0
+# Guitar Rig 7 is one 176 MB module, and initialises a great deal on load.
+SCAN_TIMEOUT_S = 120.0
 
 OK = 'ok'
 CRASHED = 'crashed'
@@ -119,10 +127,14 @@ class ScanResult:
                    d.get('architecture', ''))
 
 
-def _scanner_command(path: Path) -> list[str]:
+RETRIED = (CRASHED, TIMED_OUT, FAILED)
+SOURCE_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _scanner_command(path: Path, result: Path) -> list[str]:
     if getattr(sys, 'frozen', False):
-        return [sys.executable, 'scan-plugin', str(path)]
-    return [sys.executable, '-m', 'tonesphere.plugins.scan', str(path)]
+        return [sys.executable, 'scan-plugin', str(path), '--result', str(result)]
+    return [sys.executable, '-m', 'tonesphere.plugins.scan', str(path), '--result', str(result)]
 
 
 def scan_module(path: Path, timeout: float = SCAN_TIMEOUT_S) -> ScanResult:
@@ -134,18 +146,26 @@ def scan_module(path: Path, timeout: float = SCAN_TIMEOUT_S) -> ScanResult:
     if arch != 'x64':
         return ScanResult(str(path), WRONG_ARCHITECTURE, f"built for {arch}; ToneSphere is x64", architecture=arch)
 
-    try:
-        done = subprocess.run(_scanner_command(path), capture_output=True, text=True, timeout=timeout,
-                              creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
-    except subprocess.TimeoutExpired:
-        return ScanResult(str(path), TIMED_OUT, f"did not finish loading within {timeout:.0f} s", architecture=arch)
+    with tempfile.TemporaryDirectory(prefix='tonesphere-scan-') as folder:
+        result_file = Path(folder) / 'result.json'
+        try:
+            # Bytes, not text: a plugin may write anything to its stdout or stderr.
+            done = subprocess.run(_scanner_command(path, result_file), capture_output=True, timeout=timeout,
+                                  cwd=None if getattr(sys, 'frozen', False) else SOURCE_ROOT,
+                                  creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        except subprocess.TimeoutExpired:
+            return ScanResult(str(path), TIMED_OUT, f"did not finish loading within {timeout:.0f} s",
+                              architecture=arch)
+        try:
+            report = json.loads(result_file.read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            report = None
 
-    lines = [line for line in done.stdout.splitlines() if line.startswith('{')]
-    if done.returncode != 0 or not lines:
-        code = done.returncode & 0xFFFFFFFF
-        return ScanResult(str(path), CRASHED, f"the scanner process died (exit code 0x{code:08X}) while loading it",
-                          architecture=arch)
-    report = json.loads(lines[-1])
+    code = done.returncode & 0xFFFFFFFF
+    if report is None:
+        stderr = done.stderr.decode('utf-8', errors='replace').strip().splitlines()
+        return ScanResult(str(path), CRASHED, f"the scanner process died (exit code 0x{code:08X}) while loading it"
+                          + (f": {stderr[-1][:200]}" if stderr else ''), architecture=arch)
     if 'error' in report:
         status = CRASHED if 'crashed' in report['error'] else FAILED
         return ScanResult(str(path), status, report['error'], architecture=arch)
@@ -187,15 +207,20 @@ class ScanCache:
         self.file.write_text(json.dumps(self._entries, indent=1), encoding='utf-8')
 
 
-def scan(roots=None, cache: ScanCache | None = None, timeout: float = SCAN_TIMEOUT_S) -> list[ScanResult]:
+def scan(roots=None, cache: ScanCache | None = None, timeout: float = SCAN_TIMEOUT_S,
+         retry_failed: bool = False) -> list[ScanResult]:
     """
     Scan every module under `roots` (the standard VST3 folders by default). Duplicate
     classes — the same class ID in two modules, usually two installed versions — are
     reported on the later module instead of silently shadowing the earlier one.
+    `retry_failed` scans again a module whose cached scan crashed, timed out or failed:
+    what the user asks for by pressing Scan, after updating a plugin or ToneSphere.
     """
     results = []
     for module in find_modules(roots if roots is not None else standard_paths()):
         result = cache.get(module) if cache else None
+        if result is not None and retry_failed and result.status in RETRIED:
+            result = None
         if result is None:
             result = scan_module(module, timeout)
             if cache:
@@ -213,18 +238,28 @@ def scan(roots=None, cache: ScanCache | None = None, timeout: float = SCAN_TIMEO
     return results
 
 
-def scan_one_cli(path: str) -> int:
-    """The subprocess side: load one module, print one JSON line, exit."""
+def scan_one_cli(argv: list[str]) -> int:
+    """
+    The subprocess side: load one module, write one JSON report, and leave at once. The
+    module is never unloaded and the interpreter never shuts down normally (`os._exit`):
+    both run the plugin's teardown, where some commercial modules fault after their
+    classes were read perfectly well.
+    """
+    path = argv[0]
+    result = Path(argv[argv.index('--result') + 1]) if '--result' in argv else None
     if os.environ.get('TONESPHERE_SCAN_TEST_ABORT') == '1':
         os.abort()  # stands in for a crash no handler can catch, for the tests
     try:
-        classes = classes_in(path)
+        report = {'classes': [c.to_dict() for c in classes_in(path)]}
     except PluginError as e:
-        print(json.dumps({'error': str(e)}))
-        return 0
-    print(json.dumps({'classes': [c.to_dict() for c in classes]}))
-    return 0
+        report = {'error': str(e)}
+    text = json.dumps(report)
+    if result is not None:
+        result.write_text(text, encoding='utf-8')
+    elif sys.stdout is not None:
+        print(text, flush=True)
+    os._exit(0)
 
 
 if __name__ == '__main__':
-    raise SystemExit(scan_one_cli(sys.argv[1]))
+    raise SystemExit(scan_one_cli(sys.argv[1:]))

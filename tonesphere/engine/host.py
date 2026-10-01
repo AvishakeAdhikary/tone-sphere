@@ -399,6 +399,8 @@ class AudioHost:
 
     def _sounddevice(self):
         if self._sd is None:
+            from tonesphere.engine.devices import use_bundled_portaudio
+            use_bundled_portaudio()
             try:
                 import sounddevice as sd
             except (ImportError, OSError) as e:

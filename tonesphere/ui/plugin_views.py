@@ -103,7 +103,8 @@ class PluginBrowser(QDialog):
         self.add_folder_button.clicked.connect(self._add_folder)
         paths_row.addWidget(self.add_folder_button)
         self.scan_button = QPushButton(tr('plugins.browser.scan'))
-        self.scan_button.clicked.connect(self.scan)
+        # Pressing Scan is asking again: modules whose last scan failed are loaded afresh.
+        self.scan_button.clicked.connect(lambda: self.scan(retry_failed=True))
         paths_row.addWidget(self.scan_button)
         layout.addLayout(paths_row)
 
@@ -172,14 +173,14 @@ class PluginBrowser(QDialog):
 
     # --- Scanning ---
 
-    def scan(self):
+    def scan(self, retry_failed: bool = False):
         if self._scanning:
             return
         self._scanning = True
         self.scan_button.setEnabled(False)
         self.status_label.setText(tr('plugins.browser.scanning'))
         roots = self.roots()
-        self._tasks.submit(lambda: self._engine.scan_plugins(roots), self._scanned, self._scan_failed)
+        self._tasks.submit(lambda: self._engine.scan_plugins(roots, retry_failed), self._scanned, self._scan_failed)
 
     def _scanned(self, results: list):
         self._scanning = False

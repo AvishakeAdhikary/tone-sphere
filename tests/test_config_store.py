@@ -127,7 +127,7 @@ class TestDefaultsOnAnEmptyDatabase:
         assert config["api"]["host"] == "127.0.0.1"
         assert config["api"]["port"] == 8080
         assert config["logging"]["level"] == "INFO"
-        assert config["logging"]["enable_file_logging"] is False
+        assert config["logging"]["enable_file_logging"] is True
         assert config["logging"]["max_file_size_mb"] == 10
 
     def test_no_error_is_reported_for_a_database_that_did_not_exist_yet(self, manager):

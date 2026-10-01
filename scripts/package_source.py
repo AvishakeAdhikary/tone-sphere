@@ -42,7 +42,8 @@ Rebuild: docs/BUILDING_WINDOWS.md. Extract to a short path, such as C:/src: unde
 directory the VST3 SDK's object paths exceed Windows' 260-character limit. The SDKs are
 already in place, so scripts/fetch_sdks.py will find them and download nothing. Python
 dependencies are pinned exactly in uv.lock and installed from PyPI by `uv sync`; the
-executable is produced by `uv run pyinstaller tonesphere.spec` with ONEFILE=1.
+application is frozen by `uv run pyinstaller tonesphere.spec` and packed into its installer by
+Inno Setup from packaging/windows/ToneSphere.iss.
 """
 
 
@@ -55,6 +56,7 @@ def main() -> int:
     if len(sys.argv) != 2:
         sys.exit(__doc__)
     target = Path(sys.argv[1]).resolve()
+    target.parent.mkdir(parents=True, exist_ok=True)
     asio = ROOT / "sdks" / "asiosdk"
     vst3 = ROOT / "sdks" / "vst3sdk"
     if not (asio / ".tonesphere-sha256").is_file() or not (vst3 / "CMakeLists.txt").is_file():

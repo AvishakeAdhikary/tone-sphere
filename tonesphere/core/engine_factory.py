@@ -348,8 +348,8 @@ class UnifiedAudioEngine:
     def hosts_plugins(self) -> bool:
         return self.engine.hosts_plugins()
 
-    def scan_plugins(self, paths=None) -> list:
-        return self.engine.scan_plugins(paths)
+    def scan_plugins(self, paths=None, retry_failed: bool = False) -> list:
+        return self.engine.scan_plugins(paths, retry_failed)
 
     def add_plugin(self, device_id: int, info, is_input: bool = True) -> tuple[bool, str]:
         return self.engine.add_plugin(device_id, info, is_input)

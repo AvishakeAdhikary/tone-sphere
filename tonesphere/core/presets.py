@@ -57,12 +57,18 @@ class RecallResult:
         return ", ".join(parts)
 
 
+def default_presets_dir() -> Path:
+    """With the user's other ToneSphere data: an installed app's folder is not theirs to write."""
+    from tonesphere.utils.paths import app_data_dir
+    return app_data_dir() / 'presets'
+
+
 class PresetManager:
     """Reads and writes presets for an `AudioEngine`."""
 
     def __init__(self, engine, directory: Path | None = None):
         self.engine = engine
-        self.directory = Path(directory) if directory else Path("presets")
+        self.directory = Path(directory) if directory else default_presets_dir()
 
     # --- Capture ---
 
