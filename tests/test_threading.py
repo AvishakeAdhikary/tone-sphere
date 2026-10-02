@@ -132,10 +132,15 @@ def test_the_window_keeps_repainting_while_the_engine_is_slow(qt_app, tmp_path, 
             held.set()
             time.sleep(1.5)
 
-    monkeypatch.setattr(AudioEngine, 'start_engine', slow_start)
     window = MainWindow(ConfigManager(db_path=tmp_path / "settings.db"))
     try:
         assert window.tasks.flush()
+        # The window starts the engine at launch; the slow start is what the Start button
+        # meets afterwards, from a stopped engine.
+        window._run(window.engine.stop_engine)
+        assert window.tasks.flush()
+        window._running, window._state = False, 'stopped'
+        monkeypatch.setattr(AudioEngine, 'start_engine', slow_start)
         gaps, last = [], [time.monotonic()]
 
         def tick():

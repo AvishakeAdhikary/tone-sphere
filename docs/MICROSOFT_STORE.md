@@ -247,12 +247,18 @@ first.
 
 ## 5. Versioning
 
-The version now lives in three places, and MSIX has its own rules:
+The version lives in three places, and MSIX has its own rules:
 
-1. `pyproject.toml` → `version = "0.2.0"` — the source of truth. CI's auto-tag job releases
-   on a change here (`.github/workflows/ci.yml`).
+1. `pyproject.toml` → `version = "0.2.0"`.
 2. `tonesphere/__init__.py` → `__version__ = "0.2.0"`.
 3. `packaging/msix/AppxManifest.xml` → `Version="0.2.0.0"`.
+
+A release's version is not typed by hand any more. On every green push to main, CI's
+`version` job (`scripts/release_version.py`) takes the latest `v*` tag and adds one to the
+patch number — or to the minor or major number when the head commit's message contains
+`[minor]` or `[major]` — never going below (1). The package jobs stamp that version into
+all three files in their own checkout before building, and the release job tags the commit.
+The checked-in numbers are therefore a floor: raise (1) by hand only to jump ahead.
 
 `build_msix.ps1` reads (1) and (2), refuses to build if they disagree, converts to the
 four-part MSIX form with a **zero fourth part** (the Store rejects a non-zero one), and
@@ -263,7 +269,8 @@ version even if (3) drifted. It warns loudly when it had to.
 
 The Store also requires each submission's version to be **strictly greater** than the last
 published one. It never goes backwards; a rejected submission still burns its version
-number in practice, so bump `pyproject.toml` rather than re-uploading the same version.
+number in practice, so build the Store package from a newer release rather than
+re-uploading the same version.
 
 ## 6. Submission checklist in Partner Center
 
@@ -329,8 +336,9 @@ later, through the Store or elsewhere:
 What stays as it is:
 
 - **GitHub releases keep ASIO**, under GPLv3, with the GPLv3 text inside the executable
-  (`tonesphere.spec`) and the Corresponding Source beside it
-  (`ToneSphere-windows-source.zip`, `scripts/package_source.py`).
+  (`tonesphere.spec`) and the Corresponding Source in the `gpl-source` release, linked
+  from each release's notes (`ToneSphere-<version>-windows-source.zip`,
+  `scripts/package_source.py`).
 - **ToneSphere's own code stays MIT.** As the sole copyright holder the owner can still sell
   builds and can license future versions differently; what has already been published
   under MIT stays MIT. Contributions are accepted on the same MIT terms (`CONTRIBUTING.md`),

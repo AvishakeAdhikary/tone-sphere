@@ -39,7 +39,7 @@ extern "C" {
 #endif
 
 /* Bumped whenever a struct layout or a signature changes; Python refuses a mismatch. */
-#define TS_ABI_VERSION 12
+#define TS_ABI_VERSION 13
 
 typedef int32_t ts_result;
 #define TS_OK               0
@@ -84,6 +84,8 @@ typedef struct ts_route_desc {
     float gain;       /* linear */
     float pan;        /* -1 (left) .. +1 (right); applied when the destination is stereo */
     uint32_t flags;   /* TS_ROUTE_FLAG_* */
+    int32_t source_channel; /* -1: every channel of the source; k: only its channel k, taken as a
+                               mono source (a guitar on input 1 of a stereo interface, in both ears) */
 } ts_route_desc;
 
 /* Built-in processors placed on a node, run in slot order after the node's input is

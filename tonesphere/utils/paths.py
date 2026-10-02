@@ -24,8 +24,13 @@ def app_data_dir() -> Path:
     The per-user directory for data this app writes.
 
     A pure path: nothing is created here, so importing a module that asks for the location
-    touches no disk. Callers create what they are about to write.
+    touches no disk. Callers create what they are about to write. TONESPHERE_DATA_DIR puts it
+    elsewhere (the test suite does, so no test reads or writes a real user's setup).
     """
+    override = os.environ.get('TONESPHERE_DATA_DIR')
+    if override:
+        return Path(override)
+
     if sys.platform == 'win32':
         local = os.environ.get('LOCALAPPDATA')
         base = Path(local) if local else Path.home() / 'AppData' / 'Local'
@@ -65,6 +70,24 @@ def bundled_default_config() -> Path | None:
         if candidate.is_file():
             return candidate
 
+    return None
+
+
+def bundled_resource(relative: str) -> Path | None:
+    """
+    A file packaged with the app (`assets/...`, `config/...`), by its path from the
+    repository root: inside the frozen bundle or next to the package. Never relative to the
+    working directory, which for an installed app is wherever the shortcut says.
+    """
+    roots = []
+    bundle = getattr(sys, '_MEIPASS', None)
+    if bundle:
+        roots.append(Path(bundle))
+    roots.append(Path(__file__).resolve().parents[2])
+    for root in roots:
+        candidate = root / relative
+        if candidate.exists():
+            return candidate
     return None
 
 

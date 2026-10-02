@@ -325,6 +325,24 @@ class UnifiedAudioEngine:
     def set_routing_invert(self, source_id: int, destination_id: int, invert: bool):
         self.engine.set_routing_invert(source_id, destination_id, invert)
 
+    def set_routing_source_channel(self, source_id: int, destination_id: int, channel: int | None):
+        return self.engine.set_routing_source_channel(source_id, destination_id, channel)
+
+    def monitor(self, input_id: int, output_id: int, source_channel: int | None = None):
+        return self.engine.monitor(input_id, output_id, source_channel)
+
+    def save_session(self):
+        self.engine.save_session()
+
+    def save_preset(self, path):
+        return self.engine.save_preset(path)
+
+    def load_preset(self, path) -> str:
+        return self.engine.load_preset(path)
+
+    def restore_session(self):
+        return self.engine.restore_session()
+
     def set_master_volume(self, volume: float):
         return self.engine.set_master_volume(volume)
 
@@ -348,8 +366,8 @@ class UnifiedAudioEngine:
     def hosts_plugins(self) -> bool:
         return self.engine.hosts_plugins()
 
-    def scan_plugins(self, paths=None) -> list:
-        return self.engine.scan_plugins(paths)
+    def scan_plugins(self, paths=None, retry_failed: bool = False) -> list:
+        return self.engine.scan_plugins(paths, retry_failed)
 
     def add_plugin(self, device_id: int, info, is_input: bool = True) -> tuple[bool, str]:
         return self.engine.add_plugin(device_id, info, is_input)

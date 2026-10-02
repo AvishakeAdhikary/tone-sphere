@@ -139,8 +139,10 @@ class TestCatalogShape:
 
 class TestEveryUiKeyExistsInEnglish:
     def _literal_keys_used_in_ui(self) -> set[str]:
+        # The whole package: user-facing text is not only under tonesphere/ui (the crash
+        # dialog lives in tonesphere/utils/crash.py, installed before any window exists).
         keys = set()
-        for path in UI_DIR.glob("*.py"):
+        for path in (REPO_ROOT / "tonesphere").rglob("*.py"):
             text = path.read_text(encoding="utf-8")
             keys.update(TR_CALL.findall(text))
         return keys
@@ -175,7 +177,7 @@ class TestEveryUiKeyExistsInEnglish:
         dynamic |= builtin_keys()  # built from the built-in effects' parameter specs
 
         unused = base_keys - used - dynamic
-        assert not unused, f"en.json has keys nothing under tonesphere/ui renders: {sorted(unused)}"
+        assert not unused, f"en.json has keys nothing under tonesphere/ renders: {sorted(unused)}"
 
 
 class TestBuiltinEffectKeys:

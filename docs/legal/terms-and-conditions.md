@@ -2,8 +2,8 @@
 title: Terms and Conditions
 layout: default
 permalink: /legal/terms-and-conditions/
-version: "1.2"
-effective_date: "2026-09-30"
+version: "1.3"
+effective_date: "2026-10-02"
 publisher: Neural Nexus Studios
 description: The agreement between you and Neural Nexus Studios governing your use of the ToneSphere application, including the grant of use, acceptable use, warranties, liability and governing law.
 ---
@@ -12,8 +12,8 @@ description: The agreement between you and Neural Nexus Studios governing your u
 
 - **Application:** ToneSphere
 - **Publisher:** Neural Nexus Studios, an individual developer, Kolkata, West Bengal, India
-- **Document version:** 1.2
-- **Effective date:** 30 September 2026
+- **Document version:** 1.3
+- **Effective date:** 2 October 2026
 
 ## 1. About this document
 
@@ -77,7 +77,8 @@ Microsoft Store package does not include that component. For a build that does:
 
 - you have every right GPLv3 grants, including to run, study, modify and convey it;
 - its Corresponding Source, including the Steinberg SDK sources it was built from, is
-  published next to the executable on the same release, as a `-source.zip` archive;
+  published as a `-source.zip` archive in the project's `gpl-source` release on GitHub,
+  linked from the notes of the release that carries the executable;
 - ToneSphere's own source files remain available to you under the MIT Licence as well, as
   set out above; and
 - **nothing in these Terms and Conditions, or in the other two documents, restricts a right

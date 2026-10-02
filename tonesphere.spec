@@ -6,27 +6,16 @@
 # same goes for ToneSphere's own native DLLs, loaded through ctypes (see native_bin below).
 #
 # Build:   uv run pyinstaller tonesphere.spec
-# Output:  dist/ToneSphere/ToneSphere.exe  (or the platform equivalent)
+# Output:  dist/ToneSphere/ (Windows, Linux), dist/ToneSphere.app (macOS)
 #
-# Two layouts, one spec
-# ----------------------
-# Default is one-folder (COLLECT): an `_internal` directory of loose DLLs next to the exe.
-# That is what packaging/msix/build_msix.ps1 stages into the MSIX layout, and it must keep
-# producing exactly that — nothing here changes for it.
-#
-# Set ONEFILE=1 to build a single self-contained executable instead, for the GitHub
-# Releases download: a user fetching a "single executable" should get one, not a zip of
-# 279 loose files. Trade-off, stated because it is real: a one-file build self-extracts to
-# a temp directory on every launch, which costs a startup delay the one-folder build does
-# not pay. That is the right trade for something downloaded and double-clicked occasionally,
-# and the wrong one for what the MSIX installs permanently — hence two modes, not a switch
-# of the default.
+# One folder, always. What users download is built from it: the Windows installer and
+# portable zip (packaging/windows), the Linux AppImage (packaging/linux), the macOS .app in a
+# .dmg, and the MSIX (packaging/msix). A one-file build unpacks itself to a temp folder on
+# every launch, a startup delay none of those has to pay.
 
-import os
+import re
 import sys
 from pathlib import Path
-
-ONEFILE = os.environ.get('ONEFILE') == '1'
 
 from PyInstaller.utils.hooks import (
     collect_data_files, collect_dynamic_libs, collect_submodules,
@@ -46,6 +35,16 @@ binaries += collect_data_files('_sounddevice_data')
 # sys._MEIPASS/tonesphere/native/_bin. Collected when present rather than required, so the
 # Linux/macOS builds — which have no native engine yet — still freeze; on Windows the CI
 # builds it first, and a frozen app without it reports the engine as unavailable.
+# Linux: the sounddevice wheel carries no PortAudio, and a user's machine may have none, so
+# the system's copy from the build machine travels in the bundle
+# (tonesphere/engine/devices.py, use_bundled_portaudio, finds it there).
+if sys.platform.startswith('linux'):
+    portaudio = next((p for d in ('/usr/lib/x86_64-linux-gnu', '/usr/lib64', '/usr/lib')
+                      for p in Path(d).glob('libportaudio.so.2*') if p.is_file()), None)
+    if portaudio is None:
+        raise SystemExit("libportaudio.so.2 not found: install libportaudio2 before freezing")
+    binaries += [(str(portaudio), '.')]
+
 native_bin = project_root / 'tonesphere' / 'native' / '_bin'
 if native_bin.is_dir():
     binaries += [(str(dll), 'tonesphere/native/_bin') for dll in native_bin.glob('*.dll')]
@@ -119,17 +118,18 @@ analysis = Analysis(
 
 pyz = PYZ(analysis.pure, analysis.zipped_data, cipher=block_cipher)
 
-icon_path = project_root / 'assets' / 'images' / 'ToneSphere.png'
+images = project_root / 'assets' / 'images'
+# Windows needs an .ico for the executable and its shortcuts; PyInstaller converts the PNG
+# (through Pillow, in the packaging group) for macOS.
+icon_path = images / ('ToneSphere.ico' if sys.platform == 'win32' else 'ToneSphere.png')
+version = re.search(r'__version__ = "([^"]+)"',
+                    (project_root / 'tonesphere' / '__init__.py').read_text(encoding='utf-8')).group(1)
 
 executable = EXE(
     pyz,
     analysis.scripts,
-    # One-file bundles the binaries/zipfiles/datas straight into the exe; one-folder
-    # leaves them out here so COLLECT can lay them beside it instead.
-    analysis.binaries if ONEFILE else [],
-    analysis.zipfiles if ONEFILE else [],
-    analysis.datas if ONEFILE else [],
-    exclude_binaries=not ONEFILE,
+    [],
+    exclude_binaries=True,
     name='ToneSphere',
     debug=False,
     bootloader_ignore_signals=False,
@@ -141,17 +141,33 @@ executable = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=str(icon_path) if icon_path.exists() else None,
+    icon=str(icon_path),
 )
 
-if not ONEFILE:
-    collection = COLLECT(
-        executable,
-        analysis.binaries,
-        analysis.zipfiles,
-        analysis.datas,
-        strip=False,
-        upx=False,
-        upx_exclude=[],
-        name='ToneSphere',
+collection = COLLECT(
+    executable,
+    analysis.binaries,
+    analysis.zipfiles,
+    analysis.datas,
+    strip=False,
+    upx=False,
+    upx_exclude=[],
+    name='ToneSphere',
+)
+
+if sys.platform == 'darwin':
+    app = BUNDLE(
+        collection,
+        name='ToneSphere.app',
+        icon=str(icon_path),
+        bundle_identifier='com.neuralnexusstudios.tonesphere',
+        version=version,
+        info_plist={
+            'CFBundleDisplayName': 'ToneSphere',
+            'CFBundleShortVersionString': version,
+            'NSHighResolutionCapable': True,
+            # Without it macOS refuses an audio input to the app, silently: no prompt, silence.
+            'NSMicrophoneUsageDescription':
+                'ToneSphere routes and processes audio from your microphones and audio interfaces.',
+        },
     )

@@ -127,7 +127,7 @@ class TestDefaultsOnAnEmptyDatabase:
         assert config["api"]["host"] == "127.0.0.1"
         assert config["api"]["port"] == 8080
         assert config["logging"]["level"] == "INFO"
-        assert config["logging"]["enable_file_logging"] is False
+        assert config["logging"]["enable_file_logging"] is True
         assert config["logging"]["max_file_size_mb"] == 10
 
     def test_no_error_is_reported_for_a_database_that_did_not_exist_yet(self, manager):
@@ -441,6 +441,15 @@ class TestWhereTheDataLives:
     executable is not a working default — it is a failure on the user's machine and nowhere
     else, which is the worst place for one to appear first.
     """
+
+    @pytest.fixture(autouse=True)
+    def real_location(self, monkeypatch):
+        """These check where the data goes on each system, so without the suite's override."""
+        monkeypatch.delenv("TONESPHERE_DATA_DIR", raising=False)
+
+    def test_an_override_puts_it_anywhere(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("TONESPHERE_DATA_DIR", str(tmp_path / "data"))
+        assert paths.app_data_dir() == tmp_path / "data"
 
     def test_the_default_database_is_under_the_user_data_directory(self):
         assert ConfigManager().db_path == paths.app_data_dir() / "settings.db"

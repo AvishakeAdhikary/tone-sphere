@@ -126,6 +126,11 @@ ts_result Engine::apply_plan(const ts_plan& spec) {
         if (nodes[t->second].kind == TS_NODE_SOURCE) { fail(label + ": a source cannot be fed"); return TS_ERR_INVALID; }
         if (d.source == d.dest) { fail(label + ": routes a node to itself"); return TS_ERR_CYCLE; }
         if (!std::isfinite(d.gain) || !std::isfinite(d.pan)) { fail(label + ": non-finite gain or pan"); return TS_ERR_INVALID; }
+        if (d.source_channel < -1 ||
+            (d.source_channel >= 0 && static_cast<uint32_t>(d.source_channel) >= nodes[s->second].channels)) {
+            fail(label + ": source channel " + std::to_string(d.source_channel) + " does not exist");
+            return TS_ERR_INVALID;
+        }
         if (!seen_routes.emplace(route_key(d.source, d.dest), r).second) { fail(label + ": duplicate route"); return TS_ERR_INVALID; }
         incoming[t->second].push_back(r);
         outgoing[s->second].push_back(t->second);
@@ -295,6 +300,7 @@ ts_result Engine::apply_plan(const ts_plan& spec) {
             Route& route = plan->routes[route_cursor];
             route.source_index = position[by_id[rd.source]];
             route.key = route_key(rd.source, rd.dest);
+            route.source_channel = rd.source_channel;
             route.invert = (rd.flags & TS_ROUTE_FLAG_INVERT) != 0;
             route.pan.store(std::clamp(rd.pan, -1.0f, 1.0f), std::memory_order_relaxed);
             route.target.store(rd.gain, std::memory_order_relaxed);
@@ -680,7 +686,10 @@ void Engine::mix_into(Plan& plan, Node& node, uint32_t frames) noexcept {
         }
 
         const float sign = route.invert ? -1.0f : 1.0f;
-        const uint32_t S = src.channels;
+        // One channel picked out of the source is a mono source, and maps like one.
+        const bool picked = route.source_channel >= 0;
+        float* const* inputs = picked ? &src.channel_ptrs[route.source_channel] : src.channel_ptrs;
+        const uint32_t S = picked ? 1u : src.channels;
         const uint32_t D = node.channels;
 
         for (uint32_t c = 0; c < D; ++c) {
@@ -713,7 +722,7 @@ void Engine::mix_into(Plan& plan, Node& node, uint32_t frames) noexcept {
             const uint32_t first = average ? 0 : static_cast<uint32_t>(single);
             const uint32_t last = average ? S : first + 1;
             for (uint32_t s = first; s < last; ++s) {
-                const float* in = src.channel_ptrs[s];
+                const float* in = inputs[s];
                 if (g0 == g1)
                     for (uint32_t i = 0; i < frames; ++i) dst[i] += in[i] * g1;
                 else

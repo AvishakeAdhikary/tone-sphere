@@ -331,6 +331,42 @@ class TestLossAndConcealment:
             assert buffer.pull() is not None
 
 
+class TestOvertakenPlayout:
+    """macOS CI, Opus over UDP: the sender stalled once, playout ran on past it, and every
+    packet after that arrived just after its slot — 200 received, 200 lost."""
+
+    def stall(self, buffer, stalled_pulls: int):
+        sequence = 0
+        for _ in range(3):
+            buffer.push(sequence, block(sequence))
+            sequence += 1
+        for _ in range(20):
+            buffer.push(sequence, block(sequence))
+            sequence += 1
+            buffer.pull()
+        for _ in range(stalled_pulls):
+            buffer.pull()
+        played = []
+        for _ in range(60):
+            pulled = buffer.pull()
+            if pulled is not None:
+                played.append(which(pulled))
+            buffer.push(sequence, block(sequence))
+            sequence += 1
+        return played, buffer.statistics()
+
+    def test_a_stall_longer_than_the_buffer_is_recovered_from(self):
+        played, stats = self.stall(make(target_latency_ms=3 * FRAMES / RATE * 1000), stalled_pulls=6)
+        assert stats['underruns'] == 1
+        assert stats['buffered_packets'] == 3, "the buffer is back at its depth"
+        assert played[-20:] == sorted(played[-20:]) and all(p > 0 for p in played[-20:]), "packets play again"
+        assert stats['packets_lost'] + stats['packets_late_dropped'] < 20
+
+    def test_a_stall_the_buffer_covers_needs_nothing(self):
+        _, stats = self.stall(make(target_latency_ms=3 * FRAMES / RATE * 1000), stalled_pulls=2)
+        assert stats['underruns'] == 0 and stats['packets_late_dropped'] == 0
+
+
 class TestResync:
     def test_a_large_gap_jumps_forward_instead_of_a_wall_of_losses(self):
         buffer = make(resync_gap_packets=16)

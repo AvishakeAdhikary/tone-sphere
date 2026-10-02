@@ -29,7 +29,9 @@ chain it replaces was never reachable from the UI, API or CLI and has been remov
 | Instruments played by MIDI (M18) | **HARDWARE VERIFIED** with Surge XT 1.3.4 and Dexed 1.0.1 | An instrument goes on a bus of its own (`AudioEngine.create_instrument`, Plugins → Add Instrument) and is played by note on/off through `ts_vst3_send_midi`: pushed on the plugin thread into a single-producer queue, drained on the audio thread into a preallocated event list (512 events) handed to `process()`; controllers and the pitch wheel go through the plugin's `IMidiMapping` to its parameters. `tests/hardware/test_instruments.py`: Surge XT's note 69 at **440.63 Hz** from the engine, **440.17 Hz** over REST, C4 at **261.76 Hz** from the on-screen keyboard, and **440.63 Hz out of the AI-04 and back through its cable**; Dexed's notes 60 and 67 at 131.00 and 196.57 Hz (its default voice sits an octave below the key), an exact fifth; every note silent within two seconds of its release |
 | MIDI from a hardware port (winmm) | UNVERIFIED | `engine/midi_input.py` forwards a port's notes, controllers and pitch wheel to an instrument; the development machine has no MIDI input device, so only enumeration (none) and the refusals are tested |
 | Plugins from the REST API and the CLI (M18) | VERIFIED | `/plugins`, `/chains/{id}` (add a VST3 or a built-in, remove, move, bypass, parameters), `/instruments`, `/midi/{id}`; CLI `plugins`, `chain`, `effect`, `param`, `instrument`, `note`. `tests/native/test_plugins_remote.py`: the test plugin put on a bus and set to ×0.5 by parameter id over REST halves a 1 kHz tone exactly; a high-pass set from the CLI takes 100 Hz down by over 20 dB |
-| Commercial plugins (Guitar Rig, Neural DSP, ...) | **NOT TESTED** | none installed on the development machine; nothing is claimed about them |
+| Commercial: Native Instruments Guitar Rig 7.0.1 | **HARDWARE VERIFIED** | `tests/hardware/test_guitar_rig.py`, 2026-10-02: scans OK (0.7 s) from source and from the frozen app; a 220 Hz tone at −20 dBFS comes out finite at −23 dBFS with the note intact; its **Rack Master Volume**, set to what it displays as −12.0 dB, moves the output **−12.04 dB**; 60 s, 11,250 blocks, no fault, 0 engine allocations; 3,586 bytes of state restored into a new instance; its editor opens and closes. In the built app, from the plugin browser onto a guitar input, heard at the output — `docs/FIRST_RUN_VERIFICATION.md` |
+| Other commercial plugins (Neural DSP, ...) | **NOT TESTED** | nothing is claimed about them |
+| A parameter changed while the plugin is not processing reaches its saved state | VERIFIED | `test_a_change_made_while_nothing_processes_is_in_the_saved_state`; found with Guitar Rig 7, see *State* below |
 | Plugin process isolation (a worker process per plugin) | NOT IMPLEMENTED | see *Isolation* below |
 
 Surge XT 1.3.4 (GPL-3.0; official release `surge-xt-win64-1.3.4-pluginsonly.zip`, SHA-256
@@ -47,9 +49,33 @@ legacy single-file modules. Before anything is loaded, the module's PE header is
 
 **Scanning out of process.** Loading a module runs the plugin's own initialisation code,
 so each module is loaded by a subprocess (`python -m tonesphere.plugins.scan <path>`, or
-`ToneSphere.exe scan-plugin <path>` when frozen) with a 30-second timeout. A crash, a hang
-or a load failure is recorded with the reason; the main process never loads that module
-through the scanner. Results are cached by path, size and modification time.
+`ToneSphere.exe scan-plugin <path> --result <file>` when frozen) with a 120-second timeout
+(Guitar Rig 7 is one 176 MB module). A crash, a hang or a load failure is recorded with the
+reason; the main process never loads that module through the scanner. Results are cached by
+path, size and modification time, and a failed scan is tried again when the user presses
+Scan.
+
+Four things big commercial modules taught the scanner, all from Guitar Rig 7, which v0.2.0
+reported as "crashed while reading" though Reaper loads it:
+
+- The result comes back in a file, not on stdout: a windowed build has no stdout at all.
+- The child's output goes to files, never pipes. Guitar Rig starts a helper process that
+  inherits the child's handles; with pipes, the parent waited on a pipe that never closed,
+  and the scan timed out at 120 s. It now takes 0.7 s.
+- The parent believes the result file over the exit code, and the child leaves with
+  `os._exit` without unloading the module. Guitar Rig's own teardown faults after its
+  classes were read correctly (exit code 139 from the source scanner and the frozen one
+  alike).
+- Its teardown can also hang: the first load in a session wrote its result and then never
+  left, because `os._exit` still runs every DLL's detach routine on Windows. The child now
+  terminates itself outright after renaming its result into place, and the parent ends a
+  child that has reported but not left within 5 s. Before that, the installed 0.2.1 build's
+  first scan of it timed out at 120 s ([first-run verification](FIRST_RUN_VERIFICATION.md)).
+
+The host side changed too: the factory gets the host context (`IPluginFactory3::setHostContext`)
+before anything is created, every audio bus the plugin declares gets a buffer in `process()`
+(silence in, output discarded, for all but the main bus), and a module, once scanned, is
+never unloaded in that process.
 
 **Opening.** `PluginInstance(info, sample_rate, max_block, channels)` runs on the plugin
 thread: the SDK's `Module` loader, then its `PlugProvider` (component and controller
@@ -76,6 +102,13 @@ plugin's `getState` wrote them — opaque bytes, never a Python object; `PluginS
 base64-encodes them for presets. `restore()` hands them back through `setState` and
 `setComponentState`; a plugin that rejects them (another plugin's state, an incompatible
 version) raises `PluginError` and keeps its current state.
+
+A plugin hears a parameter change only through `process()`, and only then does its saved
+state carry it: Guitar Rig 7 saved its old master volume when the change was made while the
+engine was stopped. So before reading state, the host delivers whatever changes are queued
+in a zero-sample `process()` call — VST3's parameter flush — on the plugin thread, whenever
+no audio-thread processor holds the instance. That count is changed and read only on the
+plugin thread, so the change queue keeps exactly one consumer at a time.
 
 ## Isolation, and why plugins run in-process
 

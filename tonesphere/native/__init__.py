@@ -120,6 +120,7 @@ class Route:
     pan: float = 0.0
     muted: bool = False
     invert: bool = False
+    source_channel: int = -1  # -1: every channel; k: the source's channel k alone, as mono
 
 
 EQ = _abi.INSERT_EQ
@@ -200,7 +201,7 @@ class NativeEngine:
         route_array = (_abi.RouteDesc * max(1, len(routes)))()
         for i, r in enumerate(routes):
             flags = (_abi.ROUTE_FLAG_MUTED if r.muted else 0) | (_abi.ROUTE_FLAG_INVERT if r.invert else 0)
-            route_array[i] = _abi.RouteDesc(r.source, r.dest, r.gain, r.pan, flags)
+            route_array[i] = _abi.RouteDesc(r.source, r.dest, r.gain, r.pan, flags, r.source_channel)
         insert_array = (_abi.InsertDesc * max(1, len(inserts)))()
         for i, x in enumerate(inserts):
             insert_array[i] = _abi.InsertDesc(x.node, x.slot, x.type, _abi.INSERT_FLAG_BYPASSED if x.bypassed else 0,

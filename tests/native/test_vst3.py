@@ -188,6 +188,19 @@ class TestState:
             out, _ = run_through(fresh, signal)
             assert np.allclose(out[LATENCY:], signal[:-LATENCY] * 1.6, atol=1e-6)
 
+    def test_a_change_made_while_nothing_processes_is_in_the_saved_state(self, classes, gain_plugin):
+        """A plugin hears a change only through process(): with the engine stopped, saving
+        the session once kept the old value (Guitar Rig 7's master volume, on this host)."""
+        gain_plugin.set_parameter(0, 0.25)
+        saved = gain_plugin.state()
+        with PluginInstance(classes["ToneSphere Test Gain"], RATE, BLOCK, 2) as fresh:
+            fresh.restore(saved)
+            signal = white_noise(BLOCK * 8, amplitude=0.2)
+            out, _ = run_through(fresh, signal)
+            assert np.allclose(out[LATENCY:], signal[:-LATENCY] * 0.5, atol=1e-6)
+        out, _ = run_through(gain_plugin, signal)
+        assert np.allclose(out[LATENCY:], signal[:-LATENCY] * 0.5, atol=1e-6), "and it still plays at that gain"
+
     def test_foreign_state_is_rejected_and_the_plugin_keeps_working(self, gain_plugin):
         with pytest.raises(PluginError) as rejected:
             gain_plugin.restore(PluginState(b"somebody else's preset", b""))

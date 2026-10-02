@@ -21,7 +21,7 @@ from ctypes import (
     c_void_p,
 )
 
-ABI_VERSION = 12
+ABI_VERSION = 13
 
 OK = 0
 ERR_INVALID = -1
@@ -124,6 +124,7 @@ class RouteDesc(Structure):
         ("gain", c_float),
         ("pan", c_float),
         ("flags", c_uint32),
+        ("source_channel", c_int32),
     ]
 
 

@@ -399,6 +399,8 @@ class AudioHost:
 
     def _sounddevice(self):
         if self._sd is None:
+            from tonesphere.engine.devices import use_bundled_portaudio
+            use_bundled_portaudio()
             try:
                 import sounddevice as sd
             except (ImportError, OSError) as e:
@@ -1293,6 +1295,10 @@ class AudioHost:
         averages rather than taking the left channel, so a hard-right guitar does not
         vanish. Equal counts with no pan pass through with no copy at all.
         """
+        if connection is not None and connection.source_channel is not None \
+                and connection.source_channel < source.shape[1]:
+            # One channel picked out of the source is a mono source, mapped like one.
+            source = source[:, connection.source_channel:connection.source_channel + 1]
         in_channels = source.shape[1]
         panner = self._panner_for(key, connection)
 

@@ -18,8 +18,10 @@ Host API notes (Windows), in the order we prefer them:
 """
 
 import platform
+import sys
 from dataclasses import dataclass, field
 from enum import StrEnum
+from pathlib import Path
 
 from tonesphere.utils.logger import get_logger
 
@@ -135,7 +137,34 @@ class DeviceInfo:
         return f"{self.name} [{self.host_api_name}] ({', '.join(directions)})"
 
 
+def use_bundled_portaudio():
+    """
+    On Linux the sounddevice wheel carries no PortAudio, and a user's machine may not have
+    it installed. The AppImage bundles one (tonesphere.spec); sounddevice finds PortAudio
+    only through ctypes.util.find_library, read once when it is imported, so the lookup is
+    pointed at the bundled copy before that import.
+    """
+    bundle = getattr(sys, '_MEIPASS', None)
+    if sys.platform != 'linux' or not bundle:
+        return
+    bundled = next(Path(bundle).glob('libportaudio.so.2*'), None)
+    if bundled is None:
+        return
+    import ctypes.util
+
+    system_lookup = ctypes.util.find_library
+    if getattr(system_lookup, 'bundled', False):
+        return
+
+    def find_library(name):
+        return str(bundled) if name == 'portaudio' else system_lookup(name)
+
+    find_library.bundled = True
+    ctypes.util.find_library = find_library
+
+
 def _import_sounddevice():
+    use_bundled_portaudio()
     try:
         import sounddevice as sd
     except (ImportError, OSError) as e:

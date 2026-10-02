@@ -28,25 +28,23 @@ def setup_console_encoding():
 
 
 def setup_logging(config: dict):
-    """Setup logging based on configuration"""
+    """
+    The level for every logger, and the shared log file in the per-user data folder.
+
+    Loggers are created as modules are imported, long before the config is read, so this
+    adjusts them all rather than configuring a new one.
+    """
     log_config = config.get('logging', {})
-
-    # Get log level
-    level_str = log_config.get('level', 'INFO')
-    level = getattr(logging, level_str.upper(), logging.INFO)
-
-    # Setup logger with configuration
-    logger_manager.setup_logger(
-        name="tonesphere",
-        level=level,
-        enable_file_logging=log_config.get('enable_file_logging', False),
-        log_file=log_config.get('log_file', 'tonesphere.log'),
-        log_dir=log_config.get('log_dir', 'logs'),
-        max_bytes=log_config.get('max_file_size_mb', 10) * 1024 * 1024,
-        backup_count=log_config.get('backup_count', 5),
-        structured=log_config.get('structured', False),
-        console_colors=log_config.get('colored_console', True)
-    )
+    level = getattr(logging, str(log_config.get('level', 'INFO')).upper(), logging.INFO)
+    logger_manager.set_level(level)
+    if log_config.get('enable_file_logging', True):
+        logger_manager.enable_file_logging(
+            log_file=log_config.get('log_file', 'tonesphere.log'),
+            log_dir=log_config.get('log_dir') or None,
+            level=level,
+            max_bytes=log_config.get('max_file_size_mb', 10) * 1024 * 1024,
+            backup_count=log_config.get('backup_count', 5),
+        )
 
 
 def run_diagnostics() -> int:
@@ -210,7 +208,7 @@ def main():
     # load one plugin and exit.
     if len(sys.argv) > 2 and sys.argv[1] == "scan-plugin":
         from tonesphere.plugins.scan import scan_one_cli
-        return scan_one_cli(sys.argv[2])
+        return scan_one_cli(sys.argv[2:])
     # One virtual-cable change, run elevated through Windows' administrator prompt
     # (engine/virtual_cables.py); it does that and exits, nothing else.
     if len(sys.argv) > 2 and sys.argv[1] == "cable-admin":
@@ -219,55 +217,54 @@ def main():
 
     setup_console_encoding()
 
+    from tonesphere.utils import crash
+    crash.install()
+
     config_manager = ConfigManager()
     config = config_manager.load_config()
-
-    # Setup logging first
     setup_logging(config)
 
     from tonesphere import __version__
-    print(f"ToneSphere {__version__}")
-    print("=" * 50)
+    from tonesphere.utils.logger import get_logger
+    get_logger(__name__).info(f"ToneSphere {__version__} starting: {' '.join(sys.argv[1:]) or 'gui'}")
 
-    if len(sys.argv) > 1:
-        command = sys.argv[1].lower()
+    # No arguments is how everyone starts an application: a double-click, a shortcut, the
+    # Start menu. That opens the interface; the other modes are for scripts and terminals.
+    command = sys.argv[1].lower() if len(sys.argv) > 1 else "gui"
 
-        if command == "server":
-            from tonesphere.api.server import run_api_server
-            print("Starting ToneSphere API server...")
-            run_api_server()
-
-        elif command == "gui":
-            from tonesphere.ui import run
-
-            print("Starting ToneSphere...")
-            return run(config_manager)
-
-        elif command == "cli":
-            from tonesphere.cli.interface import AudioEngineCLI
-            print("Starting ToneSphere CLI...")
-            cli = AudioEngineCLI()
-            cli.run_interactive_mode()
-
-        elif command == "test":
-            return run_diagnostics()
-
-        else:
-            print(f"Unknown command: {command}")
-            print("Available commands: server, gui, cli, test")
-            return 2
-    else:
-        from tonesphere import __version__
-        print(f"ToneSphere - Audio Routing Engine (v{__version__})")
+    if command in ("help", "-h", "--help"):
+        print(f"ToneSphere {__version__}")
         print()
         print("Usage:")
-        print("  python main.py server  - Start API server")
-        print("  python main.py gui     - Start GUI application")
-        print("  python main.py cli     - Interactive CLI mode")
-        print("  python main.py test    - Run basic tests")
-        print()
-        print("ToneSphere routes and processes real audio (see README.md for what works).")
-        print("Run `python main.py test` for a diagnostic report on this machine.")
+        print("  ToneSphere           - Start the application")
+        print("  ToneSphere server    - Start the REST API server")
+        print("  ToneSphere cli       - Interactive command line")
+        print("  ToneSphere test      - Diagnose this machine's audio")
+        return 0
+
+    if command == "server":
+        from tonesphere.api.server import run_api_server
+        print("Starting ToneSphere API server...")
+        run_api_server()
+
+    elif command == "gui":
+        from tonesphere.ui import run
+
+        return run(config_manager)
+
+    elif command == "cli":
+        from tonesphere.cli.interface import AudioEngineCLI
+        print("Starting ToneSphere CLI...")
+        cli = AudioEngineCLI()
+        cli.run_interactive_mode()
+
+    elif command == "test":
+        return run_diagnostics()
+
+    else:
+        print(f"Unknown command: {command}")
+        print("Available commands: server, gui, cli, test, help")
+        return 2
 
     return 0
 

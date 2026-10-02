@@ -36,6 +36,7 @@ NODE_WIDTH = 172
 NODE_HEIGHT = 56
 PORT_RADIUS = 6
 GRID = 24
+DROP_REACH = 28.0   # a cable let go this close to a node connects to it
 
 
 class PortItem(QGraphicsObject):
@@ -97,13 +98,14 @@ class NodeItem(QGraphicsObject):
     moved = Signal()
 
     def __init__(self, node_id: int, name: str, subtitle: str,
-                 can_input: bool, can_output: bool, is_bus: bool = False):
+                 can_input: bool, can_output: bool, is_bus: bool = False, channels: int = 2):
         super().__init__()
 
         self.node_id = node_id
         self.name = name
         self.subtitle = subtitle
         self.is_bus = is_bus
+        self.channels = channels
         self.failed: str | None = None
 
         self._level = 0.0
@@ -238,6 +240,7 @@ class CableItem(QGraphicsObject):
         self.dest = dest
         self.gain_db = gain_db
         self.muted = muted
+        self.source_channel: int | None = None
         self.dead = False
 
         self._path = QPainterPath()
@@ -336,7 +339,9 @@ class RoutingScene(QGraphicsScene):
     """The scene: owns nodes and cables, and runs the drag-to-connect interaction."""
 
     connect_requested = Signal(int, int)      # source_id, dest_id
+    connect_refused = Signal(str)             # why a dropped cable connected nothing
     disconnect_requested = Signal(int, int)
+    source_channel_requested = Signal(int, int, object)  # source_id, dest_id, channel or None
     gain_requested = Signal(int, int, float)
     mute_requested = Signal(int, int, bool)
 
@@ -355,15 +360,15 @@ class RoutingScene(QGraphicsScene):
 
     def add_node(self, node_id: int, name: str, subtitle: str,
                  can_input: bool, can_output: bool, is_bus: bool,
-                 position: QPointF) -> NodeItem:
-        node = NodeItem(node_id, name, subtitle, can_input, can_output, is_bus)
+                 position: QPointF, channels: int = 2) -> NodeItem:
+        node = NodeItem(node_id, name, subtitle, can_input, can_output, is_bus, channels)
         node.setPos(position)
         self.addItem(node)
         self.nodes[node_id] = node
         return node
 
     def add_cable(self, source_id: int, dest_id: int,
-                  gain_db: float = 0.0, muted: bool = False) -> CableItem | None:
+                  gain_db: float = 0.0, muted: bool = False, source_channel: int | None = None) -> CableItem | None:
         source = self.nodes.get(source_id)
         dest = self.nodes.get(dest_id)
         if source is None or dest is None:
@@ -373,10 +378,12 @@ class RoutingScene(QGraphicsScene):
         if existing is not None:
             existing.gain_db = gain_db
             existing.muted = muted
+            existing.source_channel = source_channel
             existing.update()
             return existing
 
         cable = CableItem(source, dest, gain_db, muted)
+        cable.source_channel = source_channel
         self.addItem(cable)
         self.cables[(source_id, dest_id)] = cable
         return cable
@@ -433,13 +440,37 @@ class RoutingScene(QGraphicsScene):
             self._pending_path = None
         self._pending_source = None
 
-        # Find a node under the drop point that can accept an input.
-        for item in self.items(scene_pos):
-            node = item if isinstance(item, NodeItem) else item.parentItem()
-            if isinstance(node, NodeItem) and node.input_port is not None:
-                if node.node_id != source_node.node_id:
-                    self.connect_requested.emit(source_node.node_id, node.node_id)
-                return
+        # The node under the drop point, wherever on it the cable landed — its title, its
+        # meter, its port — or, failing that, the nearest one within a short reach: a drop
+        # just beside a node means that node.
+        node = next((n for n in (self._node_of(item) for item in self.items(scene_pos)) if n is not None), None)
+        if node is None:
+            node = self._nearest_node(scene_pos, DROP_REACH)
+        if node is None or node is source_node:
+            if node is None:
+                self.connect_refused.emit(tr('patchbay.drop_missed'))
+            return
+        if node.input_port is None:
+            self.connect_refused.emit(tr('patchbay.drop_not_input', name=node.name))
+            return
+        self.connect_requested.emit(source_node.node_id, node.node_id)
+
+    @staticmethod
+    def _node_of(item) -> 'NodeItem | None':
+        while item is not None and not isinstance(item, NodeItem):
+            item = item.parentItem()
+        return item
+
+    def _nearest_node(self, scene_pos: QPointF, reach: float) -> 'NodeItem | None':
+        best, best_distance = None, reach
+        for node in self.nodes.values():
+            rect = node.sceneBoundingRect()
+            dx = max(rect.left() - scene_pos.x(), 0.0, scene_pos.x() - rect.right())
+            dy = max(rect.top() - scene_pos.y(), 0.0, scene_pos.y() - rect.bottom())
+            distance = (dx * dx + dy * dy) ** 0.5
+            if distance <= best_distance:
+                best, best_distance = node, distance
+        return best
 
     def contextMenuEvent(self, event):
         item = self.itemAt(event.scenePos(), self.views()[0].transform())
@@ -457,10 +488,23 @@ class RoutingScene(QGraphicsScene):
         unity = menu.addAction(tr('cable.menu.unity'))
         down6 = menu.addAction(tr('cable.menu.minus_6'))
         down12 = menu.addAction(tr('cable.menu.minus_12'))
+        channel_actions = {}
+        source_node = self.nodes.get(source_id)
+        if source_node is not None and source_node.channels > 1:
+            channels = menu.addMenu(tr('cable.menu.input_channel'))
+            options = [(None, tr('monitor.channel.all'))] + \
+                [(c, tr('monitor.channel.one', number=c + 1)) for c in range(source_node.channels)]
+            for value, label in options:
+                action = channels.addAction(label)
+                action.setCheckable(True)
+                action.setChecked(cable.source_channel == value)
+                channel_actions[action] = value
         menu.addSeparator()
         remove = menu.addAction(tr('cable.menu.disconnect'))
 
         chosen = menu.exec(event.screenPos())
+        if chosen in channel_actions:
+            self.source_channel_requested.emit(source_id, dest_id, channel_actions[chosen])
 
         if chosen == remove:
             self.disconnect_requested.emit(source_id, dest_id)

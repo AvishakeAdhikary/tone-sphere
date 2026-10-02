@@ -46,6 +46,9 @@ class RoutingConnection:
     # legitimately sit centre in a headphone mix and hard left in a recording feed.
     pan: float = 0.0      # -1.0 hard left .. 1.0 hard right
     inverted: bool = False
+    # One channel of the source alone, as a mono source (0-based); None takes them all. A
+    # guitar on input 1 of a two-input interface is channel 0, heard in both ears.
+    source_channel: int | None = None
 
 @dataclass
 class AudioEffect:

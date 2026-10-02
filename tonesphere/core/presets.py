@@ -57,12 +57,18 @@ class RecallResult:
         return ", ".join(parts)
 
 
+def default_presets_dir() -> Path:
+    """With the user's other ToneSphere data: an installed app's folder is not theirs to write."""
+    from tonesphere.utils.paths import app_data_dir
+    return app_data_dir() / 'presets'
+
+
 class PresetManager:
     """Reads and writes presets for an `AudioEngine`."""
 
     def __init__(self, engine, directory: Path | None = None):
         self.engine = engine
-        self.directory = Path(directory) if directory else Path("presets")
+        self.directory = Path(directory) if directory else default_presets_dir()
 
     # --- Capture ---
 
@@ -96,10 +102,15 @@ class PresetManager:
             routes.append({
                 'source': self._reference(source_id),
                 'dest': self._reference(dest_id),
+                # What to call a device that is missing on recall: its key is an endpoint ID
+                # nobody can read.
+                'source_name': self._name(source_id),
+                'dest_name': self._name(dest_id),
                 'gain': round(route.volume, 6),
                 'muted': route.muted,
                 'pan': round(route.pan, 4),
                 'inverted': route.inverted,
+                'source_channel': route.source_channel,
             })
 
         channels = {}
@@ -168,6 +179,13 @@ class PresetManager:
             'channels': channels,
             'plugins': plugins,
         }
+
+    def _name(self, device_id: int) -> str | None:
+        device = self.engine._device_by_id.get(device_id)
+        if device is not None:
+            return device.name
+        meta = self.engine._bus_meta.get(device_id)
+        return meta['name'] if meta else None
 
     def _reference(self, device_id: int) -> str | None:
         """
@@ -302,9 +320,9 @@ class PresetManager:
 
             if source_id is None or dest_id is None:
                 result.skipped_routes += 1
-                for reference in (source_ref, dest_ref):
+                for reference, name in ((source_ref, route.get('source_name')), (dest_ref, route.get('dest_name'))):
                     if reference and reference not in mapping:
-                        label = reference.split(':', 1)[-1]
+                        label = name or reference.split(':', 1)[-1]
                         if label not in result.missing_devices:
                             result.missing_devices.append(label)
                 continue
@@ -322,6 +340,8 @@ class PresetManager:
                 engine.set_routing_mute(source_id, dest_id, True)
             if route.get('pan'):
                 engine.set_routing_pan(source_id, dest_id, float(route['pan']))
+            if route.get('source_channel') is not None:
+                engine.set_routing_source_channel(source_id, dest_id, int(route['source_channel']))
             if route.get('inverted'):
                 engine.set_routing_invert(source_id, dest_id, True)
 

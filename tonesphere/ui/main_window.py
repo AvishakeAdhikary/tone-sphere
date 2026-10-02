@@ -15,8 +15,10 @@ statistics come from a poller thread the same way. So the window keeps repaintin
 device takes seconds to open, and the control lock is never waited on here.
 """
 
+import json
+from pathlib import Path
 
-from PySide6.QtCore import QPointF, Qt
+from PySide6.QtCore import QPointF, Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence
 from PySide6.QtWidgets import (
     QComboBox,
@@ -76,7 +78,7 @@ class MainWindow(QMainWindow):
         # from the engine directly.
         self._view: dict = {'devices': [], 'matrix': {}, 'drivers': [], 'active_driver': None,
                             'plugin_host': False, 'insert_counts': {}, 'sample_rate': None,
-                            'buffer_size': None}
+                            'buffer_size': None, 'exclusive': None}
         self._state = 'stopped'
         self._running = False
         self._tick = 0
@@ -91,8 +93,14 @@ class MainWindow(QMainWindow):
         self._build_menu()
         self.tasks.busy.connect(self.hardware_bar.set_busy)
 
-        # Enumeration opens every endpoint to read its format: seconds on some machines.
-        self._run(self.engine.initialize, refresh='all')
+        # Enumeration opens every endpoint to read its format: seconds on some machines. Then
+        # the last session comes back and the engine starts: an audio app that opens silent
+        # until the user finds a Start button is one the user thinks is broken.
+        self._save_timer = QTimer(self)
+        self._save_timer.setSingleShot(True)
+        self._save_timer.setInterval(2000)
+        self._save_timer.timeout.connect(lambda: self._run(self.engine.save_session))
+        self._run(self._start_up, refresh='all', done=self._started_up, error_title=tr('dialog.engine_error'))
         self._poller = EnginePoller(self._gather_poll, METER_INTERVAL_MS, self)
         self._poller.polled.connect(self._apply_poll)
 
@@ -112,6 +120,8 @@ class MainWindow(QMainWindow):
             result, view = value
             if view is not None:
                 self._apply_view(view)
+                # Whatever changed the routing or the devices is worth keeping for next time.
+                self._save_timer.start()
             self._stats_due = True
             if done is not None:
                 done(result)
@@ -124,6 +134,17 @@ class MainWindow(QMainWindow):
                 self._run(lambda: None, refresh=refresh)
 
         self.tasks.submit(job, finished, failed)
+
+    def _start_up(self):
+        """On the worker: devices, then the last session, then the engine running."""
+        self.engine.initialize()
+        restored = self.engine.restore_session()
+        self.engine.start_engine()
+        return restored
+
+    def _started_up(self, restored: str | None):
+        if restored:
+            self.hardware_bar.set_notice(tr('session.partial', detail=restored))
 
     def _gather_view(self, refresh: str) -> dict:
         """On the worker: everything the window draws from, read under the engine's lock."""
@@ -138,8 +159,9 @@ class MainWindow(QMainWindow):
                         entries = self.engine.list_inserts(d['id'], d['direction'] == 'input')
                         counts[(d['id'], d['direction'] == 'input')] = (
                             len(entries), any(e['crashed'] for e in entries))
+            info = self.engine.get_driver_info()
             view.update(devices=devices, drivers=self.engine.get_available_drivers(),
-                        active_driver=self.engine.get_driver_info().get('active_driver'),
+                        active_driver=info.get('active_driver'), exclusive=info.get('exclusive_mode'),
                         plugin_host=plugin_host, insert_counts=counts,
                         sample_rate=self.engine.sample_rate, buffer_size=self.engine.buffer_size)
         return view
@@ -312,6 +334,8 @@ class MainWindow(QMainWindow):
         self.routing_scene.disconnect_requested.connect(self._disconnect_nodes)
         self.routing_scene.gain_requested.connect(self._set_route_gain)
         self.routing_scene.mute_requested.connect(self._set_route_mute)
+        self.routing_scene.connect_refused.connect(lambda text: self.hardware_bar.set_notice(text))
+        self.routing_scene.source_channel_requested.connect(self._set_route_source_channel)
 
         self.routing_view = RoutingView(self.routing_scene)
         layout.addWidget(self.routing_view, stretch=1)
@@ -372,6 +396,16 @@ class MainWindow(QMainWindow):
         attributes purely to retranslate them. `_change_language` clears the menu bar and
         calls this again.
         """
+        file_menu = self.menuBar().addMenu(tr('menu.file'))
+        save_preset = QAction(tr('menu.file.save_preset'), self)
+        save_preset.setShortcut(QKeySequence.StandardKey.Save)
+        save_preset.triggered.connect(self._save_preset)
+        file_menu.addAction(save_preset)
+        load_preset = QAction(tr('menu.file.load_preset'), self)
+        load_preset.setShortcut(QKeySequence.StandardKey.Open)
+        load_preset.triggered.connect(self._load_preset)
+        file_menu.addAction(load_preset)
+
         engine_menu = self.menuBar().addMenu(tr('menu.engine'))
 
         toggle = QAction(tr('menu.engine.start_stop'), self)
@@ -472,6 +506,16 @@ class MainWindow(QMainWindow):
             self.buffer_combo.setCurrentIndex(index)
             self.buffer_combo.blockSignals(False)
         self._fill_rates()
+        if self._view['exclusive'] is not None:
+            self.exclusive_button.blockSignals(True)
+            self.exclusive_button.setChecked(bool(self._view['exclusive']))
+            self.exclusive_button.blockSignals(False)
+            self._label_exclusive()
+
+    def _label_exclusive(self):
+        # A checkable button looks the same either way in this theme: the text is the state.
+        self.exclusive_button.setText(tr('transport.exclusive') if self.exclusive_button.isChecked()
+                                      else tr('transport.shared'))
 
     def _populate_backends(self):
         self.backend_combo.blockSignals(True)
@@ -479,6 +523,15 @@ class MainWindow(QMainWindow):
 
         for name in self._view['drivers']:
             self.backend_combo.addItem(name)
+        if self._view.get('plugin_host') and 'ASIO' not in self._view['drivers']:
+            # The native engine runs ASIO when a driver is installed; with none, say so here
+            # rather than leave the user wondering where it went. WASAPI does everything.
+            self.backend_combo.addItem(tr('backend.asio_unavailable'))
+            item = self.backend_combo.model().item(self.backend_combo.count() - 1)
+            item.setEnabled(False)
+            # The style sheet's popup draws a disabled item like any other; dim it by hand.
+            item.setForeground(Colors.TEXT_DIM)
+            item.setToolTip(tr('backend.asio_unavailable_tooltip'))
 
         active = self._view['active_driver']
         if active:
@@ -551,6 +604,7 @@ class MainWindow(QMainWindow):
                     can_output=(device['direction'] == 'input' or is_bus),
                     is_bus=is_bus,
                     position=position,
+                    channels=max(1, device.get('channels') or 2),
                 )
                 node.moved.connect(lambda n=node: self._remember_position(n))
 
@@ -573,6 +627,7 @@ class MainWindow(QMainWindow):
                 source_id, dest_id,
                 gain_db=route.get('volume_db', 0.0),
                 muted=route.get('muted', False),
+                source_channel=route.get('source_channel'),
             )
 
     # --- Engine actions ---
@@ -588,6 +643,7 @@ class MainWindow(QMainWindow):
         self._run(self.engine.switch_driver, name, refresh='all', error_title=tr('dialog.backend_error'))
 
     def _toggle_exclusive(self, exclusive: bool):
+        self._label_exclusive()
         self._run(self.engine.set_exclusive_mode, exclusive)
 
     def _change_buffer(self, index: int):
@@ -666,22 +722,45 @@ class MainWindow(QMainWindow):
         self._run(self.engine.handle_device_change, refresh='all')
 
     def _create_monitor_patch(self):
-        def created(result):
-            success, message = result
-            if not success:
-                self._error(tr('dialog.monitor_error'), message)
-                return
-            answer = QMessageBox.question(
-                self, tr('dialog.unmute_title'),
-                tr('dialog.unmute_body', patch=message),
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-            if answer == QMessageBox.StandardButton.Yes:
-                self._run(lambda: self.engine.set_routing_mute(
-                    self.engine.default_input_id(), self.engine.default_output_id(), False), refresh='routing')
+        from tonesphere.ui.monitor_dialog import MonitorDialog
 
-        self._run(self.engine.create_monitor_patch, True, refresh='routing', done=created)
+        def chosen(defaults):
+            dialog = MonitorDialog(self._view.get('devices') or [], *defaults, parent=self)
+            if dialog.exec() != dialog.DialogCode.Accepted:
+                return
+            self._run(self.engine.monitor, *dialog.choice(), refresh='all', done=monitoring)
+
+        def monitoring(result):
+            success, message = result
+            if success:
+                self.hardware_bar.set_notice(tr('monitor.on', patch=message))
+            else:
+                self._error(tr('dialog.monitor_error'), message)
+
+        self._run(lambda: (self.engine.default_input_id(), self.engine.default_output_id()), done=chosen)
+
+    def _save_preset(self):
+        from PySide6.QtWidgets import QFileDialog
+
+        from tonesphere.core.presets import default_presets_dir
+
+        default_presets_dir().mkdir(parents=True, exist_ok=True)
+        path, _ = QFileDialog.getSaveFileName(self, tr('menu.file.save_preset'),
+                                              str(default_presets_dir() / 'My setup.yaml'), 'Presets (*.yaml)')
+        if path:
+            self._run(lambda: self.engine.save_preset(Path(path)), error_title=tr('dialog.preset_error'),
+                      done=lambda _r: self.hardware_bar.set_notice(tr('preset.saved', name=Path(path).stem)))
+
+    def _load_preset(self):
+        from PySide6.QtWidgets import QFileDialog
+
+        from tonesphere.core.presets import default_presets_dir
+
+        path, _ = QFileDialog.getOpenFileName(self, tr('menu.file.load_preset'), str(default_presets_dir()),
+                                              'Presets (*.yaml)')
+        if path:
+            self._run(lambda: self.engine.load_preset(Path(path)), refresh='all', error_title=tr('dialog.preset_error'),
+                      done=lambda summary: self.hardware_bar.set_notice(summary))
 
     def _add_bus(self):
         def create():
@@ -709,7 +788,13 @@ class MainWindow(QMainWindow):
             if not success:
                 self._error(tr('dialog.patch_error'), message)
 
-        self._run(self.engine.create_routing, source_id, dest_id, 1.0, refresh='routing', done=connected)
+        def connect():
+            result = self.engine.create_routing(source_id, dest_id, 1.0)
+            if result[0] and not self._running:
+                self.engine.start_engine()
+            return result
+
+        self._run(connect, refresh='routing', done=connected)
 
     def _disconnect_nodes(self, source_id: int, dest_id: int):
         self._run(self.engine.remove_routing, source_id, dest_id, refresh='routing')
@@ -719,6 +804,10 @@ class MainWindow(QMainWindow):
 
     def _set_route_mute(self, source_id: int, dest_id: int, muted: bool):
         self._run(self.engine.set_routing_mute, source_id, dest_id, muted, refresh='routing')
+
+    def _set_route_source_channel(self, source_id: int, dest_id: int, channel):
+        self._run(self.engine.set_routing_source_channel, source_id, dest_id, channel, refresh='routing',
+                  done=lambda result: None if result[0] else self._error(tr('dialog.patch_error'), result[1]))
 
     # --- Strip actions ---
 
@@ -814,14 +903,21 @@ class MainWindow(QMainWindow):
             if node is not None:
                 node.set_level(self._db_to_bar(reading['peak_db']))
 
-        if meters:
-            loudest = max(meters.values(), key=lambda r: r['peak_db'])
+        # The master meter is what the outputs are being given — not the loudest input, which
+        # made it dance with a guitar while the headphones stayed silent.
+        outputs = [meters.get(d['id'], {}).get('sides', {}).get('output')
+                   for d in self._view.get('devices') or [] if d['direction'] == 'output']
+        outputs = [r for r in outputs if r is not None]
+        if outputs:
+            loudest = max(outputs, key=lambda r: r['peak_db'])
             self.master_strip.set_levels(
                 [loudest['peak_db']] * 2,
                 [loudest['rms_db']] * 2,
                 [loudest['peak_hold_db']] * 2,
-                any(r['clipped'] for r in meters.values()),
+                any(r['clipped'] for r in outputs),
             )
+        else:
+            self.master_strip.set_inactive()
 
     @staticmethod
     def _db_to_bar(db: float) -> float:
@@ -901,7 +997,7 @@ class MainWindow(QMainWindow):
             else tr('transport.start_engine')
         )
         self.backend_caption.setText(tr('transport.caption.backend'))
-        self.exclusive_button.setText(tr('transport.exclusive'))
+        self._label_exclusive()
         self.exclusive_button.setToolTip(tr('transport.exclusive_tooltip'))
         self.mode_caption.setText(tr('transport.caption.mode'))
 
@@ -994,12 +1090,48 @@ class MainWindow(QMainWindow):
 
         QMessageBox.information(self, tr('about.title'), "\n".join(lines))
 
+    def report_when_ready(self, path: Path, timeout_ms: int = 120_000):
+        """
+        For the packaging smoke test: once the window is drawing a real device list, write
+        what a user would see — the backend, whether the native engine loaded, the devices —
+        to `path` and quit. A start that never gets there writes the timeout instead.
+        """
+        from PySide6.QtWidgets import QApplication
+
+        def write(report: dict, code: int):
+            path.write_text(json.dumps(report, indent=2), encoding='utf-8')
+            QApplication.exit(code)
+
+        def gather():
+            return {'driver': self.engine.get_driver_info(), 'hosts_plugins': self.engine.hosts_plugins()}
+
+        def done(info: dict):
+            write({'window_title': self.windowTitle(), 'visible': self.isVisible(),
+                   'devices': len(self._view.get('devices') or []), 'drivers': self._view.get('drivers'),
+                   'backend': info['driver'].get('backend', 'portaudio'), 'engine': info['driver'].get('engine'),
+                   'asio_available': info['driver'].get('asio_available'), 'hosts_plugins': info['hosts_plugins'],
+                   'error': info['driver'].get('error')}, 0)
+
+        def check():
+            if 'devices' in self._view:
+                poll.stop()
+                self._run(gather, done=done)
+
+        poll = QTimer(self)
+        poll.timeout.connect(check)
+        poll.start(250)
+        QTimer.singleShot(timeout_ms, lambda: write({'error': 'the window never showed a device list'}, 3))
+
     def closeEvent(self, event):
         self._poller.stop()
         for dialog in list(self._inserts_dialogs.values()) + ([self._diagnostics] if self._diagnostics else []):
             dialog.close()
 
         def cleanup():
+            try:
+                self.engine.save_session()
+            except Exception as e:
+                logger.warning(f"The session could not be saved: {e}")
             try:
                 self.engine.cleanup()
             except Exception as e:

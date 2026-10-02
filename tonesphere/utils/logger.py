@@ -93,6 +93,9 @@ class ToneSphereLogger:
         self.file_logging_enabled = False
         self.log_file_path: Path | None = None
         self.structured_logging = False
+        # One file for every module's logger: each is its own logger with propagate off, so
+        # a handler on "tonesphere" alone would catch nothing from the rest.
+        self._file_handler: logging.Handler | None = None
 
     def setup_logger(
         self,
@@ -134,22 +137,27 @@ class ToneSphereLogger:
         # Clear existing handlers
         logger.handlers.clear()
 
-        # Console handler
-        console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setLevel(level)
+        # A windowed build has no console: sys.stdout is None there, and a handler on it
+        # would drop every line. The file handler below is what keeps them.
+        if sys.stdout is not None:
+            console_handler = logging.StreamHandler(sys.stdout)
+            console_handler.setLevel(level)
 
-        if console_colors and not structured:
-            console_formatter = ColoredConsoleFormatter()
-        elif structured:
-            console_formatter = StructuredFormatter()
-        else:
-            console_formatter = logging.Formatter(
-                '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                datefmt='%Y-%m-%d %H:%M:%S'
-            )
+            if console_colors and not structured:
+                console_formatter = ColoredConsoleFormatter()
+            elif structured:
+                console_formatter = StructuredFormatter()
+            else:
+                console_formatter = logging.Formatter(
+                    '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                    datefmt='%Y-%m-%d %H:%M:%S'
+                )
 
-        console_handler.setFormatter(console_formatter)
-        logger.addHandler(console_handler)
+            console_handler.setFormatter(console_formatter)
+            logger.addHandler(console_handler)
+
+        if self._file_handler is not None:
+            logger.addHandler(self._file_handler)
 
         # File handler with rotation
         if enable_file_logging:
@@ -205,49 +213,45 @@ class ToneSphereLogger:
     def enable_file_logging(
         self,
         log_file: str = "tonesphere.log",
-        log_dir: str | None = None,
-        level: int = logging.INFO
+        log_dir: str | Path | None = None,
+        level: int = logging.INFO,
+        max_bytes: int = 10 * 1024 * 1024,
+        backup_count: int = 5,
     ):
-        """Enable file logging for all existing loggers"""
-        for logger in self.loggers.values():
-            # Remove old file handlers
-            for handler in logger.handlers[:]:
-                if isinstance(handler, logging.handlers.RotatingFileHandler):
-                    logger.removeHandler(handler)
-
-            # Add new file handler
-            if log_dir is None:
-                log_dir = Path.cwd() / "logs"
-            else:
-                log_dir = Path(log_dir)
-
+        """
+        One rotating file shared by every logger, existing and future. Never fails the app:
+        a folder that cannot be written leaves logging to the console.
+        """
+        log_dir = Path(log_dir) if log_dir else default_log_dir()
+        try:
             log_dir.mkdir(parents=True, exist_ok=True)
-            self.log_file_path = log_dir / log_file
-
             file_handler = logging.handlers.RotatingFileHandler(
-                self.log_file_path,
-                maxBytes=10 * 1024 * 1024,
-                backupCount=5,
-                encoding='utf-8'
-            )
-            file_handler.setLevel(level)
+                log_dir / log_file, maxBytes=max_bytes, backupCount=backup_count, encoding='utf-8')
+        except OSError:
+            return
+        file_handler.setLevel(level)
+        file_handler.setFormatter(logging.Formatter(
+            '%(asctime)s - %(name)s - %(levelname)s - %(module)s:%(funcName)s:%(lineno)d - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'))
 
-            formatter = logging.Formatter(
-                '%(asctime)s - %(name)s - %(levelname)s - %(module)s:%(funcName)s:%(lineno)d - %(message)s',
-                datefmt='%Y-%m-%d %H:%M:%S'
-            )
-            file_handler.setFormatter(formatter)
+        old, self._file_handler = self._file_handler, file_handler
+        for logger in self.loggers.values():
+            if old is not None:
+                logger.removeHandler(old)
             logger.addHandler(file_handler)
+        if old is not None:
+            old.close()
 
+        self.log_file_path = log_dir / log_file
         self.file_logging_enabled = True
-        logger.info(f"File logging enabled: {self.log_file_path}")
 
     def disable_file_logging(self):
         """Disable file logging for all loggers"""
-        for logger in self.loggers.values():
-            for handler in logger.handlers[:]:
-                if isinstance(handler, logging.handlers.RotatingFileHandler):
-                    logger.removeHandler(handler)
+        if self._file_handler is not None:
+            for logger in self.loggers.values():
+                logger.removeHandler(self._file_handler)
+            self._file_handler.close()
+            self._file_handler = None
 
         self.file_logging_enabled = False
 
@@ -278,6 +282,12 @@ class ToneSphereLogger:
             stats['log_file_size'] = self.log_file_path.stat().st_size
 
         return stats
+
+
+def default_log_dir() -> Path:
+    """Logs live with the user's other ToneSphere data, never next to the executable."""
+    from tonesphere.utils.paths import app_data_dir
+    return app_data_dir() / 'logs'
 
 
 # Global logger manager instance

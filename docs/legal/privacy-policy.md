@@ -2,8 +2,8 @@
 title: Privacy Policy
 layout: default
 permalink: /legal/privacy-policy/
-version: "1.2"
-effective_date: "2026-09-30"
+version: "1.3"
+effective_date: "2026-10-02"
 publisher: Neural Nexus Studios
 description: ToneSphere collects no user information and has no user accounts. This policy states what stays on your machine, and what the one optional feature that sends audio off it actually does.
 ---
@@ -12,8 +12,8 @@ description: ToneSphere collects no user information and has no user accounts. T
 
 - **Application:** ToneSphere
 - **Publisher:** Neural Nexus Studios, an individual developer, Kolkata, West Bengal, India
-- **Policy version:** 1.2
-- **Effective date:** 30 September 2026
+- **Policy version:** 1.3
+- **Effective date:** 2 October 2026
 
 ## 1. Summary
 
@@ -21,7 +21,8 @@ ToneSphere collects no user information.
 
 There are no user accounts, no sign-in, no registration, no telemetry, no analytics, no
 advertising identifiers, no crash or usage reporting, and no third-party tracking of any
-kind. ToneSphere is a desktop audio router: it takes audio from the devices and
+kind. When something goes wrong, ToneSphere writes a crash report to a file on your own
+computer and tells you where it is; it never sends it anywhere. ToneSphere is a desktop audio router: it takes audio from the devices and
 applications on your computer, processes it, and sends it to other devices on the same
 computer. That audio is handled in memory, in real time, and is neither stored nor
 transmitted by ToneSphere.
@@ -65,9 +66,11 @@ edit and delete. Nothing in these files is sent anywhere.
 | What | Where | Contains |
 |---|---|---|
 | Settings | `settings.db` in your user data folder (on Windows `%LOCALAPPDATA%\Neural Nexus Studios\ToneSphere`); defaults are read from `config/default_config.yaml`, which ships with the application and is never written | Sample rate, buffer size, backend choice, port numbers, logging switches, interface language, the folders you asked to be scanned for plugins |
-| Presets | the `presets` folder in the folder ToneSphere was started from | Patch and mixer state as plain YAML, keyed on audio device names and identifiers; for each plugin in a chain, its file path, name, vendor, version and the plugin's own saved state |
+| Session | `session.yaml` in the same user data folder, saved as you work and when you close | The same as a preset: your setup as you left it, so it comes back when you open ToneSphere |
+| Presets | the `presets` folder in the same user data folder, or wherever you choose to save one | Patch and mixer state as plain YAML, keyed on audio device names and identifiers; for each plugin in a chain, its file path, name, vendor, version and the plugin's own saved state |
 | Plugin scan cache | `plugin_cache.json` in the same user data folder | For each VST3 module found in the folders scanned: its file path, size and date, and the names, vendors, versions and categories it declares |
-| Log files | the `logs` folder, and only when you enable file logging, which is off by default | Diagnostic lines about streams, devices and errors |
+| Log files | `logs/tonesphere.log` in the same user data folder, on by default (the `enable_file_logging` setting turns it off); it rotates, so it stays small | Diagnostic lines about streams, devices, plugins and errors |
+| Crash reports | `logs/crash-*.log` (named by date and time) in the same folder, written only when ToneSphere meets an error it did not expect | The error message and the chain of calls that led to it, with the file paths of the code involved; the ToneSphere, Python and operating-system versions |
 
 Some of these record names rather than only numbers, and it is fair to say so. Presets
 record the **names of your audio devices** — for example "Focusrite Scarlett 2i2" or
@@ -75,7 +78,9 @@ record the **names of your audio devices** — for example "Focusrite Scarlett 2
 device index breaks the moment you plug something in. Presets and the scan cache record
 **which plugins you have and where they are installed**, and a preset stores each plugin's
 own saved state, whose contents the plugin decides. Logs may record device names, the file
-paths of plugins you loaded, and error messages. Both are local files under your control. Deleting those folders
+paths of plugins you loaded, and error messages; a crash report may too. All of them are
+local files under your control, and you decide whether to share one — for example by
+attaching it to an issue. Deleting those folders
 removes them, and uninstalling the application leaves nothing about you behind on any
 service, because there is no service.
 

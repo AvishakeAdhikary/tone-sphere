@@ -20,6 +20,7 @@ device key, buses are allocated from a separate range.
 
 import threading
 import time
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -231,6 +232,8 @@ class AudioEngine:
             for problem in self._problems:
                 logger.warning(f"Engine start: {problem}")
 
+            self.apply_channel_controls()
+
     @property
     def has_routes(self) -> bool:
         return bool(self.routing_matrix.connections)
@@ -279,6 +282,67 @@ class AudioEngine:
             suffix = " (muted — unmute when you know it will not feed back)" if muted else ""
 
             return True, f"{source.name} -> {dest.name}{suffix}"
+
+    def monitor(self, input_id: int, output_id: int, source_channel: int | None = None) -> tuple[bool, str]:
+        """
+        Hear an input on an output, now: the route made (or reused), the input channel
+        chosen (`source_channel`, 0-based, taken as mono into both ears; None for all of
+        them), unmuted, and the engine started. What a guitarist means by "monitor".
+        """
+        with self._lock:
+            if (input_id, output_id) not in self.routing_matrix.connections:
+                ok, message = self.create_routing(input_id, output_id, volume=1.0)
+                if not ok:
+                    return False, message
+            ok, message = self.set_routing_source_channel(input_id, output_id, source_channel)
+            if not ok:
+                return False, message
+            self.set_routing_mute(input_id, output_id, False)
+            if not self.host.is_running:
+                self.start_engine()
+            problems = [p for p in self._problems if p]
+            source, dest = self._device_by_id.get(input_id), self._device_by_id.get(output_id)
+            names = f"{source.name if source else input_id} -> {dest.name if dest else output_id}"
+            return (False, f"{names}: {problems[0]}") if problems and not self.host.is_running \
+                else (True, names)
+
+    def session_path(self):
+        from tonesphere.utils.paths import app_data_dir
+        return app_data_dir() / 'session.yaml'
+
+    def save_session(self):
+        """The whole setup — routes, strips, plugins, backend, rate, buffer — for the next launch."""
+        from tonesphere.core.presets import PresetManager
+        with self._lock:
+            PresetManager(self).save('session', self.session_path())
+
+    def restore_session(self) -> str | None:
+        """The setup the last run left, if there is one; what could not be restored is said."""
+        from tonesphere.core.presets import PresetManager
+        with self._lock:
+            path = self.session_path()
+            if not path.is_file():
+                return None
+            try:
+                result = PresetManager(self).load(path, apply_engine_settings=True)
+            except Exception as e:  # noqa: BLE001 - a broken session file must not stop the app starting
+                logger.warning(f"The last session could not be restored ({e}); starting empty")
+                return None
+            return None if result.is_complete else result.summary()
+
+    def save_preset(self, path):
+        from tonesphere.core.presets import PresetManager
+        with self._lock:
+            return PresetManager(self).save(Path(path).stem, Path(path))
+
+    def load_preset(self, path) -> str:
+        """Apply a preset file; what it restored, and what it could not, in one line."""
+        from tonesphere.core.presets import PresetManager
+        with self._lock:
+            result = PresetManager(self).load(Path(path), apply_engine_settings=True)
+            if not self.host.is_running:
+                self.start_engine()
+            return result.summary()
 
     def stop_engine(self):
         # A capture thread writes through `write_to_bus`, which never takes this lock, so
@@ -1126,6 +1190,7 @@ class AudioEngine:
                 muted=route.muted,
                 pan=route.pan,
                 invert=route.inverted,
+                source_channel=route.source_channel,
             ))
 
         soloed = frozenset(
@@ -1276,6 +1341,9 @@ class AudioEngine:
             for problem in problems:
                 logger.warning(f"Routing change: {problem}")
 
+        # A strip that has just joined the plan starts at unity: what the user already set
+        # on its fader, mute or trim is pushed to it now, not at the next touch of a control.
+        self.apply_channel_controls()
         self._problems = problems
         return problems
 
@@ -1292,6 +1360,7 @@ class AudioEngine:
                 'solo': route.solo,
                 'pan': route.pan,
                 'inverted': route.inverted,
+                'source_channel': route.source_channel,
             }
         return connections
 
@@ -1395,17 +1464,18 @@ class AudioEngine:
         node, _ = self._chain_node(device_id)
         return self.host.chain_for(node, is_input) if node is not None else []
 
-    def scan_plugins(self, paths: list[str] | None = None) -> list:
+    def scan_plugins(self, paths: list[str] | None = None, retry_failed: bool = False) -> list:
         """
         Scan VST3 folders (the standard ones by default), each module in a subprocess, with
         results cached by file size and time. Returns `plugins.scan.ScanResult`s, broken
-        and incompatible modules included, each with its reason.
+        and incompatible modules included, each with its reason. `retry_failed` scans
+        again the modules whose last scan failed.
         """
         from tonesphere.plugins import scan
         from tonesphere.utils.paths import app_data_dir
 
         cache = scan.ScanCache(app_data_dir() / 'plugin_cache.json')
-        return scan.scan(paths, cache)
+        return scan.scan(paths, cache, retry_failed=retry_failed)
 
     def add_plugin(self, device_id: int, info, is_input: bool = True) -> tuple[bool, str]:
         """Open a scanned plugin (`plugins.PluginInfo`) at the end of a device side's or bus's chain."""
@@ -1636,6 +1706,24 @@ class AudioEngine:
             route.pan = min(max(pan, -1.0), 1.0)
             self._publish_graph()
 
+    def set_routing_source_channel(self, source_id: int, destination_id: int,
+                                   channel: int | None) -> tuple[bool, str]:
+        """
+        Take one channel of the source alone, as mono (0-based), or all of them (None). A
+        guitar on input 1 of a stereo interface, channel 0, then plays in both ears.
+        """
+        with self._lock:
+            route = self.routing_matrix.connections.get((source_id, destination_id))
+            if route is None:
+                return False, "No such route"
+            device = self._device_by_id.get(source_id)
+            width = max(device.max_input_channels, device.max_output_channels) if device else None
+            if channel is not None and (channel < 0 or (width is not None and channel >= width)):
+                return False, f"The source has no channel {channel + 1}"
+            route.source_channel = channel
+            self._publish_graph()
+            return True, "Source channel set"
+
     def set_routing_invert(self, source_id: int, destination_id: int, invert: bool):
         with self._lock:
             route = self.routing_matrix.connections.get((source_id, destination_id))
@@ -1837,6 +1925,9 @@ class AudioEngine:
                    'render': endpoint(c.name, True), 'capture': endpoint(c.name, False)} for c in cables]
         return {
             'installed': any(c['state'] == 'working' for c in listed),
+            # The driver package itself: without it no cable can be added, on a normal machine
+            # until the driver is Microsoft-signed.
+            'driver_installed': bool(listed) or virtual_cables.driver_package() is not None,
             'cables': listed,
             'error': error,
             'platform_supported': virtual_cables.supported(),

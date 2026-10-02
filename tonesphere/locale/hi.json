@@ -16,11 +16,12 @@
     "transport.caption.mode": "मोड",
     "transport.caption.buffer": "बफ़र",
     "transport.exclusive": "एक्सक्लूसिव",
+    "transport.shared": "साझा",
     "transport.exclusive_tooltip": "सबसे कम लेटेंसी के लिए ऑपरेटिंग सिस्टम के मिक्सर को बायपास करता है।\nयहाँ मापा गया: उसी डिवाइस पर एक्सक्लूसिव 8.3 ms बनाम शेयर्ड 22 ms।\nजब तक ToneSphere डिवाइस को पकड़े है, कोई दूसरा ऐप उसे इस्तेमाल नहीं कर सकता।",
     "transport.buffer_frames": "{frames} फ़्रेम",
     "transport.buffer_tooltip": "प्रति कॉलबैक फ़्रेम। छोटा मान लेटेंसी घटाता है पर ड्रॉपआउट से पहले की\nगुंजाइश भी घटा देता है — घटाने के बाद XRUNS काउंटर देखते रहें।",
     "transport.monitor": "इनपुट मॉनिटर करें",
-    "transport.monitor_tooltip": "डिफ़ॉल्ट इनपुट को सीधे डिफ़ॉल्ट आउटपुट से जोड़ें",
+    "transport.monitor_tooltip": "किसी इनपुट — आपका गिटार, एक माइक्रोफ़ोन — को किसी आउटपुट पर अभी सुनें",
     "transport.rescan": "फिर से स्कैन करें",
     "transport.rescan_tooltip": "ऑडियो हार्डवेयर की सूची फिर से बनाएँ (F5)",
 
@@ -44,7 +45,7 @@
     "menu.engine.rescan": "डिवाइस फिर से स्कैन करें",
     "menu.engine.quit": "बंद करें",
     "menu.patch": "कनेक्शन",
-    "menu.patch.monitor": "इनपुट को आउटपुट पर मॉनिटर करें",
+    "menu.patch.monitor": "इनपुट मॉनिटर करें…",
     "menu.patch.clear": "सभी कनेक्शन हटाएँ",
     "menu.patch.auto_arrange": "स्वतः व्यवस्थित",
     "menu.help": "मदद",
@@ -58,8 +59,6 @@
     "dialog.patch_error": "जोड़ा नहीं जा सका",
     "dialog.add_bus_error": "बस जोड़ना",
     "dialog.bus_limit": "बस की सीमा पूरी हो गई",
-    "dialog.unmute_title": "मॉनिटरिंग अनम्यूट करें?",
-    "dialog.unmute_body": "जोड़ा गया: {patch}\n\nअभी यह म्यूट है। अगर आपका इनपुट माइक्रोफ़ोन है और आउटपुट स्पीकर हैं, तो अनम्यूट करने पर फ़ीडबैक होगा।\n\nअभी अनम्यूट करें?",
     "dialog.language_error": "भाषा",
     "dialog.language_not_saved": "इस सत्र के लिए भाषा बदल दी गई है, लेकिन उसे सहेजा नहीं जा सका: {reason}",
 
@@ -78,7 +77,7 @@
     "about.not_measured": "मापा नहीं गया",
     "about.latency_reported": "{ms} ms रिपोर्ट किया गया",
     "about.latency_nominal": "{ms} ms नाममात्र",
-    "about.asio_note": "इस बिल्ड में ASIO उपलब्ध नहीं है।\nयहाँ कम लेटेंसी का रास्ता WASAPI एक्सक्लूसिव है।",
+    "about.asio_note": "ASIO: इस कंप्यूटर पर कोई ASIO ड्राइवर इंस्टॉल नहीं है। सब कुछ Windows ऑडियो (WASAPI) पर काम करता है;\nकम लेटेंसी के लिए WASAPI एक्सक्लूसिव है। इंस्टॉल किया गया ASIO ड्राइवर एक अतिरिक्त बैकएंड के रूप में दिखेगा।",
     "about.bus_note": "मिक्स बस केवल इसी प्रोसेस में हैं और अन्य ऐप्लिकेशन से चुनी नहीं जा सकतीं।\nइसके लिए ToneSphere वर्चुअल केबल ड्राइवर बना है, पर अभी सत्यापित या\nप्रोडक्शन-साइन नहीं है — docs/VIRTUAL_AUDIO_DRIVER.md देखें।",
     "about.translation_note": "यह इंटरफ़ेस {language} में दिखाया जा रहा है। अनुवाद मशीन से किया गया है और किसी मातृभाषी ने उसे जाँचा नहीं है।",
 
@@ -316,6 +315,34 @@
     "cables.state.disabled": "अक्षम",
     "cables.state.problem": "काम नहीं कर रहा (Device Manager देखें)",
     "cables.none": "कोई केबल नहीं: ToneSphere ड्राइवर इंस्टॉल नहीं है, या हर केबल अनइंस्टॉल कर दिया गया।",
-    "cables.windows_only": "वर्चुअल केबल एक Windows ड्राइवर हैं; इस प्लेटफ़ॉर्म के लिए docs/VIRTUAL_AUDIO_DRIVER.md देखें।"
+    "cables.windows_only": "वर्चुअल केबल एक Windows ड्राइवर हैं; इस प्लेटफ़ॉर्म के लिए docs/VIRTUAL_AUDIO_DRIVER.md देखें।",
+
+    "crash.title": "ToneSphere में एक समस्या आई",
+    "crash.body": "कुछ गलत हो गया: {error}\n\nएक रिपोर्ट यहाँ सहेजी गई:\n{path}\n\nयह समस्या बताते समय कृपया इसे साथ भेजें।",
+
+    "monitor.title": "इनपुट मॉनिटर करें",
+    "monitor.hint": "चुनें कि क्या और कहाँ सुनना है। Start दबाते ही शुरू हो जाता है: कोई म्यूट केबल नहीं, कोई अतिरिक्त कदम नहीं।",
+    "monitor.input": "इनपुट",
+    "monitor.channel": "चैनल",
+    "monitor.output": "आउटपुट",
+    "monitor.start": "शुरू करें",
+    "monitor.channel.all": "सभी चैनल (स्टीरियो)",
+    "monitor.channel.one": "केवल इनपुट {number}, दोनों कानों में",
+    "monitor.feedback": "ये कंप्यूटर के अपने माइक्रोफ़ोन और स्पीकर हैं: इनसे फ़ीडबैक की तेज़ आवाज़ आ सकती है। हेडफ़ोन लगाएँ, या आवाज़ कम रखें।",
+    "monitor.on": "{patch} मॉनिटर हो रहा है",
+    "session.partial": "पिछला सत्र वापस लाया गया, सिवाय: {detail}",
+    "backend.asio_unavailable": "ASIO — कोई ASIO ड्राइवर इंस्टॉल नहीं",
+    "backend.asio_unavailable_tooltip": "किसी चीज़ को ASIO की ज़रूरत नहीं: हर सुविधा Windows ऑडियो पर काम करती है, और WASAPI एक्सक्लूसिव कम लेटेंसी देता है।\nअपने इंटरफ़ेस का ASIO ड्राइवर या ASIO4ALL इंस्टॉल करें, तो ASIO यहाँ दिखेगा।",
+    "menu.file": "&फ़ाइल",
+    "menu.file.save_preset": "प्रीसेट सहेजें…",
+    "menu.file.load_preset": "प्रीसेट लोड करें…",
+    "preset.saved": "प्रीसेट \"{name}\" सहेजा गया",
+    "dialog.preset_error": "प्रीसेट",
+
+    "patchbay.drop_missed": "जोड़ने के लिए केबल को किसी डिवाइस या बस पर छोड़ें।",
+    "patchbay.drop_not_input": "\"{name}\" एक इनपुट है: यह ऑडियो भेजता है, इसमें कुछ भी पैच नहीं किया जा सकता।",
+    "cable.menu.input_channel": "इनपुट चैनल",
+
+    "cables.no_driver": "वर्चुअल केबल के लिए ToneSphere ऑडियो ड्राइवर चाहिए, जो इंस्टॉल नहीं है। इसे अभी सामान्य Windows कंप्यूटर पर इंस्टॉल नहीं किया जा सकता: Windows केवल Microsoft द्वारा हस्ताक्षरित ड्राइवर लोड करता है, और यह हस्ताक्षरित नहीं है। ToneSphere का बाकी सब कुछ इसके बिना काम करता है।"
   }
 }

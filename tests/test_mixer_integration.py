@@ -114,6 +114,20 @@ class TestPanInTheMixer:
         assert float(out_phones[BLOCK // 2, 1]) == pytest.approx(1 / math.sqrt(2), abs=1e-2)
         assert abs(float(out_rec[BLOCK // 2, 1])) < 1e-2
 
+    def test_one_input_channel_alone_reaches_both_ears(self):
+        """A guitar on input 1 of a stereo interface: in both ears, input 2 left out."""
+        host = self.make_host()
+        guitar = np.column_stack([np.ones(BLOCK), np.full(BLOCK, 0.25)]).astype(np.float32)
+        out = self.render(
+            host,
+            RoutingGraph(connections=(Connection(bus_node('stereo'), bus_node('sink'), source_channel=0),)),
+            {'stereo': guitar},
+        )
+
+        expected = 1.0 / math.sqrt(2.0)
+        assert float(out[BLOCK // 2, 0]) == pytest.approx(expected, abs=1e-3)
+        assert float(out[BLOCK // 2, 1]) == pytest.approx(expected, abs=1e-3)
+
     def test_polarity_inversion_cancels_against_the_original(self):
         host = self.make_host()
         host.create_bus('a', channels=2)

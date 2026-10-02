@@ -3,7 +3,6 @@ name: CI
 on:
   push:
     branches: [main]
-    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
@@ -115,13 +114,15 @@ jobs:
         env:
           # Qt needs an offscreen platform plugin with no display attached.
           QT_QPA_PLATFORM: offscreen
-        run: uv run pytest -m "not hardware"
+        # A test stuck past ten minutes dumps every thread's stack into the log, so a hang on
+        # a runner says where it is instead of only timing the job out.
+        run: uv run pytest -m "not hardware" -o faulthandler_timeout=600
 
       - name: Check the package imports on this platform
         run: uv run python -c "import tonesphere; print(tonesphere.__version__)"
 
       - name: Check the CLI entry point runs
-        run: uv run python main.py
+        run: uv run python main.py help
 
       - name: Check diagnostics run without crashing
         # Exits non-zero when it finds no hardware, which is expected on CI — we only care
@@ -192,32 +193,39 @@ jobs:
         working-directory: native/coreaudio-plugin
         run: make uninstall
 
+  version:
+    # The version this run builds. On a push to main it is the version it releases: the
+    # latest v* tag's next patch, or minor/major when the head commit says [minor]/[major]
+    # (scripts/release_version.py). Everywhere else the same number labels the test builds.
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.next.outputs.version }}
+      previous: ${{ steps.next.outputs.previous }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Compute the next version
+        id: next
+        run: |
+          echo "version=$(python3 scripts/release_version.py next)" >> "$GITHUB_OUTPUT"
+          echo "previous=$(git tag --list 'v*' --sort=-v:refname | head -n1)" >> "$GITHUB_OUTPUT"
+
   package:
-    # tonesphere.spec (PyInstaller) has existed at the repo root since Phase 4-5 but was
-    # never actually invoked by CI, so "packaging" was an unverified claim — this job is
-    # what makes it a real one: build the frozen app, launch it, and prove it doesn't
-    # immediately die (the exact failure the spec's own comments say it was built to
-    # prevent: a missing PortAudio or ToneSphere native library) before ever calling it done.
-    #
-    # Built with ONEFILE=1: a user fetching "download for Windows" from a Releases page
-    # expects one executable, not a zip holding 279 loose files including an `_internal`
-    # DLL directory. A single self-contained binary is the release artifact; the default
-    # one-folder layout tonesphere.spec still produces without ONEFILE is what
-    # packaging/msix/build_msix.ps1 stages into the Store package, and stays that way
-    # deliberately — see tonesphere.spec's own comment for why those are different trades.
-    needs: test
+    # What users download, built and then launched the way they launch it: with no
+    # arguments, from the installer's own install, the AppImage, the app in the .dmg
+    # (.github/scripts/smoke_test_release.py). v0.2.0 was released after a test that only
+    # ever ran `ToneSphere gui`, and its exe opened nothing when double-clicked.
+    needs: [test, version]
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: windows-latest
-            asset_name: ToneSphere-windows.exe
-          - os: ubuntu-latest
-            asset_name: ToneSphere-linux
-          - os: macos-latest
-            asset_name: ToneSphere-macos
+        os: [windows-latest, ubuntu-latest, macos-latest]
 
     runs-on: ${{ matrix.os }}
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
 
     steps:
       - uses: actions/checkout@v5
@@ -230,10 +238,14 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-groups
 
+      - name: Stamp the version into the build
+        # Into this checkout only. From here on uv must not relock against the stamped
+        # pyproject.toml.
+        run: uv run python scripts/release_version.py stamp ${{ env.VERSION }}
+
       - name: Install native runtime libraries
-        # Same libraries and same reason as the test job above: PyInstaller's analysis
-        # phase imports PySide6/sounddevice to introspect them for hooks, and the frozen
-        # app the smoke-test step launches needs them at runtime too.
+        # The frozen app bundles PortAudio from here (tonesphere.spec), and Qt's xcb plugin
+        # libraries; the smoke test then runs the AppImage on this machine.
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
@@ -244,129 +256,108 @@ jobs:
       - name: Build the native engine (Windows)
         if: runner.os == 'Windows'
         run: |
-          uv run python scripts/fetch_sdks.py
-          uv run python scripts/build_native.py
+          uv run --frozen python scripts/fetch_sdks.py
+          uv run --frozen python scripts/build_native.py
 
-      - name: Build with PyInstaller (one-file)
-        run: uv run pyinstaller tonesphere.spec
-        env:
-          ONEFILE: '1'
+      - name: Freeze with PyInstaller
+        run: uv run --frozen pyinstaller --noconfirm tonesphere.spec
 
-      - name: Smoke test the frozen app (Linux, offscreen)
-        # No X server on this runner; same offscreen platform plugin the test job above
-        # uses for the same reason.
-        if: runner.os == 'Linux'
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: uv run python .github/scripts/smoke_test_frozen_app.py
-
-      - name: Smoke test the frozen app
-        if: runner.os != 'Linux'
-        run: uv run python .github/scripts/smoke_test_frozen_app.py
-
-      - name: Name the executable for its platform (Windows)
+      - name: Build the installer and the portable zip (Windows)
         if: runner.os == 'Windows'
-        run: Copy-Item dist/ToneSphere.exe ${{ matrix.asset_name }}
-
-      - name: Name the executable for its platform, and mark it runnable (Linux/macOS)
-        # A raw binary downloaded from a Releases page does not keep the +x bit through
-        # every download path regardless of what is uploaded, so this is a courtesy, not
-        # a guarantee -- documented on the release itself rather than assumed.
-        if: runner.os != 'Windows'
         run: |
-          cp dist/ToneSphere ${{ matrix.asset_name }}
-          chmod +x ${{ matrix.asset_name }}
+          choco install innosetup --no-progress -y
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DAppVersion=$env:VERSION `
+            /DSourceDir="$pwd\dist\ToneSphere" /DOutputDir="$pwd\release" packaging\windows\ToneSphere.iss
+          Compress-Archive -Path dist\ToneSphere -DestinationPath release\ToneSphere-$env:VERSION-windows-portable.zip
 
-      - name: Upload build artifact
+      - name: Build the AppImage (Linux)
+        if: runner.os == 'Linux'
+        run: bash packaging/linux/build_appimage.sh "$VERSION"
+
+      - name: Build the disk image (macOS)
+        if: runner.os == 'macOS'
+        run: bash packaging/macos/build_dmg.sh "$VERSION"
+
+      - name: Launch what users download (Windows)
+        if: runner.os == 'Windows'
+        run: >
+          uv run --frozen python .github/scripts/smoke_test_release.py windows
+          release/ToneSphere-${{ env.VERSION }}-Setup.exe
+          release/ToneSphere-${{ env.VERSION }}-windows-portable.zip
+          native/build/release/VST3/Release/tonesphere_test_gain.vst3
+
+      - name: Launch what users download (Linux)
+        if: runner.os == 'Linux'
+        run: uv run --frozen python .github/scripts/smoke_test_release.py linux release/ToneSphere-$VERSION-x86_64.AppImage
+
+      - name: Launch what users download (macOS)
+        if: runner.os == 'macOS'
+        run: uv run --frozen python .github/scripts/smoke_test_release.py macos release/ToneSphere-$VERSION-macos.dmg
+
+      - name: Upload the downloads
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.asset_name }}
-          path: ${{ matrix.asset_name }}
+          name: downloads-${{ runner.os }}
+          path: |
+            release/*.exe
+            release/*.zip
+            release/*.AppImage
+            release/*.dmg
           if-no-files-found: error
 
       - name: Package the Corresponding Source (Windows)
-        # The Windows executable bundles the GPLv3 ASIO host, so it is distributed under
-        # GPLv3 and its Corresponding Source -- including both SDKs, which are never
-        # committed -- has to be released next to it. See scripts/package_source.py.
+        # The Windows build bundles the GPLv3 ASIO host, so it is GPLv3 as a whole and its
+        # Corresponding Source (both SDKs included, never committed) must be offered with it.
+        # It is published in the separate `gpl-source` release, linked from each release's
+        # notes (GPLv3 section 6(d)), so the downloads list holds only what users run.
         if: runner.os == 'Windows'
-        run: uv run python scripts/package_source.py ToneSphere-windows-source.zip
+        run: uv run --frozen python scripts/package_source.py release-source/ToneSphere-$env:VERSION-windows-source.zip
 
       - name: Upload the Corresponding Source (Windows)
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
-          name: ToneSphere-windows-source.zip
-          path: ToneSphere-windows-source.zip
+          name: gpl-source
+          path: release-source/*.zip
           if-no-files-found: error
 
-  tag-release:
-    # Cutting a release is "bump the version in pyproject.toml and land it on main" --
-    # nothing here decides *whether* to release, only *that* a version nobody has tagged
-    # yet just did. Gated on lint/test/the plugin build so a release always represents a
-    # fully green commit, and on a genuine push to main so it can never fire for a PR or
-    # for the tag push this job itself makes (that push's ref is refs/tags/vX.Y.Z, which
-    # this job's own `if` does not match -- one tag, not a loop).
-    #
-    # Pushing the tag here uses the workflow's own token, which GitHub deliberately does
-    # not let re-trigger another workflow run -- so `release` below does not wait for a
-    # second, tag-triggered run that would never come. It runs in *this* run instead, off
-    # this job's own output, using the `package` artifacts this same run already built.
-    # `startsWith(github.ref, 'refs/tags/v')` stays as the other half of that condition
-    # purely so a tag pushed by hand later still works the original way.
-    name: Auto-tag a release
-    needs: [lint, test, build-macos-plugin]
+  release:
+    # Every green push to main is a release: tagged here, after lint, every test and every
+    # download's launch test passed, never before. One at a time, in push order.
+    name: Publish GitHub Release
+    needs: [lint, test, build-macos-plugin, version, package]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
+    concurrency:
+      group: release
+      cancel-in-progress: false
     permissions:
       contents: write
-    outputs:
-      tagged: ${{ steps.tag.outputs.tagged }}
-      version_tag: ${{ steps.tag.outputs.version_tag }}
-
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
-      - name: Tag the release if pyproject.toml's version is new
-        id: tag
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Publish the Corresponding Source
         run: |
-          version=$(grep -m1 '^version = ' pyproject.toml | sed -E 's/version = "(.*)"/\1/')
-          tag="v${version}"
-          echo "version_tag=$tag" >> "$GITHUB_OUTPUT"
+          gh release view gpl-source >/dev/null 2>&1 || gh release create gpl-source --prerelease \
+            --title "GPLv3 Corresponding Source (not an app download)" \
+            --notes "The complete corresponding source of each Windows build of ToneSphere, which includes the GPLv3 ASIO host. To install ToneSphere, use the latest release instead."
+          gh release upload gpl-source artifacts/gpl-source/*.zip --clobber
 
-          if git rev-parse "$tag" >/dev/null 2>&1; then
-            echo "Already tagged $tag -- no version bump since the last release."
-            echo "tagged=false" >> "$GITHUB_OUTPUT"
-          else
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git tag -a "$tag" -m "Release $tag"
-            git push origin "$tag"
-            echo "tagged=true" >> "$GITHUB_OUTPUT"
+      - name: Tag and publish the release
+        run: |
+          if git rev-parse "v$VERSION" >/dev/null 2>&1; then
+            echo "v$VERSION already exists: nothing to release"; exit 0
           fi
-
-  release:
-    # Publishes the exact artifacts `package` already built and smoke-tested for this
-    # commit. Fires either for a tag pushed by hand (the original, still-supported path)
-    # or for the tag `tag-release` just created in this same run -- see that job's own
-    # comment for why a fresh, tag-triggered run is not what this waits for.
-    name: Publish GitHub Release
-    needs: [package, tag-release]
-    if: startsWith(github.ref, 'refs/tags/v') || needs.tag-release.outputs.tagged == 'true'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      - name: Download build artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: release-assets
-
-      - name: Publish release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ needs.tag-release.outputs.version_tag || github.ref_name }}
-          files: release-assets/*/*
-          fail_on_unmatched_files: true
+          source_url="https://github.com/${{ github.repository }}/releases/download/gpl-source/ToneSphere-$VERSION-windows-source.zip"
+          python3 scripts/release_version.py notes "$VERSION" "${{ needs.version.outputs.previous }}" "$source_url" > notes.md
+          gh release create "v$VERSION" --target "$GITHUB_SHA" --title "ToneSphere $VERSION" \
+            --notes-file notes.md --latest artifacts/downloads-*/*
