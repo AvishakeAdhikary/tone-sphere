@@ -40,7 +40,7 @@ Download from the [latest release](https://github.com/AvishakeAdhikary/tone-sphe
 | Windows 10/11 x64 | `ToneSphere-<version>-Setup.exe` | Installs for your user only, so it never asks for administrator rights. Start menu shortcut; uninstall from Settings → Apps. |
 | Windows, no install | `ToneSphere-<version>-windows-portable.zip` | Unzip anywhere and run `ToneSphere.exe`. |
 | Linux x86_64 | `ToneSphere-<version>-x86_64.AppImage` | `chmod +x` it and run it. PortAudio is inside. |
-| macOS | `ToneSphere-<version>-macos.dmg` | Drag ToneSphere to Applications. |
+| macOS, Apple silicon | `ToneSphere-<version>-macos.dmg` | Drag ToneSphere to Applications. Built and launch-tested on macOS 26; older versions and Intel Macs are not tested. |
 
 The downloads are not code-signed yet, and both systems say so the first time:
 

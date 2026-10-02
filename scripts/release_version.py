@@ -85,7 +85,8 @@ Start menu. Windows SmartScreen may say "Windows protected your PC", because the
 yet code-signed: choose **More info → Run anyway**. Prefer no installer?
 `ToneSphere-{version}-windows-portable.zip` runs from any folder: unzip it and open `ToneSphere.exe`.
 
-**macOS 12 or later:** open `ToneSphere-{version}-macos.dmg` and drag ToneSphere to Applications.
+**macOS on Apple silicon** (built and launch-tested on macOS 26; older versions and Intel Macs
+are not tested): open `ToneSphere-{version}-macos.dmg` and drag ToneSphere to Applications.
 The app is not notarised by Apple, so the first time, **right-click it → Open → Open**; after that
 it opens normally.
 
