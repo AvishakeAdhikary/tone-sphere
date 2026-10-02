@@ -16,6 +16,7 @@
     "transport.caption.mode": "मोड",
     "transport.caption.buffer": "बफ़र",
     "transport.exclusive": "एक्सक्लूसिव",
+    "transport.shared": "साझा",
     "transport.exclusive_tooltip": "सबसे कम लेटेंसी के लिए ऑपरेटिंग सिस्टम के मिक्सर को बायपास करता है।\nयहाँ मापा गया: उसी डिवाइस पर एक्सक्लूसिव 8.3 ms बनाम शेयर्ड 22 ms।\nजब तक ToneSphere डिवाइस को पकड़े है, कोई दूसरा ऐप उसे इस्तेमाल नहीं कर सकता।",
     "transport.buffer_frames": "{frames} फ़्रेम",
     "transport.buffer_tooltip": "प्रति कॉलबैक फ़्रेम। छोटा मान लेटेंसी घटाता है पर ड्रॉपआउट से पहले की\nगुंजाइश भी घटा देता है — घटाने के बाद XRUNS काउंटर देखते रहें।",

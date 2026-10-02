@@ -15,7 +15,9 @@ from PySide6.QtCore import QPointF
 
 from tonesphere.core.engine import AudioEngine
 from tonesphere.engine.devices import DeviceInfo, HostApi
+from tonesphere.i18n import tr
 from tonesphere.ui.monitor_dialog import choose_defaults, hardware_name, is_built_in
+from tonesphere.ui.theme import Colors
 
 
 def device(name: str, inputs: int, outputs: int, key: str) -> DeviceInfo:
@@ -212,6 +214,27 @@ class TestTheWindowStartsReady:
                 combo = window.backend_combo
                 last = combo.model().item(combo.count() - 1)
                 assert 'ASIO' in last.text() and not last.isEnabled() and last.toolTip()
+                assert last.foreground().color() == Colors.TEXT_DIM, "it reads as unavailable, not as a choice"
+        finally:
+            window.close()
+
+    def test_the_mode_button_shows_the_mode_the_engine_is_in(self, qt_app, tmp_path):
+        """A restored session in shared mode once left the button saying Exclusive."""
+        from tonesphere.ui.main_window import MainWindow
+        from tonesphere.utils.config import ConfigManager
+
+        window = MainWindow(ConfigManager(db_path=tmp_path / 'settings.db'))
+        try:
+            assert window.tasks.flush(30)
+            window._run(window.engine.set_exclusive_mode, False, refresh='all')
+            assert window.tasks.flush(30)
+            qt_app.processEvents()
+            assert not window.exclusive_button.isChecked()
+            assert window.exclusive_button.text() == tr('transport.shared')
+            window.exclusive_button.click()
+            assert window.tasks.flush(30)
+            assert window.engine.get_driver_info()['exclusive_mode'] is True
+            assert window.exclusive_button.text() == tr('transport.exclusive')
         finally:
             window.close()
 

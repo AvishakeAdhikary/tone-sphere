@@ -78,7 +78,7 @@ class MainWindow(QMainWindow):
         # from the engine directly.
         self._view: dict = {'devices': [], 'matrix': {}, 'drivers': [], 'active_driver': None,
                             'plugin_host': False, 'insert_counts': {}, 'sample_rate': None,
-                            'buffer_size': None}
+                            'buffer_size': None, 'exclusive': None}
         self._state = 'stopped'
         self._running = False
         self._tick = 0
@@ -159,8 +159,9 @@ class MainWindow(QMainWindow):
                         entries = self.engine.list_inserts(d['id'], d['direction'] == 'input')
                         counts[(d['id'], d['direction'] == 'input')] = (
                             len(entries), any(e['crashed'] for e in entries))
+            info = self.engine.get_driver_info()
             view.update(devices=devices, drivers=self.engine.get_available_drivers(),
-                        active_driver=self.engine.get_driver_info().get('active_driver'),
+                        active_driver=info.get('active_driver'), exclusive=info.get('exclusive_mode'),
                         plugin_host=plugin_host, insert_counts=counts,
                         sample_rate=self.engine.sample_rate, buffer_size=self.engine.buffer_size)
         return view
@@ -505,6 +506,16 @@ class MainWindow(QMainWindow):
             self.buffer_combo.setCurrentIndex(index)
             self.buffer_combo.blockSignals(False)
         self._fill_rates()
+        if self._view['exclusive'] is not None:
+            self.exclusive_button.blockSignals(True)
+            self.exclusive_button.setChecked(bool(self._view['exclusive']))
+            self.exclusive_button.blockSignals(False)
+            self._label_exclusive()
+
+    def _label_exclusive(self):
+        # A checkable button looks the same either way in this theme: the text is the state.
+        self.exclusive_button.setText(tr('transport.exclusive') if self.exclusive_button.isChecked()
+                                      else tr('transport.shared'))
 
     def _populate_backends(self):
         self.backend_combo.blockSignals(True)
@@ -518,6 +529,8 @@ class MainWindow(QMainWindow):
             self.backend_combo.addItem(tr('backend.asio_unavailable'))
             item = self.backend_combo.model().item(self.backend_combo.count() - 1)
             item.setEnabled(False)
+            # The style sheet's popup draws a disabled item like any other; dim it by hand.
+            item.setForeground(Colors.TEXT_DIM)
             item.setToolTip(tr('backend.asio_unavailable_tooltip'))
 
         active = self._view['active_driver']
@@ -630,6 +643,7 @@ class MainWindow(QMainWindow):
         self._run(self.engine.switch_driver, name, refresh='all', error_title=tr('dialog.backend_error'))
 
     def _toggle_exclusive(self, exclusive: bool):
+        self._label_exclusive()
         self._run(self.engine.set_exclusive_mode, exclusive)
 
     def _change_buffer(self, index: int):
@@ -983,7 +997,7 @@ class MainWindow(QMainWindow):
             else tr('transport.start_engine')
         )
         self.backend_caption.setText(tr('transport.caption.backend'))
-        self.exclusive_button.setText(tr('transport.exclusive'))
+        self._label_exclusive()
         self.exclusive_button.setToolTip(tr('transport.exclusive_tooltip'))
         self.mode_caption.setText(tr('transport.caption.mode'))
 

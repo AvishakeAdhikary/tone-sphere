@@ -335,6 +335,10 @@ public:
     std::atomic<uint32_t> fault_code{0};  // set by the audio thread when process() faults
     std::string fault;  // control side: written before `crashed` is set, or from fault_code
     ts::ItemQueue<ParamChange, 1024> changes;  // producer: plugin thread; consumer: audio thread
+    // How many Vst3Processors (the audio thread's side) hold this instance. Changed and read
+    // only on the plugin thread, so `changes` keeps exactly one consumer: the audio thread
+    // while a processor holds it, flush_parameters on the plugin thread while none does.
+    int processors = 0;
     // SPSC like `changes`: every push happens on the plugin thread (ts_vst3_send_midi hops to
     // it), so there is exactly one producer however many threads send notes.
     ts::ItemQueue<NoteMessage, 512> notes;
@@ -346,6 +350,38 @@ public:
     }
     ~Instance();
 };
+
+// Plugin thread only. A change reaches the processor, and so the state it saves, only through
+// process(); with no audio thread running the instance (the engine stopped, its device not
+// routed), deliver what is queued in a zero-sample process() call, VST3's parameter flush.
+// Guitar Rig 7 otherwise saved a session without the knob the user had just turned.
+void flush_parameters(Instance& p) {
+    if (p.processors > 0 || !p.processor || p.crashed.load(std::memory_order_acquire)) return;
+    FixedChanges changes;
+    ParamChange change;
+    bool more = p.changes.pop(change);
+    while (more) {
+        changes.clear();
+        int32 index = 0;
+        do {
+            IParamValueQueue* q = changes.addParameterData(change.id, index);
+            if (!q) break;  // a full batch: the change waits for the next one
+            q->addPoint(0, change.value, index);
+            more = p.changes.pop(change);
+        } while (more);
+        ProcessData data;
+        data.processMode = kRealtime;
+        data.symbolicSampleSize = kSample32;
+        data.numSamples = 0;
+        data.inputParameterChanges = &changes;
+        DWORD code = 0;
+        guarded([&] { p.processor->process(data); }, code);
+        if (code) {
+            p.mark_crashed(fault_text("process (parameter flush)", code));
+            return;
+        }
+    }
+}
 
 tresult ComponentHandler::performEdit(ParamID id, ParamValue value) {
     // The plugin's own editor moved a control: it already updated its controller, so only
@@ -516,6 +552,7 @@ public:
           instance_(std::move(instance)),
           scratch_(new float[static_cast<size_t>(channels_) * max_block]()) {
         for (uint32_t c = 0; c < channels_; ++c) out_ptrs_[c] = scratch_.get() + static_cast<size_t>(c) * max_block;
+        plugin_thread().call([this] { ++instance_->processors; });
         // Bus 0 carries the audio; every further bus gets silence in and a place to write
         // out that nothing reads.
         const auto& ins = instance_->input_bus_channels;
@@ -546,6 +583,10 @@ public:
         context_.timeSigNumerator = 4;
         context_.timeSigDenominator = 4;
         context_.state = ProcessContext::kTempoValid | ProcessContext::kTimeSigValid;
+    }
+    // Runs on the control thread once the audio thread has let go of the plan.
+    ~Vst3Processor() override {
+        plugin_thread().call([this] { --instance_->processors; });
     }
     uint32_t param_count() const override { return 0; }
     uint32_t plugin() const override { return instance_->handle; }
@@ -933,7 +974,10 @@ TS_API int32_t ts_vst3_get_state(uint32_t handle, int32_t which, uint8_t* buffer
     int32_t size = 0;
     DWORD code = 0;
     tresult r = kResultOk;
+    bool flush_fault = false;
     plugin_thread().call([&] {
+        flush_parameters(*p);
+        if ((flush_fault = p->crashed.load(std::memory_order_acquire))) return;
         guarded([&] {
             MemoryStream stream;
             r = which == 0 ? p->component->getState(&stream) : p->controller->getState(&stream);
@@ -941,8 +985,8 @@ TS_API int32_t ts_vst3_get_state(uint32_t handle, int32_t which, uint8_t* buffer
             if (buffer && capacity > 0) std::memcpy(buffer, stream.getData(), static_cast<size_t>(std::min(size, capacity)));
         }, code);
     });
-    if (code) {
-        p->mark_crashed(fault_text("getState", code));
+    if (code) p->mark_crashed(fault_text("getState", code));
+    if (code || flush_fault) {
         t_error = p->fault;
         return TS_ERR_BACKEND;
     }

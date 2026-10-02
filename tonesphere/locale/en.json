@@ -16,6 +16,7 @@
     "transport.caption.mode": "MODE",
     "transport.caption.buffer": "BUFFER",
     "transport.exclusive": "Exclusive",
+    "transport.shared": "Shared",
     "transport.exclusive_tooltip": "Bypass the OS mixer for the lowest latency.\nMeasured here: 8.3 ms exclusive against 22 ms shared on the same device.\nNo other application can use the device while ToneSphere holds it.",
     "transport.buffer_frames": "{frames} frames",
     "transport.buffer_tooltip": "Frames per callback. Smaller is lower latency with less margin before a\ndropout — watch the XRUNS counter after lowering it.",
