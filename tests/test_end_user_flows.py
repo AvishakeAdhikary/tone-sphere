@@ -8,6 +8,8 @@ stayed silent, a session that vanished on close. The audio itself through these 
 proven on hardware in tests/hardware/test_first_run.py.
 """
 
+import sys
+
 import pytest
 from PySide6.QtCore import QPointF
 
@@ -233,3 +235,42 @@ class TestTheWindowStartsReady:
             assert window.master_strip.meter._peaks[0] == pytest.approx(-40.0)
         finally:
             window.close()
+
+
+class TestADoubleClickOpensTheApp:
+    def test_no_arguments_starts_the_interface(self, monkeypatch):
+        """v0.2.0's exe printed usage to a console a windowed build does not have, and exited."""
+        import threading
+
+        import main
+        import tonesphere.ui
+
+        # main() installs the crash hooks process-wide; these put pytest's own back afterwards.
+        monkeypatch.setattr(sys, 'excepthook', sys.excepthook)
+        monkeypatch.setattr(threading, 'excepthook', threading.excepthook)
+        opened = []
+        monkeypatch.setattr(sys, 'argv', ['ToneSphere.exe'])
+        monkeypatch.setattr(tonesphere.ui, 'run', lambda config: opened.append(config) or 0)
+        assert main.main() == 0
+        assert opened, "a launch with no arguments must open the window"
+
+    def test_help_is_still_there_for_a_terminal(self, monkeypatch, capsys):
+        import main
+
+        monkeypatch.setattr(sys, 'argv', ['ToneSphere.exe', 'help'])
+        assert main.main() == 0
+        assert 'ToneSphere server' in capsys.readouterr().out
+
+
+class TestAFailureLeavesAReport:
+    def test_an_uncaught_exception_is_written_to_the_logs_folder(self):
+        from tonesphere.utils import crash
+        from tonesphere.utils.logger import default_log_dir
+
+        try:
+            raise RuntimeError("the device vanished mid-start")
+        except RuntimeError as e:
+            path = crash.write_report(type(e), e, e.__traceback__, 'main thread')
+        assert path is not None and path.parent == default_log_dir()
+        text = path.read_text(encoding='utf-8')
+        assert 'the device vanished mid-start' in text and 'Traceback' in text and 'main thread' in text
