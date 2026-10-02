@@ -345,7 +345,11 @@ Found by signal tests during the migration, each now covered by one:
   its pipes, for a crash; a plugin setting changed while nothing processed the plugin missing
   from its saved state (Guitar Rig 7; now flushed by a zero-sample `process()`); an Exclusive
   button that said exclusive after a shared session was restored; tests writing into the
-  developer's real settings folder.
+  developer's real settings folder;
+- a jitter buffer that never recovered from one sender stall longer than its depth:
+  playout ran on ahead of the sender at the same rate, and every packet after the stall
+  arrived just after its slot and was dropped (macOS CI, Opus over UDP: 200 received, 200
+  lost). A run of eight late packets into an empty buffer now realigns it.
 
 ## 5. What remains, and what blocks it
 

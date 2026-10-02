@@ -23,6 +23,16 @@ None, and that is counted as priming, never as loss — a buffer that has not st
 not a buffer that is dropping audio, and conflating the two would make a healthy startup
 look like a broken link.
 
+Playout that has overtaken the sender primes once more. A sender that stalls for longer
+than the buffer holds leaves its slots to be concealed, and playout moves on past audio
+that is still coming; both then run at the audio rate, so playout never falls back, and
+every packet from then on arrives just after its slot and is dropped as late. One stall
+lost every packet after it that way (macOS CI, Opus over UDP: 200 received, 200 lost).
+A straggler, or jitter, drops a late packet now and then between packets that play; an
+overtaken playout drops nothing but. So after `OVERTAKEN_PACKETS` late packets in a row
+with nothing held and nothing played between them, playout moves back to the latest and
+the buffer fills to its target again before playing — counted as an *underrun*.
+
 Adaptive depth
 --------------
 `mode='fixed'` holds `target_latency_ms` and nothing else. `mode='adaptive'` measures how
@@ -66,6 +76,8 @@ DEPTH_SMOOTHING = 1.0 / 8.0
 # A held slot shows in the depth only once the next packet lands, so stretches are spaced
 # to let the smoothed depth see each one before deciding on another.
 STRETCH_SPACING_PULLS = 4
+# Late packets in a row, into an empty buffer, that mean playout has overtaken the sender.
+OVERTAKEN_PACKETS = 8
 
 
 def sequence_distance(origin: int, other: int) -> int:
@@ -165,6 +177,7 @@ class JitterBuffer:
         self._priming = True
         self._last_block: np.ndarray | None = None
         self._concealment_run = 0
+        self._late_run = 0
         self._silence = np.zeros((frames_per_packet, channels), dtype=np.float32)
         self._lock = threading.Lock()
 
@@ -181,6 +194,7 @@ class JitterBuffer:
             'resync_events': 0,
             'resynced_packets_skipped': 0,
             'priming_pulls': 0,
+            'underruns': 0,
             'peak_buffered_packets': 0,
             'stretches': 0,
             'shrinks': 0,
@@ -225,8 +239,14 @@ class JitterBuffer:
                 # sequence arriving afterwards is genuinely late.
                 self._next_sequence = sequence
             elif sequence_distance(self._next_sequence, sequence) < 0:
-                self._stats['packets_late_dropped'] += 1
-                return False
+                self._late_run = 0 if self._packets else self._late_run + 1
+                if self._late_run < OVERTAKEN_PACKETS:
+                    self._stats['packets_late_dropped'] += 1
+                    return False
+                self._stats['underruns'] += 1
+                self._late_run = 0
+                self._next_sequence = sequence
+                self._priming = True
 
             if sequence in self._packets:
                 self._stats['packets_duplicate'] += 1
@@ -348,6 +368,7 @@ class JitterBuffer:
                 self._next_sequence = (self._next_sequence + 1) % SEQUENCE_MODULUS
                 self._last_block = block
                 self._concealment_run = 0
+                self._late_run = 0
                 return block
 
             resynced = self._resync_if_far_behind()
@@ -434,6 +455,7 @@ class JitterBuffer:
             self._priming = True
             self._last_block = None
             self._concealment_run = 0
+            self._late_run = 0
 
     # --- Statistics ---
 

@@ -70,6 +70,7 @@ def test_a_scanner_that_never_reports_times_out(monkeypatch, tmp_path):
     assert result.status == scan.TIMED_OUT and time.monotonic() - started < 15
 
 
+@pytest.mark.skipif(sys.platform != 'win32', reason="the VST3 host, and so the scanner, is Windows-only")
 def test_the_real_scanner_reports_and_leaves(tmp_path):
     """The child's own side: the report is in place, whole, by the time the process has gone."""
     import subprocess
