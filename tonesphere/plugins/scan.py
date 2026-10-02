@@ -11,7 +11,8 @@ cached too, and retried when the user asks for a scan.
 The result crosses back in a file, not on stdout: a windowed build of ToneSphere has no
 stdout at all, so a scanner that printed its result reported every plugin as crashed there.
 And the parent believes that result over the subprocess's exit code: big commercial modules
-can fault in their own teardown after their classes were read perfectly well.
+can fault in their own teardown after their classes were read perfectly well, or hang in it:
+once the result is in, the scanner is given a moment to leave and then ended.
 
     python -m tonesphere.plugins.scan <path.vst3> [--result <file.json>]
 """
@@ -30,6 +31,8 @@ from tonesphere.plugins import PluginError, PluginInfo, classes_in
 
 # Guitar Rig 7 is one 176 MB module, and initialises a great deal on load.
 SCAN_TIMEOUT_S = 120.0
+# How long a scanner that has written its result may take to exit before it is ended.
+EXIT_GRACE_S = 5.0
 
 OK = 'ok'
 CRASHED = 'crashed'
@@ -152,12 +155,25 @@ def scan_module(path: Path, timeout: float = SCAN_TIMEOUT_S) -> ScanResult:
         # process (Guitar Rig does) hands it the pipe, the pipe never closes, and waiting for
         # it would time the scan out long after the plugin was read.
         with open(Path(folder) / 'stderr.txt', 'w+b') as stderr_file:
-            try:
-                done = subprocess.run(_scanner_command(path, result_file), stdin=subprocess.DEVNULL,
-                                      stdout=subprocess.DEVNULL, stderr=stderr_file, timeout=timeout,
-                                      cwd=None if getattr(sys, 'frozen', False) else SOURCE_ROOT,
-                                      creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
-            except subprocess.TimeoutExpired:
+            child = subprocess.Popen(_scanner_command(path, result_file), stdin=subprocess.DEVNULL,
+                                     stdout=subprocess.DEVNULL, stderr=stderr_file,
+                                     cwd=None if getattr(sys, 'frozen', False) else SOURCE_ROOT,
+                                     creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+            deadline = time.monotonic() + timeout
+            reported = None
+            while child.poll() is None:
+                now = time.monotonic()
+                if reported is None and result_file.exists():
+                    reported = now
+                # Guitar Rig 7's first load in a session can hang the process's exit after the
+                # result was written; waiting for it would time a good scan out.
+                late = now > reported + EXIT_GRACE_S if reported is not None else now > deadline
+                if late:
+                    child.kill()
+                    child.wait()
+                    break
+                time.sleep(0.05)
+            if reported is None and not result_file.exists() and time.monotonic() > deadline:
                 return ScanResult(str(path), TIMED_OUT, f"did not finish loading within {timeout:.0f} s",
                                   architecture=arch)
             stderr_file.seek(0)
@@ -167,7 +183,7 @@ def scan_module(path: Path, timeout: float = SCAN_TIMEOUT_S) -> ScanResult:
         except (OSError, ValueError):
             report = None
 
-    code = done.returncode & 0xFFFFFFFF
+    code = child.returncode & 0xFFFFFFFF
     if report is None:
         stderr = stderr_bytes.decode('utf-8', errors='replace').strip().splitlines()
         return ScanResult(str(path), CRASHED, f"the scanner process died (exit code 0x{code:08X}) while loading it"
@@ -247,9 +263,11 @@ def scan(roots=None, cache: ScanCache | None = None, timeout: float = SCAN_TIMEO
 def scan_one_cli(argv: list[str]) -> int:
     """
     The subprocess side: load one module, write one JSON report, and leave at once. The
-    module is never unloaded and the interpreter never shuts down normally (`os._exit`):
-    both run the plugin's teardown, where some commercial modules fault after their
-    classes were read perfectly well.
+    module is never unloaded and the process does not exit normally: both run the plugin's
+    teardown, where some commercial modules fault or hang after their classes were read
+    perfectly well. On Windows even `os._exit` runs every DLL's detach routine, so the
+    process is terminated outright. The report is renamed into place, so whoever polls for
+    it never reads half of one.
     """
     path = argv[0]
     result = Path(argv[argv.index('--result') + 1]) if '--result' in argv else None
@@ -261,9 +279,16 @@ def scan_one_cli(argv: list[str]) -> int:
         report = {'error': str(e)}
     text = json.dumps(report)
     if result is not None:
-        result.write_text(text, encoding='utf-8')
+        partial = result.with_name(result.name + '.part')
+        partial.write_text(text, encoding='utf-8')
+        os.replace(partial, result)
     elif sys.stdout is not None:
         print(text, flush=True)
+    if sys.platform == 'win32':
+        import ctypes
+        kernel32 = ctypes.WinDLL('kernel32')
+        kernel32.GetCurrentProcess.restype = ctypes.c_void_p
+        kernel32.TerminateProcess(ctypes.c_void_p(kernel32.GetCurrentProcess()), 0)
     os._exit(0)
 
 

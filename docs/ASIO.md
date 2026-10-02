@@ -179,7 +179,8 @@ signed by Steinberg before publishing, or **GPL version 3** (its `LICENSE.txt` s
 - Any binary distribution that includes `tonesphere_asio.dll` is distributed under GPLv3
   as a whole. The Windows executable does: `tonesphere.spec` bundles the GPLv3 text and
   both SDKs' licence files into it, and the release job publishes its Corresponding
-  Source next to it as `ToneSphere-windows-source.zip` (`scripts/package_source.py`: the
+  Source as `ToneSphere-<version>-windows-source.zip` in the rolling `gpl-source` release,
+  linked from that release's notes (`scripts/package_source.py`: the
   tree at that commit, the ASIO SDK exactly as fetched, and the parts of the VST3 SDK the
   build compiles), because the tag's own source archive has neither SDK. Extracted on its
   own, the archive rebuilds both DLLs with nothing downloaded, and `tests/native` passes

@@ -22,7 +22,8 @@ panel from 2006. That is the whole idea.
   PortAudio host.
 - Hosts **VST3 effect plugins on Windows** — a browser that scans each plugin in a separate
   process, insert chains on any device's input or output, parameters, bypass and the
-  plugin's own editor. Proven with the project's own test plugin and with Surge XT.
+  plugin's own editor. Proven with the project's own test plugin, with Surge XT, and with
+  Native Instruments' Guitar Rig 7.
 - Gives you a mixer and a patchbay: pan and balance, polarity, trim, mute, solo, smoothed
   gain, a limiter on every output, per-channel meters, and cables you make by dragging a
   port onto a port.
@@ -33,8 +34,9 @@ panel from 2006. That is the whole idea.
 - Creates **a Linux sink other applications can select**, and publishes a **CoreAudio
   loopback device on macOS** that is proven in continuous integration and unverified in
   day-to-day use — stated that way on purpose.
-- Saves presets as plain YAML keyed on stable device identifiers, with their plugin chains,
-  and tells you what was missing when it loads one without your interface attached.
+- Comes back as you left it: the session — routes, mixer, plugins and their settings — is
+  saved as you work and restored when you open it. Presets are the same plain YAML, keyed on
+  stable device identifiers, and say what was missing when your interface is not attached.
 - Keeps latency figures apart: ToneSphere's own buffer arithmetic, what the drivers and
   plugins report, and — on Windows — a round trip it **measures** by playing a sweep and
   timing its return. Until that measurement has been taken on your own output and input,
@@ -54,17 +56,21 @@ signed for anyone else's machine, and exactly where it stands in the
 ## Download
 
 **[Latest release downloads](https://github.com/AvishakeAdhikary/tone-sphere/releases/latest)**
-— built and smoke-tested on Windows, Linux and macOS.
+— a Windows installer (per user, no administrator prompt) or portable zip, a Linux AppImage
+and a macOS disk image, each launched by continuous integration the way you would launch it
+before it is published. A new release is published on every change that passes.
 
-On Linux, install PortAudio from your distribution first (`libportaudio2` on Debian and
-Ubuntu, `portaudio` on Fedora, `portaudio` on Arch); the Linux Python wheel does not bundle
-it. Run `main.py test` before anything else — it opens a stream, plays a tone, reports the
-engine's timing and the driver's latency, and tells you PASS, WARN or FAIL per capability.
+They are not code-signed yet: on Windows choose **More info → Run anyway** when SmartScreen
+asks; on macOS right-click the app → **Open** the first time. Then press **Monitor Input**:
+it picks your interface and its first input, in both ears. How that was checked with a
+guitar, a commercial amp simulator and the release build is in the
+[first-run verification](FIRST_RUN_VERIFICATION.md).
 
-The Windows executable on GitHub includes ASIO support built from Steinberg's ASIO SDK
-under the GNU GPL version 3, and is distributed under that licence; each release carries
-its complete source, SDKs included. The Microsoft Store package leaves ASIO out, and it and
-the Linux and macOS executables are MIT-licensed.
+The Windows build on GitHub includes ASIO support built from Steinberg's ASIO SDK under the
+GNU GPL version 3, and is distributed under that licence; its complete source, SDKs
+included, is published with every release in the `gpl-source` release and linked from the
+release notes. The Microsoft Store package leaves ASIO out, and it and the Linux and macOS
+builds are MIT-licensed.
 
 ## Engineering documentation
 
@@ -76,6 +82,8 @@ shown as `--`.
   with every figure's source.
 - [Implementation status](IMPLEMENTATION_STATUS.md) — the record of what is done, capability
   by capability.
+- [First-run verification](FIRST_RUN_VERIFICATION.md) — the release build installed and used
+  through its own window, with a guitar plugged in, and the output measured.
 - [Architecture](ARCHITECTURE.md) — the Python control plane, the native real-time engine,
   and the C ABI between them.
 - [Real-time rules](REALTIME.md) — what the audio thread may and may not do, and the

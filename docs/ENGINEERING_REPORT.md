@@ -276,6 +276,28 @@ the output jack.
   Dexed played in tune by MIDI from the engine, REST, the on-screen keyboard and through the
   AI-04's cable.
 
+### 3.12 The product a user downloads (M21–M24)
+
+v0.2.0, installed by the owner on a clean machine, opened no window, showed meters but no
+sound on Monitor Input, called Guitar Rig "crashed" and added no cables. Every one of those
+paths had tests; none of the tests drove what a user downloads. So:
+
+- **Packaging** (`.github/scripts/smoke_test_release.py`, every CI run): the Windows
+  installer is installed silently and the installed app started with no arguments; the
+  portable zip, the AppImage and the app from the mounted `.dmg` are started the same way.
+  Each writes, once its window is up, what it is running on; the test checks the window, the
+  backend and (Windows) the native engine. The frozen scanner reads the MIT test plugin.
+- **Guitar Rig 7.0.1** (`tests/hardware/test_guitar_rig.py`): scanned in 0.7 s where it had
+  timed out; its own −12.0 dB master volume moves the output −12.04 dB; 60 s with no fault.
+- **The built app, through its own window** (UI Automation from PowerShell, AI-04, guitar on
+  input 1, measured from another process on the output's loopback — `first_run_probe.py`):
+  Monitor Input preselected Line (AI-04), input 1 to both ears, Speakers (AI-04); on Start the
+  headphones carried the guitar 3.02 dB below the input (mono law 3.01 dB; coherence 0.976);
+  Guitar Rig added from the browser and set from the parameter list to −12.0 dB lowered it
+  12.20 dB; after close and reopen, the route and the plugin at its setting came back
+  (−15.05 dB). `tests/hardware/test_first_run.py` repeats the measured part against the
+  built app on a prepared session. Record: `docs/FIRST_RUN_VERIFICATION.md`.
+
 ## 4. Real defects found and fixed
 
 Found by signal tests during the migration, each now covered by one:
@@ -315,7 +337,15 @@ Found by signal tests during the migration, each now covered by one:
   event (now bounded per wake-up); and an ASIO host that would wait for ever on a driver
   stuck in `stop()` (now abandoned after 5 s and reported);
 - a disable of a cable in use leaving it "pending a restart", and a device change recorded
-  while the cable's second endpoint had not yet gone.
+  while the cable's second endpoint had not yet gone;
+- found by the owner on v0.2.0, then by driving the built app: no window from a no-argument
+  launch; a monitor route created muted on an engine nobody started; a MASTER meter that read
+  the inputs; routes made before Start that stayed silent, and strip settings not re-applied
+  to a new plan; a scanner that took a plugin's teardown fault, or a helper process holding
+  its pipes, for a crash; a plugin setting changed while nothing processed the plugin missing
+  from its saved state (Guitar Rig 7; now flushed by a zero-sample `process()`); an Exclusive
+  button that said exclusive after a shared session was restored; tests writing into the
+  developer's real settings folder.
 
 ## 5. What remains, and what blocks it
 
@@ -324,7 +354,9 @@ Found by signal tests during the migration, each now covered by one:
 | Production-signed driver | EV code-signing certificate and a Partner Center hardware account (attestation signing) | **owner**, cost and identity verification |
 | The driver on a real desktop, with Discord or OBS | the driver is test-signed: only a test-signed machine or VM | **owner** / after signing |
 | ASIO with a manufacturer's ASIO driver | an interface whose maker ships one (the AI-04 has none) | **owner** |
-| Commercial VST3 plugins; Neural Amp Modeler | licences; NAM's installer is unsigned | **owner** |
+| Commercial VST3 plugins beyond Guitar Rig 7.0.1; Neural Amp Modeler | licences; NAM's installer is unsigned | **owner** |
+| Code-signed downloads (no SmartScreen or Gatekeeper warning) | a code-signing certificate; an Apple Developer ID | **owner** |
+| Discord as a capture source, tested | it played nothing during the run and exposes no controls to automation; per-app capture itself is HARDWARE VERIFIED | project |
 | MIDI from a hardware keyboard | a MIDI device | **owner** |
 | macOS day to day, and bus routing with real macOS devices | a Mac | whoever owns one |
 | An intermittent exclusive-mode round trip through a virtual cable in the VM: the capture holds the whole sweep, the correlation sometimes fails on it | cause not established; `docs/VIRTUAL_AUDIO_DRIVER.md` | project |
@@ -345,8 +377,8 @@ Found by signal tests during the migration, each now covered by one:
   ASIO SDK as fetched, the compiled parts of the VST3 SDK). Checked: extracted on its own,
   it rebuilds both DLLs with no download, and the 148 native tests pass against them.
   CI first built it on 2026-09-30, for this branch's pull request (38 MiB, uploaded as a
-  run artifact beside the executable); publishing both on a version tag has not happened
-  yet. That same first CI run found the Windows build could not find the compiler on
+  run artifact beside the executable). Since M21 a release is published on every green
+  push to main, its source archive in the `gpl-source` release, linked from its notes. That same first CI run found the Windows build could not find the compiler on
   GitHub's runners (an environment-variable name compared case-sensitively); fixed, and the
   Windows job now builds the native engine and passes 833 tests there.
 - **The Microsoft Store package leaves ASIO out** and is MIT only (`build_msix.ps1`), so
@@ -354,9 +386,11 @@ Found by signal tests during the migration, each now covered by one:
   GitHub releases keep ASIO under GPLv3 with their source. A paid build with ASIO would
   need Steinberg's proprietary ASIO licence signed first. Contributions come in under MIT
   with a DCO sign-off (`CONTRIBUTING.md`).
-- Terms and Conditions 1.2, Terms of Service 1.4 and Privacy Policy 1.2 describe that —
-  free today, later versions or editions possibly paid, a copy already obtained keeps its
-  licence, who would process a payment — as well as the GPLv3 build, and state that nothing
+- Terms and Conditions 1.3 (where the GPLv3 source is published), Terms of Service 1.4 and
+  Privacy Policy 1.3 (local logs on by default, local crash reports, the session file)
+  describe that — free today, later versions or editions possibly paid, a copy already
+  obtained keeps its licence, who would process a payment — as well as the GPLv3 build, and
+  state that nothing
   in them restricts a GPLv3 right. **These are drafted by an engineer, not a lawyer; have
   them reviewed before relying on them.**
 

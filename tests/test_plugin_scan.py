@@ -8,6 +8,7 @@ import json
 import struct
 import sys
 import textwrap
+import time
 
 import pytest
 
@@ -46,6 +47,39 @@ def test_a_report_written_before_a_crash_in_teardown_is_believed(monkeypatch, tm
     ''')
     result = scan.scan_module(x64_module(tmp_path / 'Amp.vst3'))
     assert result.status == scan.OK and [c.name for c in result.classes] == ['Amp']
+
+
+def test_a_scanner_that_hangs_after_reporting_is_ended_and_believed(monkeypatch, tmp_path):
+    """Guitar Rig 7's first load in a session hung the scanner's exit; the scan timed out at 120 s."""
+    monkeypatch.setattr(scan, 'EXIT_GRACE_S', 0.5)
+    stand_in(monkeypatch, tmp_path, f'''
+        import time
+        open(result, "w").write(json.dumps({{"classes": [{CLASS!r}]}}))
+        time.sleep(60)
+    ''')
+    started = time.monotonic()
+    result = scan.scan_module(x64_module(tmp_path / 'Amp.vst3'), timeout=30)
+    assert result.status == scan.OK and [c.name for c in result.classes] == ['Amp']
+    assert time.monotonic() - started < 15
+
+
+def test_a_scanner_that_never_reports_times_out(monkeypatch, tmp_path):
+    stand_in(monkeypatch, tmp_path, 'import time\ntime.sleep(60)\n')
+    started = time.monotonic()
+    result = scan.scan_module(x64_module(tmp_path / 'Amp.vst3'), timeout=1)
+    assert result.status == scan.TIMED_OUT and time.monotonic() - started < 15
+
+
+def test_the_real_scanner_reports_and_leaves(tmp_path):
+    """The child's own side: the report is in place, whole, by the time the process has gone."""
+    import subprocess
+    result = tmp_path / 'result.json'
+    code = subprocess.run([sys.executable, '-c', 'import sys; from tonesphere.plugins.scan import scan_one_cli; '
+                           'scan_one_cli(sys.argv[1:])', str(tmp_path / 'missing.vst3'), '--result', str(result)],
+                          cwd=scan.SOURCE_ROOT, timeout=60).returncode
+    assert code == 0
+    assert 'error' in json.loads(result.read_text(encoding='utf-8'))
+    assert not (tmp_path / 'result.json.part').exists()
 
 
 def test_a_process_that_dies_before_reporting_is_a_crash_with_its_exit_code(monkeypatch, tmp_path):

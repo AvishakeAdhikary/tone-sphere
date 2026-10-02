@@ -217,9 +217,10 @@ When a verification is missing, name the reason (no device, no licence, no certi
 - `native/asio/` is **GPLv3**, because the Steinberg ASIO SDK is used under its GPLv3
   option. It builds to a separate DLL. Any binary distribution that includes it is
   distributed under GPLv3 as a whole, with source available — the README and legal docs
-  must say so. Such a release ships the GPLv3 text inside it (`tonesphere.spec`) and its
-  Corresponding Source beside it (`scripts/package_source.py`, run by the release job),
-  SDKs included; never publish a Windows binary without that archive.
+  must say so. Such a release ships the GPLv3 text inside it (`tonesphere.spec`), and the
+  release job publishes its Corresponding Source (`scripts/package_source.py`, SDKs
+  included) to the rolling `gpl-source` release, linked from that release's notes (GPLv3
+  §6(d)); never publish a Windows binary without that archive.
 - **The Microsoft Store package never carries `tonesphere_asio.dll`** (`build_msix.ps1`
   leaves it and the GPLv3 texts out): the owner keeps the Store listing MIT so its price
   and terms stay theirs (`docs/MICROSOFT_STORE.md` section 7). A paid build with ASIO needs

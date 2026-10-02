@@ -31,13 +31,43 @@ I've had enough, so being a coder myself, I coded one on my own.
 
 This project is all about that.
 
-## Setup
+## Install
+
+Download from the [latest release](https://github.com/AvishakeAdhikary/tone-sphere/releases/latest):
+
+| System | File | |
+|---|---|---|
+| Windows 10/11 x64 | `ToneSphere-<version>-Setup.exe` | Installs for your user only, so it never asks for administrator rights. Start menu shortcut; uninstall from Settings → Apps. |
+| Windows, no install | `ToneSphere-<version>-windows-portable.zip` | Unzip anywhere and run `ToneSphere.exe`. |
+| Linux x86_64 | `ToneSphere-<version>-x86_64.AppImage` | `chmod +x` it and run it. PortAudio is inside. |
+| macOS | `ToneSphere-<version>-macos.dmg` | Drag ToneSphere to Applications. |
+
+The downloads are not code-signed yet, and both systems say so the first time:
+
+- **Windows SmartScreen** shows "Windows protected your PC". Choose **More info → Run
+  anyway**. This is the prompt that looked like an administrator request in v0.2.0; nothing
+  ToneSphere installs needs one.
+- **macOS Gatekeeper** refuses to open it. Right-click ToneSphere in Applications →
+  **Open** → **Open**, once.
+
+Then plug in your interface and press **Monitor Input**. It picks your interface's input and
+output for you, defaults to input 1 in both ears (a guitar or a microphone is mono), and
+plays the moment you press Start. Your setup is saved when you close and comes back when you
+open it again.
+
+Everything works with or without ASIO. With an ASIO driver installed, ASIO appears in the
+backend list; without one, the list says so, and WASAPI exclusive gives low latency anyway.
+
+## Run from source
 
 ```
 pip install uv        # if you don't have it
 uv sync --all-groups
-uv run main.py gui
+uv run main.py
 ```
+
+`uv run main.py` opens the window; `server`, `cli` and `test` are the other entry points
+(`uv run main.py help`). No administrator rights are needed.
 
 **Windows:** the native engine is built from source, once. It needs Microsoft's EWDK (a
 mountable ISO, no installer and no admin) and Steinberg's two SDKs, which are fetched rather
@@ -138,13 +168,25 @@ running are marked failed, and when they come back the engine reopens them with 
 routes, on its own. The PortAudio host keeps WDM-KS, DirectSound and MME on
 Windows as a fallback, and provides ALSA and JACK on Linux and CoreAudio on macOS.
 
+**Monitoring an instrument, as a user does it.** The built app, driven through its own
+window by Windows UI Automation on the development machine with a guitar on the AI-04's
+input 1: Monitor Input preselected the interface and input 1, and on Start the guitar was in
+both headphone ears 3.02 dB below the input (the constant-power mono law is 3.01 dB),
+measured from outside the app on the output's loopback. Guitar Rig 7, added from the plugin
+browser, changed what was heard by what its own volume control displayed (−12.0 dB set,
+−12.20 dB heard); its editor opened inside ToneSphere; and after closing and reopening the
+app, the route, the plugin and its setting all came back and played
+([docs/FIRST_RUN_VERIFICATION.md](docs/FIRST_RUN_VERIFICATION.md)).
+
 **VST3 plugins (Windows).** A native host on Steinberg's VST3 SDK: a browser that scans each
 module in a separate process (a module that crashes while loading takes down the scanner,
 not ToneSphere) and lists every failure with its reason; insert chains on any device's
 input or output; parameters, the host's bypass and the plugin's own editor; plugin state
 and chains saved in presets. A plugin that faults on the audio thread is bypassed from that
 block on and reported. Proven bit-exact with ToneSphere's own test plugin, and with
-**Surge XT** measured end to end (its 250 ms delay heard at 250.06 ms)
+**Surge XT** measured end to end (its 250 ms delay heard at 250.06 ms), and with Native
+Instruments' **Guitar Rig 7.0.1**: it scans, processes, follows its own controls to within
+0.04 dB, runs a minute without a fault, keeps its state and opens its editor
 ([docs/VST3.md](docs/VST3.md)). Instruments too: a VST3 instrument gets a bus of its own
 and is played by MIDI — from a MIDI input port, an on-screen keyboard, the REST API or the
 CLI — through a fixed-size native queue; Surge XT and Dexed play in tune. Plugins and
@@ -166,18 +208,25 @@ cable at 100.000 ms.
 own period, mean load, xruns, ring under/overruns, audio-thread allocations, and latency
 broken into its nominal, reported, plugin and measured parts.
 
-**Patchbay.** Drag a port to a port to connect. Feedback loops are refused before they
-happen. Cables show their gain; muted and broken routes look different.
+**Patchbay.** Drag a port to a port to connect; a drop anywhere on a node counts, and a drop
+that cannot connect says why. The engine starts itself when a cable is made. A cable from a
+stereo input can carry just one of its channels, to both ears (right-click it → Input
+channel). Feedback loops are refused before they happen. Cables show their gain; muted and
+broken routes look different.
 
-**Presets.** Patch, mixer and plugin state saved as plain YAML, keyed on stable device
-identifiers (with names as a fallback), so they survive plugging something in. Partial
-recall: a preset saved with an interface attached loads without it and tells you what was
-missing.
+**Sessions and presets.** The session — patch, mixer, backend, rate, buffer, mode and every
+plugin's own state — is saved as you work and when you close, and restored when you open the
+app. File → Save/Load Preset does the same with a file of your choosing. Plain YAML, keyed on
+stable device identifiers with names as a fallback, so they survive plugging something in.
+Partial recall: a preset saved with an interface attached loads without it and names what
+was missing.
 
 **Settings.** Stored in SQLite under your user data directory —
 `%LOCALAPPDATA%\Neural Nexus Studios\ToneSphere\settings.db` on Windows,
 `$XDG_DATA_HOME/ToneSphere` (or `~/.local/share/ToneSphere`) on Linux,
-`~/Library/Application Support/ToneSphere` on macOS. Not next to the executable: the Store
+`~/Library/Application Support/ToneSphere` on macOS. The session, presets, a rotating log
+(`logs/tonesphere.log`) and, if something goes wrong, a crash report (`logs/crash-*.log`,
+named in the dialog that tells you) live in the same folder. Not next to the executable: the Store
 build is an MSIX package whose install directory is read-only, and the GUI and the API
 server are expected to be open at once, which one YAML file cannot survive.
 `config/default_config.yaml` holds the defaults, and every key in it is read by something.
@@ -230,16 +279,18 @@ marked as such) Hindi.
   others, and they are added, renamed, disabled, re-enabled and uninstalled from the UI.
   But the driver is test-signed, so it loads only where test-signing is on, and it cannot
   be offered to anyone until Microsoft signs it, which needs an EV certificate this project
-  does not have. It has not been tried on a real desktop with Discord or OBS. A round trip
+  does not have. It has not been tried on a real desktop with Discord or OBS, so on a
+  normal PC ToneSphere cannot yet be Discord's microphone (the Virtual Cables dialog says
+  so when the driver is absent). A round trip
   measured through a cable in exclusive mode fails intermittently in the VM (3 of 10 runs):
   the sweep arrives intact, but the correlation misses it — not yet explained
   ([docs/VIRTUAL_AUDIO_DRIVER.md](docs/VIRTUAL_AUDIO_DRIVER.md)).
 - **An interface manufacturer's ASIO driver.** The ASIO host is verified against FlexASIO
   and ASIO4ALL — genuine ASIO drivers, but third-party wrappers over WASAPI and WDM-KS. The
   Audio Array AI-04's maker publishes no ASIO driver, and no other interface was available.
-- **Commercial plugins, AU, and plugin isolation.** No commercial plugin (Guitar Rig,
-  Neural DSP, ...) has been tested, and nothing is claimed about them. Neural Amp Modeler
-  was not tried, because its installer is unsigned. AU is not supported. Plugins run in
+- **Commercial plugins beyond Guitar Rig 7, AU, and plugin isolation.** Guitar Rig 7.0.1 is
+  the one commercial plugin tested; nothing is claimed about any other (Neural DSP, ...).
+  Neural Amp Modeler was not tried, because its installer is unsigned. AU is not supported. Plugins run in
   ToneSphere's process: a fault on the audio thread is caught and the plugin bypassed, but
   a plugin can still take the application down.
 - **MIDI from a hardware keyboard.** MIDI input ports are opened and forwarded to
@@ -265,9 +316,10 @@ What is proven, and at which level, is tracked item by item in
 | 2 | Real mixer: pan law, polarity, limiter, drift resampling, metering | done |
 | 3 | Qt interface: mixer strips, dB faders, node-graph patchbay | done |
 | 4 | Real DSP, honest app detection, presets; VST3 hosting (native, phase 6) | done |
-| 5 | Packaging (CI-built and smoke-tested, releases on tag); per-process capture (Windows, done); virtual devices (Linux done; macOS proven in CI, unverified in daily use; Windows: see phase 6); Microsoft Store MSIX — manifest, logo generation and a local pack script exist and the manifest validates against the real `makeappx`, but nothing has been signed, installed from a package, or submitted, and the Store identity does not exist yet (see [docs/MICROSOFT_STORE.md](docs/MICROSOFT_STORE.md)) | mostly done |
+| 5 | Packaging (CI-built and smoke-tested installers, a release on every push to main); per-process capture (Windows, done); virtual devices (Linux done; macOS proven in CI, unverified in daily use; Windows: see phase 6); Microsoft Store MSIX — manifest, logo generation and a local pack script exist and the manifest validates against the real `makeappx`, but nothing has been signed, installed from a package, or submitted, and the Store identity does not exist yet (see [docs/MICROSOFT_STORE.md](docs/MICROSOFT_STORE.md)) | mostly done |
 | 6 | Windows-native real-time engine: C++ audio path behind a C ABI (done), native WASAPI (done), ASIO (done; verified against FlexASIO and ASIO4ALL on a USB interface), VST3 host (done; effects and instruments, from the UI, REST and CLI), measured round trip (done; through an interface's cable and acoustically), Windows virtual cables (done in a test VM: several, each managed from the UI; production signing unavailable) — step by step in [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) | mostly done |
 | 7 | Closing the gaps: threads, devices that come and go, whole-system loopback, built-in effects in the UI, TCP send, adaptive jitter buffer, Opus, bus routing on the PortAudio host | done |
+| 8 | For whoever downloads it: installers that open a window, logs and crash reports, monitoring that plays, a session that comes back, Guitar Rig 7 hosted, checked through the built app's own window on real hardware | done |
 
 ## A note on how this was rebuilt
 
@@ -326,8 +378,10 @@ one or that it comes from us.
 
 **The Windows executable on GitHub is GPLv3.** Its ASIO support, `tonesphere_asio.dll`, is
 built from Steinberg's ASIO SDK under GPLv3 ([native/asio/](native/asio/) is GPLv3 for that
-reason), so a build that bundles it is distributed under GPLv3 as a whole. Each Windows
-release carries its Corresponding Source, SDKs included, as `ToneSphere-windows-source.zip`.
+reason), so a build that bundles it is distributed under GPLv3 as a whole. Its
+Corresponding Source, SDKs included, is `ToneSphere-<version>-windows-source.zip` in the
+[`gpl-source`](https://github.com/AvishakeAdhikary/tone-sphere/releases/tag/gpl-source)
+release, linked from every release's notes, so the downloads list holds only installers.
 The Microsoft Store package leaves ASIO out and is MIT alone, as are the Linux and macOS
 executables ([why](docs/MICROSOFT_STORE.md#7-licensing-the-store-package-does-not-carry-asio)).
 ToneSphere is free today; later versions or editions may be paid, and a copy you already
@@ -351,7 +405,7 @@ attack time was wrong by a factor of 256, a pan knob that moved nothing — were
 exactly that kind of test and by nothing else.
 
 P.S. This is not a rickroll.
-Executables now build and get smoke-tested in CI on all three platforms, and publish to
-GitHub Releases once a version tag is pushed. Still busy working in corporate. Inviting
+Installers now build and get smoke-tested in CI on all three platforms — launched the way
+you would launch them — and every green push to main publishes a release. Still busy working in corporate. Inviting
 others to contribute.
 Have fun.
