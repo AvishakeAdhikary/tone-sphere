@@ -20,7 +20,7 @@ TEST_CASE("FrameRing basic read/write and wraparound", "[ring]") {
     FrameRing r;
     r.init(2, 8);
     REQUIRE(r.capacity() == 8);
-    std::vector<float> in(12), out(12);
+    std::vector<float> in(12), out(16);  // up to 8 stereo frames
     for (int i = 0; i < 12; ++i) in[i] = float(i);
     REQUIRE(r.write(in.data(), 6) == 6);
     REQUIRE(r.available() == 6);

@@ -65,7 +65,56 @@ struct BridgeStats {
     std::atomic<float> ppm{0.0f};
     std::atomic<float> fillMs{0.0f};
     std::atomic<float> latencyMs{0.0f};
+    std::atomic<float> targetMs{0.0f};
+    std::atomic<uint64_t> settling{0};  // adaptations during the first seconds (not dropouts)
     std::atomic<bool> active{false};
+};
+
+/// Observes how a device really delivers/consumes audio: largest burst and longest gap.
+/// Written by the device thread, harvested by the engine thread once per window.
+class BurstMeter {
+public:
+    void observe(size_t frames, double now) {
+        if (frames > maxFrames_.load(std::memory_order_relaxed)) maxFrames_.store(frames, std::memory_order_relaxed);
+        if (last_ > 0.0) {
+            const double gap = now - last_;
+            if (gap < 1.0 && gap > maxGap_.load(std::memory_order_relaxed)) maxGap_.store(gap, std::memory_order_relaxed);
+        }
+        last_ = now;
+    }
+    void resetLast() { last_ = 0.0; }
+    size_t peekFrames() const { return maxFrames_.load(std::memory_order_relaxed); }
+    double peekGap() const { return maxGap_.load(std::memory_order_relaxed); }
+    void harvest(size_t& frames, double& gap) {
+        frames = maxFrames_.exchange(0, std::memory_order_relaxed);
+        gap = maxGap_.exchange(0.0, std::memory_order_relaxed);
+    }
+
+private:
+    std::atomic<size_t> maxFrames_{0};
+    std::atomic<double> maxGap_{0.0};
+    double last_ = 0.0;  // device thread only
+};
+
+/// Latency cushion that adapts to the device: grows at once when bursts are larger than
+/// expected or after a dropout, and shrinks slowly while there is unused headroom.
+class AdaptiveTarget {
+public:
+    /// @param margin frames always needed besides one device period (engine block + jitter + safety)
+    /// @param startPeriod initial (pessimistic) period; adapts down towards nominalPeriod.
+    void init(double rate, double nominalPeriod, double margin, bool fixed, double startPeriod = 0.0);
+    /// Engine thread, every cycle. `fillBefore` = real ring fill just before consuming. Returns the target.
+    double update(BurstMeter& meter, double fillBefore, double now);
+    void onUnderrun();
+    double target() const { return target_; }
+    double period() const { return period_; }
+
+private:
+    double rate_ = 48000, nominal_ = 480, margin_ = 0, period_ = 480, target_ = 0, max_ = 0;
+    bool fixed_ = false;
+    double windowStart_ = -1, minFill_ = 1e18;
+    size_t prevBurst_ = 0;
+    double prevGap_ = 0;
 };
 
 class CaptureBridge {
@@ -91,10 +140,12 @@ private:
     FrameRing ring_;
     VarispeedResampler rs_;
     DriftController ctl_;
+    AdaptiveTarget target_;
+    BurstMeter bursts_;
     std::vector<float> scratch_;
     double nominal_ = 1.0;
-    double target_ = 0.0;
     bool primed_ = false;
+    double startedAt_ = -1;  // engine thread: first read after (re)start
     DevicePosition devPos_;
     uint64_t devTotal_ = 0;  // device thread
     uint64_t engTotal_ = 0;  // engine thread
@@ -124,10 +175,15 @@ private:
     FrameRing ring_;
     VarispeedResampler rs_;
     DriftController ctl_;
+    AdaptiveTarget target_;
+    BurstMeter bursts_;
     std::vector<float> scratch_;
     double nominal_ = 1.0;
-    double target_ = 0.0;
+    std::atomic<double> primeLevel_{0.0};      // engine -> device: fill required to (re)start
     std::atomic<bool> devicePrimed_{false};
+    std::atomic<uint32_t> deviceUnderruns_{0};  // device -> engine: grow the cushion
+    uint32_t seenUnderruns_ = 0;
+    double startedAt_ = -1;  // engine thread
     DevicePosition devPos_;
     uint64_t devTotal_ = 0;  // device thread
     uint64_t engTotal_ = 0;  // engine thread
