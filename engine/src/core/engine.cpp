@@ -13,6 +13,7 @@
 #include <timeapi.h>
 
 #include "backends/win/app_audio.h"
+#include "backends/win/asio_clients.h"
 #include "backends/win/vad.h"
 #include "backends/win/wasapi.h"
 #endif
@@ -48,6 +49,9 @@ bool Engine::start() {
     };
     backends_.push_back(std::move(wasapi));
     backends_.push_back(std::make_unique<VadBackend>());
+    auto asioClients = std::make_unique<AsioClientBackend>();
+    asioClients->setEngineInfo(runningRate_, settings_.blockSize, 8, 8);
+    backends_.push_back(std::move(asioClients));
     apps_ = std::make_unique<AppAudio>();
 #endif
     // Built-in test tone source (hidden in the simple view).
@@ -210,7 +214,10 @@ bool Engine::nodeNeededLocked(const NodeModel& n) const {
 }
 
 Backend* Engine::backendFor(DeviceKind k) const {
-    const char* want = k == DeviceKind::Vad ? "vad" : (k == DeviceKind::Wasapi || k == DeviceKind::Compat) ? "wasapi" : nullptr;
+    const char* want = k == DeviceKind::Vad          ? "vad"
+                       : k == DeviceKind::AsioClient ? "asioclient"
+                       : (k == DeviceKind::Wasapi || k == DeviceKind::Compat) ? "wasapi"
+                                                                              : nullptr;
     if (!want) return nullptr;
     for (auto& b : backends_)
         if (std::string(b->name()) == want) return b.get();
@@ -562,6 +569,8 @@ void Engine::maintenanceThread() {
         if (shutdown_) break;
         std::lock_guard lock(mu_);
         bool changed = false;
+        for (auto& be : backends_)
+            if (be->poll()) devicesChanged_ = true;
         if (devicesChanged_.exchange(false)) {
             // Let Windows settle (several notifications arrive per change).
             std::this_thread::sleep_for(std::chrono::milliseconds(150));

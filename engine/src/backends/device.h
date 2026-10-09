@@ -60,6 +60,8 @@ public:
     virtual const char* name() const = 0;
     virtual std::vector<DeviceInfo> enumerate() = 0;
     virtual std::unique_ptr<DeviceStream> open(const DeviceInfo& dev, const StreamRequest& req, std::string& error) = 0;
+    /// Called periodically by the engine; return true when the device list changed.
+    virtual bool poll() { return false; }
     /// Invoked (from any thread) when devices appear/disappear or defaults change.
     std::function<void()> onDevicesChanged;
 };
