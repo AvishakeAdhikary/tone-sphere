@@ -1,0 +1,49 @@
+{
+  "name": "nextone",
+  "productName": "NexTone",
+  "version": "0.1.0",
+  "description": "NexTone — simple, powerful audio routing for everyone",
+  "license": "GPL-3.0-or-later",
+  "author": "NexTone contributors",
+  "private": true,
+  "type": "module",
+  "main": "dist-electron/main.cjs",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build:renderer": "vite build",
+    "build:electron": "node scripts/build-electron.mjs",
+    "build": "npm run typecheck && npm run build:renderer && npm run build:electron",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "mock-engine": "node mock-engine/server.mjs",
+    "start": "electron .",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "dist:win": "npm run build && electron-builder --win nsis",
+    "dist:appx": "npm run build && electron-builder --win appx"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@playwright/test": "^1.54.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@types/ws": "^8.18.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "electron": "^44.7.0",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.28.2",
+    "lucide-react": "^1.54.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "typescript": "^6.0.3",
+    "vite": "^8.3.4",
+    "vitest": "^4.0.0",
+    "ws": "^8.18.0",
+    "zustand": "^5.0.15"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "electron-winstaller@5.4.0": true,
+    "electron@44.7.0": true
+  }
+}

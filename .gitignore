@@ -1,0 +1,25 @@
+node_modules/
+ui/dist/
+ui/dist-electron/
+ui/release/
+ui/test-results/
+ui/playwright-report/
+build/
+build-*/
+out/
+*.user
+.vs/
+*.aps
+*.iso
+*.vhdx
+third_party/_downloads/
+drivers/win/vad/x64/
+drivers/win/vad/ARM64/
+drivers/win/vad/build/
+*.cer
+*.pfx
+!packaging/certs/README.md
+# Original ASIO Link Pro binaries are the user's property and not part of this project
+asiolinkpro.exe
+AsioLinkProToolPatcher/
+AsioLinkProToolPatcher.zip
