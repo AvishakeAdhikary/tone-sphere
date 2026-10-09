@@ -13,6 +13,7 @@
 #include <timeapi.h>
 
 #include "backends/win/app_audio.h"
+#include "backends/win/vad.h"
 #include "backends/win/wasapi.h"
 #endif
 
@@ -46,6 +47,7 @@ bool Engine::start() {
         maintCv_.notify_all();
     };
     backends_.push_back(std::move(wasapi));
+    backends_.push_back(std::make_unique<VadBackend>());
     apps_ = std::make_unique<AppAudio>();
 #endif
     // Built-in test tone source (hidden in the simple view).
@@ -172,6 +174,7 @@ void Engine::refreshDevicesLocked() {
 #ifdef _WIN32
     if (apps_) apps_->refresh(*this, seen);
 #endif
+    vadPresent_ = std::any_of(nodes_.begin(), nodes_.end(), [](auto& kv) { return kv.second.kind == DeviceKind::Vad && kv.second.present; });
     seen.insert("tone");
     // Mark vanished devices; drop ones nobody refers to.
     for (auto it = nodes_.begin(); it != nodes_.end();) {
@@ -206,39 +209,54 @@ bool Engine::nodeNeededLocked(const NodeModel& n) const {
     return false;
 }
 
+Backend* Engine::backendFor(DeviceKind k) const {
+    const char* want = k == DeviceKind::Vad ? "vad" : (k == DeviceKind::Wasapi || k == DeviceKind::Compat) ? "wasapi" : nullptr;
+    if (!want) return nullptr;
+    for (auto& b : backends_)
+        if (std::string(b->name()) == want) return b.get();
+    return nullptr;
+}
+
 bool Engine::openStreamLocked(NodeModel& n) {
     if (n.stream) return true;
+    DeviceInfo dev = n.device;
+    bool viaBackend = true;
 #ifdef _WIN32
     if (n.kind == DeviceKind::App) {
-        if (!apps_) return false;
-        std::string err;
-        n.stream = apps_->open(n, runningRate_, err);
-        if (!n.stream) {
-            n.streamError = err;
-            return false;
+        const DeviceInfo* assigned = apps_ ? apps_->assigned(n) : nullptr;
+        if (assigned) {
+            // Isolated app / app microphone: stream through the assigned virtual device.
+            dev = *assigned;
+            dev.input = n.bin == Bin::AppOut;
+        } else {
+            viaBackend = false;
+            std::string err;
+            n.stream = apps_ ? apps_->open(n, runningRate_, err) : nullptr;
+            if (!n.stream) {
+                n.streamError = err;
+                return false;
+            }
+            dev.input = true;
         }
-    } else
+    }
 #endif
-    {
-        Backend* be = nullptr;
-        for (auto& b : backends_) {
-            const bool match = (n.kind == DeviceKind::Wasapi || n.kind == DeviceKind::Compat) ? std::string(b->name()) == "wasapi"
-                                                                                                : false;
-            if (match) be = b.get();
-        }
+    if (viaBackend) {
+        Backend* be = backendFor(dev.kind);
         if (!be) return false;
         StreamRequest req;
         req.exclusive = n.settings.exclusive;
         req.bufferMs = n.settings.bufferMs;
         req.preferredRate = runningRate_;
         std::string err;
-        n.stream = be->open(n.device, req, err);
+        n.stream = be->open(dev, req, err);
         if (!n.stream) {
             n.streamError = err.empty() ? "Could not open device" : err;
             NT_WARN("%s: %s", n.name.c_str(), n.streamError.c_str());
             return false;
         }
     }
+    n.streamInput = dev.input;
+
     // Device may report a different channel count than its property store.
     if (n.stream->channels() != n.channels) {
         n.channels = n.stream->channels();
@@ -265,7 +283,7 @@ bool Engine::openStreamLocked(NodeModel& n) {
     cfg.extraSafetyMs = n.settings.safetyMs;
     cfg.jittery = n.kind == DeviceKind::App || n.kind == DeviceKind::Vban;
     n.streamRate = n.stream->sampleRate();
-    if (n.device.input || (n.kind == DeviceKind::App && n.bin == Bin::AppOut)) {
+    if (n.streamInput) {
         n.cap = std::make_shared<CaptureBridge>();
         n.cap->init(cfg);
         n.rt->capture.store(n.cap.get(), std::memory_order_release);
@@ -554,6 +572,12 @@ void Engine::maintenanceThread() {
         for (auto& [id, n] : nodes_) {
             if (n.stream && !n.stream->error().empty()) {
                 n.streamError = n.stream->error();
+                if (n.streamError.rfind("restart:", 0) == 0) {
+                    closeStreamLocked(n);  // e.g. format change: reopen right away
+                    n.streamError.clear();
+                    changed = true;
+                    continue;
+                }
                 NT_WARN("%s: %s", n.name.c_str(), n.streamError.c_str());
                 closeStreamLocked(n);
                 changed = true;

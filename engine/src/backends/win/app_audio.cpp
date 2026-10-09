@@ -342,16 +342,19 @@ bool AppAudio::setAppEndpoint(const std::vector<uint32_t>& pids, bool capture, c
 }
 
 void AppAudio::applyRouting(Engine& e) {
-    // Cables already claimed by other apps.
+    // Virtual devices already claimed by other apps.
     std::set<std::string> busy;
     for (auto& [exe, id] : cableOut_) busy.insert(id);
     for (auto& [exe, id] : cableIn_) busy.insert(id);
-    auto cableUsedByRoutes = [&](const std::string& id) {
+    auto usedByRoutes = [&](const std::string& id) {
         return std::any_of(e.routes_.begin(), e.routes_.end(), [&](const RouteModel& r) { return r.from == id || r.to == id; });
     };
-    auto freeCable = [&](Bin bin) -> NodeModel* {
-        for (auto& [id, n] : e.nodes_)
-            if (n.kind == DeviceKind::Compat && n.bin == bin && n.present && !busy.count(id) && !cableUsedByRoutes(id)) return &n;
+    // Prefer NexTone's own virtual devices; fall back to compatibility cables.
+    auto freeDevice = [&](Bin bin) -> NodeModel* {
+        for (DeviceKind k : {DeviceKind::Vad, DeviceKind::Compat})
+            for (auto& [id, n] : e.nodes_)
+                if (n.kind == k && n.bin == bin && n.present && !n.device.appEndpointId.empty() && !busy.count(id) && !usedByRoutes(id))
+                    return &n;
         return nullptr;
     };
 
@@ -362,96 +365,73 @@ void AppAudio::applyRouting(Engine& e) {
         if (n.bin == Bin::AppOut) {
             const bool want = needed && n.app.mode == "isolate";
             if (want && !cableOut_.count(exe)) {
-                NodeModel* cable = freeCable(Bin::VirtualOut);
-                if (!cable) {
+                NodeModel* dev = freeDevice(Bin::VirtualOut);
+                if (!dev) {
                     n.streamError = "Isolating an app needs a free virtual output (install the NexTone Driver Pack or a virtual cable)";
                     continue;
                 }
-                const std::string renderId = cable->id.substr(std::string("compat:out:").size());
-                if (setAppEndpoint(n.app.pids, false, renderId)) {
-                    cableOut_[exe] = cable->id;
-                    cableOutEp_[exe] = cable->device.endpointId;
-                    redirectedOut_[exe] = renderId;
-                    busy.insert(cable->id);
-                    if (n.stream) e.closeStreamLocked(n);  // switch from loopback to the cable
-                    NT_INFO("Isolated %s on %s", exe.c_str(), cable->name.c_str());
+                if (setAppEndpoint(n.app.pids, false, dev->device.appEndpointId)) {
+                    cableOut_[exe] = dev->id;
+                    cableOutDev_[exe] = dev->device;
+                    redirectedOut_[exe] = dev->device.appEndpointId;
+                    busy.insert(dev->id);
+                    if (n.stream) e.closeStreamLocked(n);  // switch from loopback to the virtual device
+                    NT_INFO("Isolated %s on %s", exe.c_str(), dev->name.c_str());
                 } else {
                     n.streamError = "Windows refused to move this app to a virtual output";
                 }
             } else if (!want && cableOut_.count(exe)) {
                 setAppEndpoint(n.app.pids, false, "");
                 cableOut_.erase(exe);
-                cableOutEp_.erase(exe);
+                cableOutDev_.erase(exe);
                 redirectedOut_.erase(exe);
                 if (n.stream) e.closeStreamLocked(n);
                 NT_INFO("Released %s from isolation", exe.c_str());
             }
         } else if (n.bin == Bin::AppIn) {
             if (needed && !cableIn_.count(exe)) {
-                NodeModel* cable = freeCable(Bin::VirtualIn);
-                if (!cable) {
+                NodeModel* dev = freeDevice(Bin::VirtualIn);
+                if (!dev) {
                     n.streamError = "Sending sound into an app needs a free virtual microphone (install the NexTone Driver Pack or a virtual cable)";
                     continue;
                 }
-                const std::string captureId = cable->id.substr(std::string("compat:in:").size());
-                if (setAppEndpoint(n.app.pids, true, captureId)) {
-                    cableIn_[exe] = cable->id;
-                    cableInEp_[exe] = cable->device.endpointId;
-                    redirectedIn_[exe] = captureId;
-                    busy.insert(cable->id);
-                    NT_INFO("%s now records from %s", exe.c_str(), cable->name.c_str());
+                if (setAppEndpoint(n.app.pids, true, dev->device.appEndpointId)) {
+                    cableIn_[exe] = dev->id;
+                    cableInDev_[exe] = dev->device;
+                    redirectedIn_[exe] = dev->device.appEndpointId;
+                    busy.insert(dev->id);
+                    NT_INFO("%s now records from %s", exe.c_str(), dev->name.c_str());
                 } else {
                     n.streamError = "Windows refused to change this app's microphone";
                 }
             } else if (!needed && cableIn_.count(exe)) {
                 setAppEndpoint(n.app.pids, true, "");
                 cableIn_.erase(exe);
-                cableInEp_.erase(exe);
+                cableInDev_.erase(exe);
                 redirectedIn_.erase(exe);
+                if (n.stream) e.closeStreamLocked(n);
             }
         }
     }
 }
 
+const DeviceInfo* AppAudio::assigned(const NodeModel& n) const {
+    const auto& m = n.bin == Bin::AppIn ? cableInDev_ : cableOutDev_;
+    if (n.bin == Bin::AppOut && n.app.mode != "isolate") return nullptr;
+    auto it = m.find(n.app.exe);
+    return it == m.end() ? nullptr : &it->second;
+}
+
 std::unique_ptr<DeviceStream> AppAudio::open(NodeModel& n, double engineRate, std::string& err) {
     const std::string& exe = n.app.exe;
-    ComPtr<IMMDeviceEnumerator> en;
-    CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, IID_PPV_ARGS(&en));
-    auto openEndpoint = [&](const std::string& endpointId, bool capture) -> std::unique_ptr<DeviceStream> {
-        ComPtr<IMMDevice> dev;
-        IAudioClient* client = nullptr;
-        const std::wstring wid = toWide(endpointId);
-        if (!en || FAILED(en->GetDevice(wid.c_str(), &dev)) ||
-            FAILED(dev->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, reinterpret_cast<void**>(&client)))) {
-            err = "Virtual device unavailable";
-            return nullptr;
-        }
-        auto s = std::make_unique<WasapiStream>(client, capture, n.name);
-        if (!s->initShared(10.0, false, nullptr, err)) return nullptr;
-        return s;
-    };
-
     if (n.bin == Bin::AppIn) {
-        auto it = cableInEp_.find(exe);
-        if (it == cableInEp_.end()) {
-            err = "No virtual microphone assigned";
-            return nullptr;
-        }
-        return openEndpoint(it->second, false);
-    }
-    if (n.app.mode == "isolate") {
-        auto it = cableOutEp_.find(exe);
-        if (it == cableOutEp_.end()) {
-            err = "No virtual output assigned";
-            return nullptr;
-        }
-        return openEndpoint(it->second, true);
+        err = "No virtual microphone assigned";
+        return nullptr;
     }
     if (n.app.mode == "off") {
         err = "Capture is off for this app";
         return nullptr;
     }
-
     // Copy mode: process loopback of the app's whole process tree.
     if (n.app.pids.empty()) {
         err = "App is not running";

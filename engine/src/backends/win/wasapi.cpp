@@ -344,6 +344,7 @@ std::vector<DeviceInfo> WasapiBackend::enumerate() {
         vo.input = true;
         vo.endpointId = toUtf8(c->id);
         vo.nodeId = "compat:out:" + toUtf8(r->id);
+        vo.appEndpointId = toUtf8(r->id);
         vo.name = toUtf8(r->desc);
         vo.subtitle = toUtf8(iface);
         vo.channels = c->ch;
@@ -358,6 +359,7 @@ std::vector<DeviceInfo> WasapiBackend::enumerate() {
         vi.input = false;
         vi.endpointId = toUtf8(r->id);
         vi.nodeId = "compat:in:" + toUtf8(c->id);
+        vi.appEndpointId = toUtf8(c->id);
         vi.name = toUtf8(c->desc);
         vi.subtitle = toUtf8(iface);
         vi.channels = r->ch;

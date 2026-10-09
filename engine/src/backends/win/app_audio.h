@@ -29,8 +29,10 @@ public:
     bool poll();
     /// Creates/updates app nodes in the engine (engine mutex held).
     void refresh(Engine& e, std::set<std::string>& seen);
-    /// Opens the stream backing an app node (engine mutex held).
+    /// Opens a process-loopback stream for an app node in copy mode (engine mutex held).
     std::unique_ptr<DeviceStream> open(NodeModel& n, double engineRate, std::string& err);
+    /// Virtual device assigned to an app node (isolate mode / app microphone), or nullptr.
+    const DeviceInfo* assigned(const NodeModel& n) const;
     /// Applies per-app endpoint redirection according to modes and routes (engine mutex held).
     void applyRouting(Engine& e);
     void handleRpc(Engine& e, const std::string& method, const nlohmann::json& p);
@@ -56,10 +58,9 @@ private:
     std::map<std::string, std::string> icons_;
     // exe -> endpoint redirected to (empty when not redirected)
     std::map<std::string, std::string> redirectedOut_, redirectedIn_;
-    // exe -> cable node id assigned for isolate / microphone feed
+    // exe -> virtual device (node id + device) assigned for isolate / microphone feed
     std::map<std::string, std::string> cableOut_, cableIn_;
-    // exe -> endpoint NexTone streams from/to for that cable
-    std::map<std::string, std::string> cableOutEp_, cableInEp_;
+    std::map<std::string, DeviceInfo> cableOutDev_, cableInDev_;
     void* policy_ = nullptr;  // IAudioPolicyConfigFactory*
     bool policyNew_ = true;
 };

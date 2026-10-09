@@ -159,7 +159,7 @@ json Engine::state() {
 #else
                {"platform", "linux"},
 #endif
-               {"driverPack", {{"vad", false}, {"asio", false}}}};
+               {"driverPack", {{"vad", vadPresent_}, {"asio", false}}}};
 
     json settings = {{"sampleRate", settings_.sampleRate},     {"blockSize", settings_.blockSize},
                      {"clockMaster", settings_.clockMaster},   {"compatMode", settings_.compatMode},

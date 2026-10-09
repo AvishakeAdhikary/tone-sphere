@@ -84,6 +84,7 @@ struct NodeModel {
 
     std::shared_ptr<NodeRuntime> rt;
     std::unique_ptr<DeviceStream> stream;
+    bool streamInput = true;  // the open stream captures into NexTone
     std::shared_ptr<CaptureBridge> cap;
     std::shared_ptr<RenderBridge> ren;
     std::string streamError;
@@ -138,6 +139,7 @@ private:
     void compileAndPublishLocked();
     void updateStreamsLocked();
     bool openStreamLocked(NodeModel& n);
+    Backend* backendFor(DeviceKind k) const;
     void closeStreamLocked(NodeModel& n);
     bool nodeNeededLocked(const NodeModel& n) const;
     NodeModel* findNode(const std::string& id);
@@ -205,6 +207,7 @@ private:
     std::atomic<bool> configDirty_{false};
     std::atomic<bool> shutdown_{false};
     bool recording_ = false;
+    bool vadPresent_ = false;
 };
 
 }  // namespace nt

@@ -58,7 +58,8 @@ set(ENGINE_SOURCES
 if(WIN32)
   list(APPEND ENGINE_SOURCES
     src/backends/win/wasapi.cpp
-    src/backends/win/app_audio.cpp)
+    src/backends/win/app_audio.cpp
+    src/backends/win/vad.cpp)
 endif()
 add_library(nextone_engine_lib STATIC ${ENGINE_SOURCES})
 target_link_libraries(nextone_engine_lib PUBLIC nextone_core nlohmann_json::nlohmann_json rnnoise)

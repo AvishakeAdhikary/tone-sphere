@@ -15,7 +15,8 @@ const char* deviceKindName(DeviceKind k);
 
 struct DeviceInfo {
     std::string nodeId;      // stable node id, e.g. "wasapi:out:{0.0.0.00000000}.{guid}"
-    std::string endpointId;  // platform endpoint id
+    std::string endpointId;  // platform endpoint id NexTone streams with
+    std::string appEndpointId;  // virtual devices: the Windows endpoint apps should be pointed at
     std::string name;
     std::string subtitle;
     DeviceKind kind = DeviceKind::Wasapi;

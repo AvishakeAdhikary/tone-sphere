@@ -10,3 +10,5 @@ sc config AudioEndpointBuilder start= auto
 rem Keep the test VM awake.
 powercfg /change standby-timeout-ac 0
 powercfg /change monitor-timeout-ac 0
+rem PowerShell Direct sessions of the local admin get a full (unfiltered) token.
+reg add HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System /v LocalAccountTokenFilterPolicy /t REG_DWORD /d 1 /f
