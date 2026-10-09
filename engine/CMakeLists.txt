@@ -60,13 +60,15 @@ if(WIN32)
     src/backends/win/wasapi.cpp
     src/backends/win/app_audio.cpp
     src/backends/win/vad.cpp
-    src/backends/win/asio_clients.cpp)
+    src/backends/win/asio_clients.cpp
+    src/backends/win/asio_host.cpp)
 endif()
 add_library(nextone_engine_lib STATIC ${ENGINE_SOURCES})
 target_link_libraries(nextone_engine_lib PUBLIC nextone_core nlohmann_json::nlohmann_json rnnoise)
 target_compile_definitions(nextone_engine_lib PUBLIC NEXTONE_WITH_RNNOISE)
 if(WIN32)
   target_compile_definitions(nextone_engine_lib PUBLIC UNICODE _UNICODE)
+  target_include_directories(nextone_engine_lib PRIVATE ${CMAKE_SOURCE_DIR}/third_party/asiosdk/common)
   target_link_libraries(nextone_engine_lib PUBLIC winmm avrt ole32 ws2_32 mmdevapi runtimeobject version windowscodecs shell32)
 else()
   find_package(Threads REQUIRED)

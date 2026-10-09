@@ -14,6 +14,7 @@
 
 #include "backends/win/app_audio.h"
 #include "backends/win/asio_clients.h"
+#include "backends/win/asio_host.h"
 #include "backends/win/vad.h"
 #include "backends/win/wasapi.h"
 #endif
@@ -52,6 +53,9 @@ bool Engine::start() {
     auto asioClients = std::make_unique<AsioClientBackend>();
     asioClients->setEngineInfo(runningRate_, settings_.blockSize, 8, 8);
     backends_.push_back(std::move(asioClients));
+    auto asioHost = std::make_unique<AsioHostBackend>();
+    asioHost->setPreferred(runningRate_, settings_.blockSize);
+    backends_.push_back(std::move(asioHost));
     apps_ = std::make_unique<AppAudio>();
 #endif
     // Built-in test tone source (hidden in the simple view).
@@ -216,6 +220,7 @@ bool Engine::nodeNeededLocked(const NodeModel& n) const {
 Backend* Engine::backendFor(DeviceKind k) const {
     const char* want = k == DeviceKind::Vad          ? "vad"
                        : k == DeviceKind::AsioClient ? "asioclient"
+                       : k == DeviceKind::Asio       ? "asio"
                        : (k == DeviceKind::Wasapi || k == DeviceKind::Compat) ? "wasapi"
                                                                               : nullptr;
     if (!want) return nullptr;

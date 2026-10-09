@@ -10,6 +10,7 @@
 
 #ifdef _WIN32
 #include "backends/win/app_audio.h"
+#include "backends/win/asio_host.h"
 #endif
 
 namespace nt {
@@ -134,7 +135,16 @@ json Engine::call(const std::string& method, const json& params) {
         return nullptr;
     }
     if (method == "node.openControlPanel") {
-        fail("This device has no control panel");
+        NodeModel* n = findNode(str(p, "id"));
+        if (!n || n->kind != DeviceKind::Asio) fail("This device has no control panel");
+#ifdef _WIN32
+        if (auto* be = dynamic_cast<AsioHostBackend*>(backendFor(DeviceKind::Asio))) {
+            std::string err;
+            if (!be->controlPanel(n->device.endpointId, err)) fail(err);
+            return nullptr;
+        }
+#endif
+        fail("ASIO is not available");
     }
 
     // ------------------------------------------------------------ routes
