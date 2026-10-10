@@ -6,12 +6,26 @@
 #include "util/platform.h"
 
 #ifdef _WIN32
+#include <windows.h>
+
 #include "backends/win/app_audio.h"
 #endif
 
 namespace nt {
 
 namespace {
+
+// The NexTone ASIO driver is registered by the desktop installer (nextone-setup).
+bool asioDriverInstalled() {
+#ifdef _WIN32
+    HKEY k;
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\ASIO\\NexTone ASIO", 0, KEY_READ | KEY_WOW64_64KEY, &k) != ERROR_SUCCESS) return false;
+    RegCloseKey(k);
+    return true;
+#else
+    return false;
+#endif
+}
 
 const char* protocolKind(const NodeModel& n) {
     if (n.id == "tone") return "tone";
@@ -165,7 +179,7 @@ json Engine::state() {
 #else
                {"platform", "linux"},
 #endif
-               {"driverPack", {{"vad", vadPresent_}, {"asio", false}}}};
+               {"driverPack", {{"vad", vadPresent_}, {"asio", asioDriverInstalled()}}}};
 
     json settings = {{"sampleRate", settings_.sampleRate},     {"blockSize", settings_.blockSize},
                      {"clockMaster", settings_.clockMaster},   {"compatMode", settings_.compatMode},
