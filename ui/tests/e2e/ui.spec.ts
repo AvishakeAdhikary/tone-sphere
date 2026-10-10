@@ -27,6 +27,8 @@ test.beforeAll(async () => {
   app = await electron.launch({ args: ['.'], env });
   page = await app.firstWindow();
   await page.setViewportSize({ width: 1400, height: 880 });
+  // The app remembers the last view; tests start from the Routing view.
+  await page.locator('.segmented button', { hasText: 'Routing' }).click({ timeout: 20_000 });
   await page.waitForSelector('.node-card', { timeout: 20_000 });
 });
 

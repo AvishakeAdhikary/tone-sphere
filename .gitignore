@@ -2,10 +2,11 @@ node_modules/
 ui/dist/
 ui/dist-electron/
 ui/release/
+ui/release-store/
 ui/test-results/
 ui/playwright-report/
-build/
-build-*/
+/build/
+/build-*/
 out/
 *.user
 .vs/

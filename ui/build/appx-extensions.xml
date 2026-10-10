@@ -1,0 +1,10 @@
+<!-- Extra MSIX extensions for the Store build: start at sign-in, and a command alias
+     so the NexTone ASIO driver (outside the package) can start the engine. -->
+<desktop:Extension Category="windows.startupTask" Executable="app\NexTone.exe" EntryPoint="Windows.FullTrustApplication">
+  <desktop:StartupTask TaskId="NexToneStartup" Enabled="true" DisplayName="NexTone" />
+</desktop:Extension>
+<uap3:Extension Category="windows.appExecutionAlias" Executable="app\resources\engine\nextone-engine.exe" EntryPoint="Windows.FullTrustApplication">
+  <uap3:AppExecutionAlias>
+    <desktop:ExecutionAlias Alias="nextone-engine.exe" />
+  </uap3:AppExecutionAlias>
+</uap3:Extension>

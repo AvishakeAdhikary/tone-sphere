@@ -368,6 +368,7 @@ void Engine::updateStreamsLocked() {
 void Engine::rebuildLocked() {
     updateStreamsLocked();
     compileAndPublishLocked();
+    updateExternalMetersLocked();
     markDirty();
 }
 
@@ -677,8 +678,11 @@ void Engine::updateExternalMetersLocked() {
     std::vector<PeakMeters::Target> targets;
     for (auto& [id, n] : nodes_) {
         if (!n.rt) continue;
-        const bool candidate = n.present && !n.stream && n.meterOffset >= 0 &&
-                               (n.kind == DeviceKind::Wasapi || n.kind == DeviceKind::Compat || n.kind == DeviceKind::App) && id != "tone";
+        // Only real Windows devices/apps have an OS peak meter (mixes keep the default kind!).
+        const bool osDevice = n.bin != Bin::Bus && id != "tone" && !n.device.endpointId.empty() &&
+                              (n.kind == DeviceKind::Wasapi || n.kind == DeviceKind::Compat);
+        const bool osApp = n.kind == DeviceKind::App && !n.app.pids.empty();
+        const bool candidate = n.present && !n.stream && n.meterOffset >= 0 && (osDevice || osApp);
         if (candidate) {
             PeakMeters::Target t;
             t.offset = n.meterOffset;
