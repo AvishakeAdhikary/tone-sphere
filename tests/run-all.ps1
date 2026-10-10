@@ -1,6 +1,8 @@
 # Runs every automated NexTone test that is safe on the host PC (no kernel driver needed).
 #   .\tests\run-all.ps1            # unit + integration
 #   .\tests\run-all.ps1 -SkipBuild
+# Note: the suites change the engine's routing (the user's configuration): don't run them while
+# relying on a setup in NexTone.
 # Integration suites use VB-CABLE (+ FlexASIO configured on it) as a silent loopback.
 param([switch]$SkipBuild)
 $ErrorActionPreference = 'Stop'
@@ -21,7 +23,8 @@ $suites = @(
   @('meters-hotkeys', 'tests\integration\meters-hotkeys.mjs'),
   @('plugins', 'tests\integration\plugins.mjs'),
   @('latency', 'tests\integration\latency.mjs'),
-  @('osc', 'tests\integration\osc.mjs')
+  @('osc', 'tests\integration\osc.mjs'),
+  @('presets', 'tests\integration\presets.mjs')
 )
 $summary = @()
 foreach ($s in $suites) {
