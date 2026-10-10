@@ -24,7 +24,9 @@ test.beforeAll(async () => {
   // VS Code terminals set this, which would make Electron run as plain Node.
   delete env.ELECTRON_RUN_AS_NODE;
   if (process.env.NEXTONE_E2E_REAL !== '1') env.NEXTONE_DISCOVERY = discovery;
-  app = await electron.launch({ args: ['.'], env });
+  // Own profile: the tests must not collide with a NexTone the user has open (single-instance lock).
+  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'nextone-e2e-profile-'));
+  app = await electron.launch({ args: ['.', `--user-data-dir=${profile}`], env });
   page = await app.firstWindow();
   await page.setViewportSize({ width: 1400, height: 880 });
   // The app remembers the last view; tests start from the Routing view.
