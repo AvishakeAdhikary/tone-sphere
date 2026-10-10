@@ -185,7 +185,7 @@ void processProgram(Program& p, int frames, double nowSec) {
         }
         applyDelay(n, frames, sr);
         applyGainPanInvert(n, frames);
-        if (bank) meter(n, *bank, pn.meterOffset, frames, sr);
+        if (bank && !n.externalMeter.load(std::memory_order_relaxed)) meter(n, *bank, pn.meterOffset, frames, sr);
         if (FrameRing* tap = n.tap.load(std::memory_order_acquire)) {
             float* dst = n.tapScratch.data();
             for (int i = 0; i < frames; ++i)

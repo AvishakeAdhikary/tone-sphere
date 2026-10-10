@@ -13,6 +13,9 @@
 #include <nlohmann/json.hpp>
 
 #include "core/engine.h"
+#ifdef _WIN32
+#include "backends/win/hotkeys.h"
+#endif
 #include "ipc/ws_server.h"
 #include "util/log.h"
 #include "util/platform.h"
@@ -203,6 +206,7 @@ int main(int argc, char** argv) {
         while (!g_quit) {
             std::this_thread::sleep_for(std::chrono::milliseconds(33));
             if (!server.clientCount()) continue;
+            engine.pollExternalMeters();
             const uint32_t layout = engine.meters(vals);
             const uint32_t magic = 0x314D544E, count = static_cast<uint32_t>(vals.size());
             frame.resize(12 + vals.size() * 4);
@@ -221,6 +225,8 @@ int main(int argc, char** argv) {
     wc.lpszClassName = L"NexToneEngineHidden";
     RegisterClassW(&wc);
     HWND hidden = CreateWindowExW(0, wc.lpszClassName, L"NexTone Engine", 0, 0, 0, 0, 0, nullptr, nullptr, wc.hInstance, &engine);
+    Hotkeys hotkeys(engine);
+    hotkeys.install();  // needs this thread's message loop
     MSG msg;
     while (!g_quit && GetMessageW(&msg, nullptr, 0, 0) > 0) {
         TranslateMessage(&msg);

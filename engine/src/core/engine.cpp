@@ -16,6 +16,7 @@
 #include "backends/win/app_audio.h"
 #include "backends/win/asio_clients.h"
 #include "backends/win/asio_host.h"
+#include "backends/win/peak_meters.h"
 #include "backends/win/vad.h"
 #include "backends/win/wasapi.h"
 #endif
@@ -59,6 +60,7 @@ bool Engine::start() {
     asioHost->setPreferred(runningRate_, settings_.blockSize);
     backends_.push_back(std::move(asioHost));
     apps_ = std::make_unique<AppAudio>();
+    peaks_ = std::make_unique<PeakMeters>();
 #endif
     backends_.push_back(std::make_unique<vban::VbanBackend>());
 
@@ -610,7 +612,7 @@ void Engine::maintenanceThread() {
 #ifdef _WIN32
     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
 #endif
-    double lastSave = nowSeconds(), lastApps = 0;
+    double lastSave = nowSeconds(), lastApps = 0, lastMeters = 0;
     while (!shutdown_) {
         {
             std::unique_lock lk(maintMu_);
@@ -654,6 +656,10 @@ void Engine::maintenanceThread() {
 #endif
         if (changed) rebuildLocked();
         reclaimLocked();
+        if (changed || now - lastMeters > 1.0) {
+            lastMeters = now;
+            updateExternalMetersLocked();
+        }
         if (configDirty_ && now - lastSave > 1.0) {
             saveConfigLocked();
             lastSave = now;
@@ -662,6 +668,43 @@ void Engine::maintenanceThread() {
     }
 #ifdef _WIN32
     CoUninitialize();
+#endif
+}
+
+void Engine::updateExternalMetersLocked() {
+#ifdef _WIN32
+    if (!peaks_) return;
+    std::vector<PeakMeters::Target> targets;
+    for (auto& [id, n] : nodes_) {
+        if (!n.rt) continue;
+        const bool candidate = n.present && !n.stream && n.meterOffset >= 0 &&
+                               (n.kind == DeviceKind::Wasapi || n.kind == DeviceKind::Compat || n.kind == DeviceKind::App) && id != "tone";
+        if (candidate) {
+            PeakMeters::Target t;
+            t.offset = n.meterOffset;
+            t.channels = n.channels;
+            if (n.kind == DeviceKind::App) {
+                t.pids = n.app.pids;
+                t.capture = n.bin == Bin::AppIn;
+            } else {
+                t.endpointId = n.device.endpointId;
+            }
+            targets.push_back(std::move(t));
+        }
+        n.rt->externalMeter.store(candidate, std::memory_order_relaxed);
+    }
+    peaks_->setTargets(std::move(targets));
+#endif
+}
+
+void Engine::pollExternalMeters() {
+#ifdef _WIN32
+    std::shared_ptr<MeterBank> bank;
+    {
+        std::lock_guard lock(mu_);
+        bank = meterBank_;
+    }
+    if (bank && peaks_) peaks_->poll(*bank, bank->layoutVersion);
 #endif
 }
 

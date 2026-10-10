@@ -107,7 +107,8 @@ struct SceneModel {
     json snapshot;
 };
 
-class AppAudio;  // per-application audio (Windows)
+class AppAudio;    // per-application audio (Windows)
+class PeakMeters;  // OS peak meters for idle devices (Windows)
 
 class Engine {
 public:
@@ -124,6 +125,8 @@ public:
     json state();
     /// Fills `out` with the current meter values; returns the layout version.
     uint32_t meters(std::vector<float>& out);
+    /// Refreshes levels of idle devices/apps from the OS peak meters (meter thread).
+    void pollExternalMeters();
 
     /// Called whenever the observable state changed (coalesced by the IPC layer).
     std::function<void()> onStateChanged;
@@ -175,6 +178,8 @@ private:
     std::string activeScene_;
     std::vector<std::unique_ptr<Backend>> backends_;
     std::unique_ptr<AppAudio> apps_;
+    std::unique_ptr<PeakMeters> peaks_;
+    void updateExternalMetersLocked();
     std::shared_ptr<ToneGen> tone_;
 
     // published program (RCU)

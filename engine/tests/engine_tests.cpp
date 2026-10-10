@@ -188,3 +188,23 @@ TEST_CASE("VBAN encode/decode round trip for every PCM type", "[vban]") {
         for (size_t i = 0; i < in.size(); ++i) REQUIRE_THAT(out[i], WithinAbs(in[i], t == vban::DataType::Int16 ? 1e-4 : 1e-6));
     }
 }
+
+#ifdef _WIN32
+#include <windows.h>
+#include "backends/win/hotkeys.h"
+TEST_CASE("Shortcut accelerators parse like the UI writes them", "[hotkeys]") {
+    unsigned vk;
+    bool c, a, s, w;
+    REQUIRE(Hotkeys::parse("Ctrl+Shift+M", vk, c, a, s, w));
+    REQUIRE((vk == 'M' && c && s && !a && !w));
+    REQUIRE(Hotkeys::parse("Alt+F12", vk, c, a, s, w));
+    REQUIRE((vk == VK_F12 && a && !c));
+    REQUIRE(Hotkeys::parse("Ctrl+Space", vk, c, a, s, w));
+    REQUIRE(vk == VK_SPACE);
+    REQUIRE(Hotkeys::parse("Win+ArrowUp", vk, c, a, s, w));
+    REQUIRE((vk == VK_UP && w));
+    REQUIRE(Hotkeys::parse("Ctrl++", vk, c, a, s, w));
+    REQUIRE(vk == VK_OEM_PLUS);
+    REQUIRE_FALSE(Hotkeys::parse("Ctrl+Shift", vk, c, a, s, w));
+}
+#endif

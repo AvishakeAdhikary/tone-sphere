@@ -63,7 +63,9 @@ if(WIN32)
     src/backends/win/app_audio.cpp
     src/backends/win/vad.cpp
     src/backends/win/asio_clients.cpp
-    src/backends/win/asio_host.cpp)
+    src/backends/win/asio_host.cpp
+    src/backends/win/peak_meters.cpp
+    src/backends/win/hotkeys.cpp)
 endif()
 add_library(nextone_engine_lib STATIC ${ENGINE_SOURCES})
 target_link_libraries(nextone_engine_lib PUBLIC nextone_core nlohmann_json::nlohmann_json rnnoise)

@@ -63,6 +63,8 @@ struct NodeRuntime {
     std::shared_ptr<ToneGen> tone;
     // Recording / replay tap (owned by the Recorder; null when not tapped).
     std::atomic<FrameRing*> tap{nullptr};
+    // Levels come from Windows' peak meter (not streaming): the audio thread leaves meters alone.
+    std::atomic<bool> externalMeter{false};
 
     // Statistics (audio writes, control reads).
     std::atomic<float> cpuUs{0.0f};

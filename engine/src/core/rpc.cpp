@@ -327,6 +327,7 @@ json Engine::call(const std::string& method, const json& params) {
             s = &scenes_.back();
         }
         s->name = name;
+        if (p.contains("hotkey")) s->hotkey = p["hotkey"].is_string() ? p["hotkey"].get<std::string>() : std::string();
         s->snapshot = snapshotLocked();
         activeScene_ = s->id;
         markDirty();
