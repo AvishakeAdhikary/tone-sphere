@@ -61,6 +61,16 @@ json Engine::nodeJsonLocked(const NodeModel& n) const {
     } else if (!n.present) {
         state = "unavailable";
         status = isApp ? "Not running" : n.kind == DeviceKind::Vban ? "Not connected" : "Disconnected";
+        if (n.kind == DeviceKind::AsioClient) {
+            // The app may well be running, just not on the NexTone ASIO driver (e.g. its own WASAPI device).
+            const std::string exe = n.id.substr(n.id.find(':', n.id.find(':') + 1) + 1);
+            const auto app = nodes_.find("app:out:" + exe);
+            status = app != nodes_.end() && app->second.present
+                         ? "Running, but not on NexTone ASIO: choose the ASIO driver “NexTone ASIO” in its audio settings"
+                         : "Waiting: open the app with its audio device set to “NexTone ASIO”";
+        } else if (n.id.rfind("ph:", 0) == 0) {
+            status = "Not connected yet: plug it in and NexTone connects it";
+        }
     } else if (!n.userEnabled) {
         state = "idle";
         status = "Off";

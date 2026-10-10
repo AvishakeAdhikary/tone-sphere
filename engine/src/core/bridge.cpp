@@ -81,7 +81,7 @@ void CaptureBridge::init(const BridgeConfig& cfg) {
     // Room for the largest adaptive target plus bursts.
     const size_t cap = static_cast<size_t>(cfg.deviceRate * 0.3) * 3 + cfg.devicePeriod * 4 + cfg.engineMaxBlock * 4 + 4096;
     ring_.init(cfg.channels, cap);
-    const size_t maxIn = static_cast<size_t>(static_cast<double>(cfg.engineMaxBlock) * nominal_ * 1.02) + 4 * kHalfTaps + 64;
+    const size_t maxIn = static_cast<size_t>(static_cast<double>(cfg.engineMaxBlock) * nominal_ * 1.05) + 4 * kHalfTaps + 64;
     rs_.init(cfg.channels, maxIn, 0.95 * std::min(1.0, 1.0 / nominal_), kHalfTaps);
     ctl_.configure(cfg.deviceRate, target_.target());
     scratch_.assign(maxIn * cfg.channels, 0.0f);
@@ -111,7 +111,9 @@ void CaptureBridge::engineRead(float* const* out, size_t frames, double nowSec) 
     };
     if (restart_.exchange(false, std::memory_order_acq_rel)) {
         rs_.reset();
+        ctl_.setFeedForward(0.0);
         ctl_.reset();
+        rate_.reset();
         primed_ = false;
         startedAt_ = -1;
     }
@@ -142,6 +144,7 @@ void CaptureBridge::engineRead(float* const* out, size_t frames, double nowSec) 
         engTotal_ += ring_.skip(avail - static_cast<size_t>(tgt));
         avail = ring_.available();
         ctl_.reset();
+        rate_.reset();  // a burst or stall would skew the rate measurement
         stats_.overruns.fetch_add(1, std::memory_order_relaxed);
     }
 
@@ -159,6 +162,7 @@ void CaptureBridge::engineRead(float* const* out, size_t frames, double nowSec) 
         // The first seconds calibrate the cushion to the device; later dropouts are real.
         (nowSec - startedAt_ < 2.0 ? stats_.settling : stats_.underruns).fetch_add(1, std::memory_order_relaxed);
         target_.onUnderrun();
+        rate_.reset();
         primed_ = false;  // rebuild the (now larger) cushion before continuing
         return;
     }
@@ -172,6 +176,8 @@ void CaptureBridge::engineRead(float* const* out, size_t frames, double nowSec) 
         const double elapsed = std::clamp(nowSec - tW, 0.0, maxElapsed);
         fill = static_cast<double>(static_cast<int64_t>(totalW - engTotal_)) + elapsed * cfg_.deviceRate +
                static_cast<double>(rs_.buffered());
+        // Real device rate: consume device frames as fast as they actually arrive.
+        if (const double r = rate_.update(tW, totalW); r > 0 && !cfg_.master) ctl_.setFeedForward(r / cfg_.deviceRate - 1.0);
     }
     if (!cfg_.master) ctl_.update(fill, static_cast<double>(frames) / cfg_.engineRate);
     stats_.ppm.store(static_cast<float>(ctl_.ppm()), std::memory_order_relaxed);
@@ -196,7 +202,7 @@ void RenderBridge::init(const BridgeConfig& cfg) {
     ring_.init(cfg.channels, cap);
     rs_.init(cfg.channels, cfg.engineMaxBlock + 4 * kHalfTaps + 64, 0.95 * std::min(1.0, 1.0 / nominal_), kHalfTaps);
     ctl_.configure(cfg.deviceRate, target_.target());
-    const size_t maxOut = static_cast<size_t>(static_cast<double>(cfg.engineMaxBlock) / nominal_ * 1.02) + 4 * kHalfTaps + 64;
+    const size_t maxOut = static_cast<size_t>(static_cast<double>(cfg.engineMaxBlock) / nominal_ * 1.05) + 4 * kHalfTaps + 64;
     scratch_.assign(maxOut * cfg.channels, 0.0f);
     primeLevel_.store(target_.target());
     devicePrimed_.store(false);
@@ -210,7 +216,9 @@ void RenderBridge::init(const BridgeConfig& cfg) {
 void RenderBridge::engineWrite(const float* const* in, size_t frames, double nowSec) {
     if (restart_.exchange(false, std::memory_order_acq_rel)) {
         rs_.reset();
+        ctl_.setFeedForward(0.0);
         ctl_.reset();
+        rate_.reset();
         devicePrimed_.store(false, std::memory_order_release);
         startedAt_ = -1;
         if (cfg_.master) engTotal_ += ring_.writeSilence(2 * kHalfTaps);
@@ -228,6 +236,7 @@ void RenderBridge::engineWrite(const float* const* in, size_t frames, double now
         const uint32_t n = u - seenUnderruns_;
         seenUnderruns_ = u;
         target_.onUnderrun();
+        rate_.reset();
         (nowSec - startedAt_ < 2.0 ? stats_.settling : stats_.underruns).fetch_add(n, std::memory_order_relaxed);
     }
     const double fillNow = static_cast<double>(ring_.fillApprox());
@@ -244,6 +253,7 @@ void RenderBridge::engineWrite(const float* const* in, size_t frames, double now
         // Device is not consuming (stalled or much slower): drop this block and re-lock.
         stats_.overruns.fetch_add(1, std::memory_order_relaxed);
         ctl_.reset();
+        rate_.reset();
     } else if (produced > 0) {
         const size_t w = ring_.write(scratch_.data(), produced);
         engTotal_ += w;
@@ -257,6 +267,10 @@ void RenderBridge::engineWrite(const float* const* in, size_t frames, double now
         const double maxElapsed = 2.0 * target_.period() / cfg_.deviceRate;
         const double elapsed = std::clamp(nowSec - tR, 0.0, maxElapsed);
         fill = static_cast<double>(static_cast<int64_t>(engTotal_ - totalR)) - elapsed * cfg_.deviceRate;
+        // Real device rate: produce device frames as fast as the device actually consumes them.
+        if (const double r = rate_.update(tR, totalR); r > 0 && !cfg_.master) ctl_.setFeedForward(cfg_.deviceRate / r - 1.0);
+    } else {
+        rate_.reset();  // (re)priming: no frames are consumed while time passes
     }
     fill += static_cast<double>(rs_.buffered()) / nominal_;
     if (!cfg_.master && devicePrimed_.load(std::memory_order_relaxed)) {

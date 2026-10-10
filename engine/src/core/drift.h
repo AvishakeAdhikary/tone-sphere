@@ -1,6 +1,8 @@
 #pragma once
 // PI controller that keeps a ring buffer's fill level at a target by nudging the
 // resampling ratio. Output is a fractional correction (e.g. 1e-4 = +100 ppm).
+// A feed-forward term carries the device's measured rate error (cheap USB interfaces can be
+// off by 1 % or more); the PI loop then only trims the remainder within ±maxCorrection.
 #include <algorithm>
 #include <cmath>
 
@@ -17,10 +19,13 @@ public:
     void reset() {
         avg_ = target_;
         integ_ = 0.0;
-        corr_ = 0.0;
+        corr_ = ff_;
         settled_ = false;
     }
     void setTarget(double t) { target_ = t; }
+    /// Measured device rate error (fraction), applied on top of the PI correction.
+    void setFeedForward(double ff) { ff_ = std::clamp(ff, -kMaxFeedForward, kMaxFeedForward); }
+    double feedForward() const { return ff_; }
     double target() const { return target_; }
     double correction() const { return corr_; }
     double ppm() const { return corr_ * 1e6; }
@@ -36,7 +41,7 @@ public:
         integ_ += err * dt;
         const double iMax = maxCorr_ / kKi;
         integ_ = std::clamp(integ_, -iMax, iMax);
-        corr_ = std::clamp(kKp * err + kKi * integ_, -maxCorr_, maxCorr_);
+        corr_ = ff_ + std::clamp(kKp * err + kKi * integ_, -maxCorr_, maxCorr_);
         return corr_;
     }
 
@@ -44,6 +49,7 @@ public:
     static constexpr double kKp = 0.42;
     static constexpr double kKi = 0.09;
     static constexpr double kSmoothSeconds = 0.4;
+    static constexpr double kMaxFeedForward = 0.03;  // ±3 %: anything further off is a misconfigured device
 
 private:
     double rate_ = 48000.0;
@@ -52,6 +58,7 @@ private:
     double avg_ = 0.0;
     double integ_ = 0.0;
     double corr_ = 0.0;
+    double ff_ = 0.0;
     bool settled_ = false;
 };
 

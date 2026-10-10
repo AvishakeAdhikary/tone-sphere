@@ -6,7 +6,7 @@ _Last updated: 2026-10-10._
 
 | Area | Status | Evidence |
 |---|---|---|
-| Real-time core: lock-free rings, varispeed resampler, drift-compensated adaptive bridges | ✅ | `engine/tests/core_tests.cpp`: SPSC ring stress; 44.1→48 kHz resampling better than −60 dB; ±300 ppm clocks stay locked within ±15 ppm over 10 simulated minutes with 0 dropouts |
+| Real-time core: lock-free rings, varispeed resampler, drift-compensated adaptive bridges (with measured device-rate feed-forward up to ±3 %) | ✅ | real AI-04 USB interface running −10,300 ppm (1 % slow) at 44.1 kHz: before, the input underran every ~15 s and grew to 148 ms latency; now locked at −10,195 ppm with 15 ms latency. Unit tests for 1 %-slow capture and render devices; `engine/tests/core_tests.cpp`: SPSC ring stress; 44.1→48 kHz resampling better than −60 dB; ±300 ppm clocks stay locked within ±15 ppm over 10 simulated minutes with 0 dropouts |
 | Engine graph: mixes/buses, crosspoint routing, gain/mute/solo/pan/delay/polarity, meters | ✅ | `engine/tests/engine_tests.cpp` (11 cases) |
 | Built-in effects: noise suppression (RNNoise), gate, EQ, compressor, limiter, auto-duck, delay | ✅ | unit tests: limiter ceiling, gate, 4:1 compression = −15 dB |
 | **VST3 plugins**: out-of-process scan, inserts on any node, plugin windows, state in config and scenes, custom folders, crash containment | ✅ | `tests/integration/plugins.mjs` 7/7 with the bundled *NexTone Test Gain* plugin (see below). Real plugin: Guitar Rig 7 scans in 2 s and inserts in 0.35 s; its window opens; CPU 1.6 %, 0 xruns |

@@ -117,6 +117,29 @@ private:
     double prevGap_ = 0;
 };
 
+/// Measures a device's real sample rate from its (arrival time, total frames) positions, over a
+/// window that grows from the last reset: cheap interfaces can run 1 % or more off their nominal
+/// rate, far more than the PI loop is meant to absorb.
+class RateEstimator {
+public:
+    void reset() { t0_ = -1; }
+    /// Measured frames per second once the window is long enough; 0 before that.
+    double update(double t, uint64_t total) {
+        if (t0_ < 0) {
+            t0_ = t;
+            f0_ = total;
+            return 0.0;
+        }
+        const double w = t - t0_;
+        return w >= kMinWindowSec ? static_cast<double>(total - f0_) / w : 0.0;
+    }
+    static constexpr double kMinWindowSec = 3.0;  // packet jitter / window ≈ 0.3 % at 3 s, shrinking after
+
+private:
+    double t0_ = -1;
+    uint64_t f0_ = 0;
+};
+
 class CaptureBridge {
 public:
     void init(const BridgeConfig& cfg);
@@ -147,6 +170,7 @@ private:
     bool primed_ = false;
     double startedAt_ = -1;  // engine thread: first read after (re)start
     DevicePosition devPos_;
+    RateEstimator rate_;  // engine thread
     uint64_t devTotal_ = 0;  // device thread
     uint64_t engTotal_ = 0;  // engine thread
     std::atomic<bool> stopped_{true};
@@ -185,6 +209,7 @@ private:
     uint32_t seenUnderruns_ = 0;
     double startedAt_ = -1;  // engine thread
     DevicePosition devPos_;
+    RateEstimator rate_;  // engine thread
     uint64_t devTotal_ = 0;  // device thread
     uint64_t engTotal_ = 0;  // engine thread
     std::atomic<bool> stopped_{true};
