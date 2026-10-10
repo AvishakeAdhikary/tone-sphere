@@ -249,6 +249,13 @@ if (!app.requestSingleInstanceLock()) {
   app.on('before-quit', () => {
     quitting = true;
   });
+  // Session logout / `kill` on Linux and macOS: quit for real (the tray would otherwise keep the window hidden).
+  for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP'] as const) {
+    process.on(sig, () => {
+      quitting = true;
+      app.quit();
+    });
+  }
   app.on('window-all-closed', () => {
     if (!tray) app.quit();
   });
