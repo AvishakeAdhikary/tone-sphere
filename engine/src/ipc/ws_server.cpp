@@ -21,7 +21,11 @@ static void closeSock(intptr_t s) { closesocket(static_cast<SOCKET>(s)); }
 #include <sys/socket.h>
 #include <unistd.h>
 using SockLen = socklen_t;
-static void closeSock(intptr_t s) { ::close(static_cast<int>(s)); }
+// shutdown() first: on Linux, close() alone does not wake a thread blocked in accept()/recv().
+static void closeSock(intptr_t s) {
+    ::shutdown(static_cast<int>(s), SHUT_RDWR);
+    ::close(static_cast<int>(s));
+}
 #endif
 
 namespace nt {

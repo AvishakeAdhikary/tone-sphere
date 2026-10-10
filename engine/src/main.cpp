@@ -26,6 +26,8 @@
 #include <appmodel.h>
 #include <objbase.h>
 #else
+#include <fcntl.h>
+#include <sys/file.h>
 #include <unistd.h>
 #endif
 
@@ -144,6 +146,18 @@ int main(int argc, char** argv) {
         }
     }
 #else
+    // One engine per user: an exclusive lock next to the discovery file.
+    {
+        const std::string disc = discoveryPath();
+        const std::string lockPath = disc.substr(0, disc.find_last_of('/')) + "/engine.lock";
+        makeDirs(disc.substr(0, disc.find_last_of('/')));
+        const int lockFd = ::open(lockPath.c_str(), O_CREAT | O_RDWR | O_CLOEXEC, 0600);
+        if (lockFd < 0 || ::flock(lockFd, LOCK_EX | LOCK_NB) != 0) {
+            std::fprintf(stderr, "NexTone engine is already running\n");
+            return 0;
+        }
+        // The descriptor stays open (and locked) for the life of the process.
+    }
     std::signal(SIGINT, [](int) { requestQuit(); });
     std::signal(SIGTERM, [](int) { requestQuit(); });
 #endif

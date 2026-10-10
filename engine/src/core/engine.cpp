@@ -21,6 +21,20 @@
 #include "backends/win/vad.h"
 #include "backends/win/wasapi.h"
 #endif
+#ifdef NEXTONE_WITH_PIPEWIRE
+#include "backends/linux/pipewire.h"
+#endif
+
+#ifndef _WIN32
+namespace nt {
+// Per-app audio and OS peak meters are Windows features; other platforms get empty stand-ins.
+class AppAudio {
+public:
+    void shutdown() {}
+};
+class PeakMeters {};
+}  // namespace nt
+#endif
 
 namespace nt {
 
@@ -73,6 +87,9 @@ bool Engine::start() {
     backends_.push_back(std::move(asioHost));
     apps_ = std::make_unique<AppAudio>();
     peaks_ = std::make_unique<PeakMeters>();
+#endif
+#ifdef NEXTONE_WITH_PIPEWIRE
+    backends_.push_back(std::make_unique<PipeWireBackend>());
 #endif
     backends_.push_back(std::make_unique<vban::VbanBackend>());
 
@@ -273,6 +290,7 @@ Backend* Engine::backendFor(DeviceKind k) const {
                        : k == DeviceKind::AsioClient ? "asioclient"
                        : k == DeviceKind::Asio       ? "asio"
                        : k == DeviceKind::Vban       ? "vban"
+                       : k == DeviceKind::PipeWire   ? "pipewire"
                        : (k == DeviceKind::Wasapi || k == DeviceKind::Compat) ? "wasapi"
                                                                               : nullptr;
     if (!want) return nullptr;
