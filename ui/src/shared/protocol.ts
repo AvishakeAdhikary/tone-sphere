@@ -137,6 +137,8 @@ export interface NodeInfo {
   channelNames: string[];
   state: NodeState;
   statusText?: string;
+  /** Not shown in lists (e.g. an app's plain card while it uses the NexTone ASIO driver). */
+  hidden?: boolean;
   enabled: boolean;
   gainDb: number;
   muted: boolean;

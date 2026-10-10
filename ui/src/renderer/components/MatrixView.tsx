@@ -16,11 +16,11 @@ export function MatrixView() {
   const hover = useStore((s) => s.hoverNode);
 
   const rows = useMemo(
-    () => ROW_BINS.flatMap((b) => state.nodes.filter((n) => n.bin === b && isSource(n.bin))),
+    () => ROW_BINS.flatMap((b) => state.nodes.filter((n) => n.bin === b && isSource(n.bin) && !n.hidden)),
     [state.nodes],
   );
   const cols = useMemo(
-    () => COL_BINS.flatMap((b) => state.nodes.filter((n) => n.bin === b && isDestination(n.bin))),
+    () => COL_BINS.flatMap((b) => state.nodes.filter((n) => n.bin === b && isDestination(n.bin) && !n.hidden)),
     [state.nodes],
   );
   const routeMap = useMemo(() => {

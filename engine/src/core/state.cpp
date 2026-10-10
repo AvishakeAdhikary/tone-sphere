@@ -118,6 +118,14 @@ json Engine::nodeJsonLocked(const NodeModel& n) const {
               {"settings", settings}};
     if (!n.subtitle.empty()) j["subtitle"] = n.subtitle;
     if (!status.empty()) j["statusText"] = status;
+    // An app that uses the NexTone ASIO driver appears through its ASIO ports; its plain app card
+    // would only capture silence and is easily mistaken for them, so hide it unless it's in use.
+    if (isApp && n.present) {
+        const std::string exe = n.id.substr(n.id.find(':', n.id.find(':') + 1) + 1);
+        const auto asio = nodes_.find("asioclient:out:" + exe);
+        const bool routed = std::any_of(routes_.begin(), routes_.end(), [&](const RouteModel& r) { return r.from == n.id || r.to == n.id; });
+        if (asio != nodes_.end() && asio->second.present && !routed) j["hidden"] = true;
+    }
     if (n.device.isDefault) j["isDefault"] = true;
     if (n.device.isDefaultComms) j["isDefaultComms"] = true;
     if (n.rt) j["cpuUs"] = n.rt->cpuUs.load();

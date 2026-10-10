@@ -37,7 +37,7 @@ export function SendToMenu({ node }: { node: NodeInfo }) {
           <div className="popover-title">Send “{node.name}” to…</div>
           <div className="send-list">
             {groups.map((bin) => {
-              const dests = state.nodes.filter((n) => n.bin === bin && n.id !== node.id && isDestination(n.bin));
+              const dests = state.nodes.filter((n) => n.bin === bin && n.id !== node.id && isDestination(n.bin) && !n.hidden);
               if (!dests.length) return null;
               return (
                 <div key={bin} className="send-group">

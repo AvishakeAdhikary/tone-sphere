@@ -85,7 +85,7 @@ export function SimpleView() {
   const [vban, setVban] = useState<'in' | 'out' | null>(null);
 
   const byBin = (bin: Bin) =>
-    state.nodes.filter((n) => n.bin === bin && n.kind !== 'vban' && n.kind !== 'tone').sort(sortNodes);
+    state.nodes.filter((n) => n.bin === bin && n.kind !== 'vban' && n.kind !== 'tone' && !n.hidden).sort(sortNodes);
   const network = (dir: 'in' | 'out') =>
     state.nodes.filter((n) => n.kind === 'vban' && n.bin === (dir === 'in' ? 'virtual-out' : 'virtual-in'));
   const buses = state.nodes.filter((n) => n.bin === 'bus');

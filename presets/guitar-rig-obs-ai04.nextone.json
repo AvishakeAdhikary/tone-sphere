@@ -1,8 +1,8 @@
 {
   "format": "nextone-preset",
   "version": 1,
-  "name": "Guitar Rig live: AI-04 → speakers + OBS",
-  "description": "Guitar on AI-04 input 1 (Hi-Z) → Guitar Rig 7 (through the NexTone ASIO driver) → laptop speakers for you to hear and VB-CABLE for OBS. Desktop audio (YouTube…) keeps playing on the speakers as usual. In Guitar Rig: Audio and MIDI Settings → Driver: ASIO, Device: NexTone ASIO. In OBS: add an Audio Input Capture with the device “CABLE Output (VB-Audio Virtual Cable)”. Devices that are unplugged keep their connections and reconnect when plugged back in.",
+  "name": "Guitar Rig live: AI-04 → earphones + OBS",
+  "description": "Guitar on AI-04 input 1 (Hi-Z) → Guitar Rig 7 (through the NexTone ASIO driver) → your earphones (Realtek HD Audio 2nd output) and VB-CABLE for OBS. Desktop audio (YouTube…) keeps playing on the Windows default device as usual. In Guitar Rig: Audio and MIDI Settings → Driver: ASIO, Device: NexTone ASIO. In OBS: add an Audio Input Capture with the device “CABLE Output (VB-Audio Virtual Cable)”. Devices that are unplugged keep their connections and reconnect when plugged back in.",
   "app": "NexTone 0.1.0",
   "devices": [
     {
@@ -32,10 +32,10 @@
     },
     {
       "key": "speakers",
-      "label": "Laptop speakers (Realtek)",
+      "label": "Earphones (Realtek HD Audio 2nd output)",
       "bin": "physical-out",
       "kind": "wasapi",
-      "match": ["Speakers (Realtek(R) Audio)", "Speakers (Realtek", "Realtek"],
+      "match": ["Realtek HD Audio 2nd output (Realtek(R) Audio)", "Realtek HD Audio 2nd output"],
       "channels": 2,
       "settings": { "exclusive": false, "bufferMs": 3 }
     },
