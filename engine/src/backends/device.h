@@ -57,6 +57,8 @@ public:
     virtual void stop() = 0;
     /// Non-empty when the stream failed after starting (device removed, etc.).
     virtual std::string error() const { return {}; }
+    /// Times the device itself ran dry (audible glitch the bridges cannot see), e.g. a late render wake-up.
+    virtual uint64_t deviceGlitches() const { return 0; }
 };
 
 class Backend {

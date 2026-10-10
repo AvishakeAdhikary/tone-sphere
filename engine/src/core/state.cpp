@@ -102,8 +102,11 @@ json Engine::nodeJsonLocked(const NodeModel& n) const {
         j["sampleRate"] = n.streamRate;
         j["latencyMs"] = bs->latencyMs.load() + n.stream->deviceLatencyMs();
         j["driftPpm"] = bs->ppm.load();
-        j["xruns"] = bs->underruns.load() + bs->overruns.load();
-        j["diag"] = {{"underruns", bs->underruns.load()}, {"overruns", bs->overruns.load()}, {"fillMs", bs->fillMs.load()}, {"targetMs", bs->targetMs.load()}, {"devicePeriod", n.stream->periodFrames()}};
+        const uint64_t glitches = n.stream->deviceGlitches();
+        j["xruns"] = bs->underruns.load() + bs->overruns.load() + glitches;
+        j["diag"] = {{"underruns", bs->underruns.load()}, {"overruns", bs->overruns.load()}, {"fillMs", bs->fillMs.load()},
+                     {"targetMs", bs->targetMs.load()}, {"devicePeriod", n.stream->periodFrames()}, {"deviceGlitches", glitches},
+                     {"settlingUnderruns", bs->settling.load()}};
     }
     if (isApp) {
         json pids = json::array();
@@ -128,6 +131,7 @@ json Engine::state() {
             capLat = std::max(capLat, static_cast<double>(n.cap->stats().latencyMs.load()) + (n.stream ? n.stream->deviceLatencyMs() : 0));
             anyOpen = true;
         }
+        if (n.stream) xruns += n.stream->deviceGlitches();
         if (n.ren) {
             xruns += n.ren->stats().underruns + n.ren->stats().overruns;
             renLat = std::max(renLat, static_cast<double>(n.ren->stats().latencyMs.load()) + (n.stream ? n.stream->deviceLatencyMs() : 0));

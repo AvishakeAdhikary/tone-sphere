@@ -647,6 +647,10 @@ void WasapiStream::renderLoop() {
         return;
     }
     std::vector<float> tmp(static_cast<size_t>(bufferFrames_) * channels_);
+    // Periods kept queued in WASAPI (shared mode). Starts low for latency and grows when the
+    // device is found empty (a late wake-up under load, or a device that consumes in bursts).
+    UINT32 queuePeriods = 3;
+    bool primed = false;
     while (running_) {
         const DWORD w = WaitForSingleObject(event_, 500);
         if (!running_) break;
@@ -660,9 +664,13 @@ void WasapiStream::renderLoop() {
                 hasError_ = true;
                 break;
             }
-            // Keep about two periods queued in WASAPI (not the whole buffer): consumption from our
+            if (primed && padding == 0) {
+                glitches_.fetch_add(1, std::memory_order_relaxed);
+                if (queuePeriods < 4) ++queuePeriods;
+            }
+            // Keep a few periods queued in WASAPI (not the whole buffer): consumption from our
             // ring stays regular, which keeps drift estimation clean and latency low.
-            const UINT32 want = static_cast<UINT32>(2 * period_);
+            const UINT32 want = std::min<UINT32>(bufferFrames_, queuePeriods * static_cast<UINT32>(period_));
             frames = padding >= want ? 0 : std::min(bufferFrames_ - padding, want - padding);
         }
         if (frames == 0) continue;
@@ -681,6 +689,7 @@ void WasapiStream::renderLoop() {
             ren_->deviceRead(tmp.data(), frames, nowSeconds());
             fromFloat(tmp.data(), data, samples, fmt_);
             rc->ReleaseBuffer(frames, 0);
+            primed = true;
         } else {
             rc->ReleaseBuffer(frames, AUDCLNT_BUFFERFLAGS_SILENT);
         }

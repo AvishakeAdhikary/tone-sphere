@@ -132,6 +132,7 @@ int capture(const std::string& frag, double seconds) {
     IAudioCaptureClient* cc = nullptr;
     s.client->GetService(__uuidof(IAudioCaptureClient), reinterpret_cast<void**>(&cc));
     std::vector<float> mono;
+    size_t discontinuities = 0;  // the capture side itself lost data (not the signal's fault)
     s.client->Start();
     const ULONGLONG end = GetTickCount64() + static_cast<ULONGLONG>(seconds * 1000);
     while (GetTickCount64() < end) {
@@ -142,6 +143,7 @@ int capture(const std::string& frag, double seconds) {
             UINT32 frames;
             DWORD flags;
             cc->GetBuffer(&data, &frames, &flags, nullptr, nullptr);
+            if ((flags & AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY) && !mono.empty()) ++discontinuities;
             const float* f = reinterpret_cast<const float*>(data);
             for (UINT32 i = 0; i < frames; ++i) mono.push_back(flags & AUDCLNT_BUFFERFLAGS_SILENT ? 0.0f : f[i * ch]);
             cc->ReleaseBuffer(frames);
@@ -165,19 +167,23 @@ int capture(const std::string& frag, double seconds) {
     const double w = 2 * 3.14159265358979 * freq / rate;
     const double k = 2 * std::cos(w);
     size_t clicks = 0, gaps = 0, silentRun = 0;
+    double firstGapAt = -1;
     const double thr = std::max(0.02, peak * 0.08);
     for (size_t i = skip + 2; i < mono.size(); ++i) {
         const double pred = k * mono[i - 1] - mono[i - 2];
         if (std::fabs(mono[i] - pred) > thr) ++clicks;
         if (std::fabs(mono[i]) < 1e-5) {
-            if (++silentRun == static_cast<size_t>(rate * 0.002)) ++gaps;  // >2 ms of digital silence
+            if (++silentRun == static_cast<size_t>(rate * 0.002)) {  // >2 ms of digital silence
+                if (firstGapAt < 0) firstGapAt = i / rate;
+                ++gaps;
+            }
         } else {
             silentRun = 0;
         }
     }
-    std::printf("{\"device\":\"%s\",\"rate\":%.0f,\"seconds\":%.2f,\"freqHz\":%.1f,\"rmsDb\":%.2f,\"peakDb\":%.2f,\"clicks\":%zu,\"gaps\":%zu}\n",
+    std::printf("{\"device\":\"%s\",\"rate\":%.0f,\"seconds\":%.2f,\"freqHz\":%.1f,\"rmsDb\":%.2f,\"peakDb\":%.2f,\"clicks\":%zu,\"gaps\":%zu,\"firstGapAt\":%.3f,\"discontinuities\":%zu}\n",
                 name.c_str(), rate, n / rate, freq, rms > 0 ? 20 * std::log10(rms) : -200.0, peak > 0 ? 20 * std::log10(peak) : -200.0,
-                clicks, gaps);
+                clicks, gaps, firstGapAt, discontinuities);
     return 0;
 }
 

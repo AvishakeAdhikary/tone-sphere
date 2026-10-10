@@ -60,6 +60,7 @@ public:
     bool start(std::shared_ptr<CaptureBridge> capture, std::shared_ptr<RenderBridge> render) override;
     void stop() override;
     std::string error() const override;
+    uint64_t deviceGlitches() const override { return glitches_.load(); }
 
 private:
     void run();
@@ -84,6 +85,7 @@ private:
     int bytesPerSample_ = 4;
     mutable std::atomic<bool> hasError_{false};
     std::string error_;
+    std::atomic<uint64_t> glitches_{0};
 };
 
 }  // namespace nt

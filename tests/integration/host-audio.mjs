@@ -76,7 +76,7 @@ async function main() {
   const cap = JSON.parse(execFileSync(probe, ['capture', 'CABLE Output', String(SOAK)], { encoding: 'utf8' }).trim());
   check('render path: frequency', Math.abs(cap.freqHz - 1000) < 5, cap.freqHz);
   check('render path: level', Math.abs(cap.peakDb + 12) < 0.3, cap.peakDb);
-  check('render path: no clicks', cap.clicks === 0, cap.clicks);
+  check('render path: no clicks', cap.clicks === 0, { clicks: cap.clicks, firstGapAt: cap.firstGapAt, captureDiscontinuities: cap.discontinuities });
   check('render path: no gaps', cap.gaps === 0, cap.gaps);
   const ci = node((n) => n.id === cableIn.id);
   check('render path: no engine dropouts', (ci.xruns ?? 0) === 0, { xruns: ci.xruns, driftPpm: ci.driftPpm, latencyMs: ci.latencyMs });

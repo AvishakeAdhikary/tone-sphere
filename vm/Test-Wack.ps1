@@ -13,7 +13,14 @@ try {
   $taef = 'C:\Program Files (x86)\Windows Kits\10\Testing\Runtimes\TAEF'
   $meta = 'C:\Program Files (x86)\Windows Kits\10\UnionMetadata'  # platform metadata for the metadata tests
   Invoke-Command -Session $s -ArgumentList $kit, $taef, $meta { param($k, $t, $m) New-Item -ItemType Directory -Force C:\NexToneTest, $k, $t, $m | Out-Null }
-  Copy-Item -ToSession $s -Path $Package, "$root\packaging\msix\nextone-dev.cer" -Destination 'C:\NexToneTest\' -Force
+  $regs = @()
+  foreach ($k in 'HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows Kits', 'HKLM\SOFTWARE\Microsoft\Windows Kits', 'HKLM\SOFTWARE\WOW6432Node\Microsoft\Microsoft SDKs\Windows', 'HKLM\SOFTWARE\Microsoft\Windows App Certification Kit') {
+    $out = Join-Path $env:TEMP ("nextone-wack-" + $regs.Count + '.reg')
+    [IO.File]::Delete($out)  # no stale export if the key is missing
+    reg export $k $out /y 2>$null | Out-Null
+    if (Test-Path $out) { $regs += $out }
+  }
+  Copy-Item -ToSession $s -Path (@($Package, "$root\packaging\msix\nextone-dev.cer") + $regs) -Destination 'C:\NexToneTest\' -Force
   # WACK finds its test runner (TAEF) by absolute path, so mirror both folders.
   Copy-Item -ToSession $s -Path "$kit\*" -Destination $kit -Recurse -Force
   Copy-Item -ToSession $s -Path "$taef\*" -Destination $taef -Recurse -Force
@@ -22,11 +29,8 @@ try {
     param($pkg)
     $ErrorActionPreference = 'Continue'
     Import-Certificate -FilePath C:\NexToneTest\nextone-dev.cer -CertStoreLocation Cert:\LocalMachine\TrustedPeople | Out-Null
-    # WACK locates the kit (and its platform metadata) through the Windows Kits registry root.
-    foreach ($k in 'HKLM:\SOFTWARE\Microsoft\Windows Kits\Installed Roots', 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows Kits\Installed Roots') {
-      New-Item -Path $k -Force | Out-Null
-      Set-ItemProperty -Path $k -Name KitsRoot10 -Value 'C:\Program Files (x86)\Windows Kits\10\'
-    }
+    # WACK locates the SDK (and its platform metadata) through the Windows Kits / SDK registry.
+    Get-ChildItem C:\NexToneTest\*.reg | ForEach-Object { reg import $_.FullName 2>$null }
     $cmd = "`"C:\Program Files (x86)\Windows Kits\10\App Certification Kit\appcert.exe`" test -appxpackagepath C:\NexToneTest\$pkg -reportoutputpath C:\NexToneTest\wack.xml > C:\NexToneTest\wack.txt 2>&1"
     Set-Content C:\NexToneTest\wack.cmd $cmd
     schtasks /create /f /tn NexToneWack /sc once /st 00:00 /ru nextone /it /rl highest /tr C:\NexToneTest\wack.cmd 2>$null | Out-Null
