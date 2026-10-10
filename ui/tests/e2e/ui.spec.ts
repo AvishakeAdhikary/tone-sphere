@@ -97,7 +97,21 @@ test('settings dialog opens', async () => {
   await page.locator('.modal.settings input[role=switch]').first().click(); // state comes back from the engine
   await expect(page.locator('.modal.settings', { hasText: '/nextone/volume' })).toBeVisible();
   await page.screenshot({ path: path.join(shots, '07-control.png') });
+  await page.locator('.settings-nav button', { hasText: 'Appearance' }).click();
+  await page.locator('.skin-card', { hasText: 'Studio' }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-skin', 'studio');
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await page.screenshot({ path: path.join(shots, '08-skin-studio.png') });
+  await page.locator('.skin-card', { hasText: 'Fluent' }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-skin', 'fluent');
   await page.keyboard.press('Escape');
+});
+
+test('scene menu offers preset import and export', async () => {
+  await page.locator('button[title="Scenes"]').click();
+  await expect(page.locator('.scene-popover button', { hasText: 'Import preset' })).toBeVisible();
+  await expect(page.locator('.scene-popover button', { hasText: 'Export as preset' })).toBeVisible();
+  await page.locator('button[title="Scenes"]').click();
 });
 
 test('dark theme renders', async () => {

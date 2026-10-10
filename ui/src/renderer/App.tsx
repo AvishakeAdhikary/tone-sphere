@@ -9,6 +9,7 @@ import { EngineMissing } from './components/EngineMissing';
 import { act, engine, useStore } from './store';
 import { bridge } from './engine/bridge';
 import { setMeterLayout } from './engine/meterLoop';
+import { applySkin, findSkin } from './skins';
 
 export function App() {
   const status = useStore((s) => s.status);
@@ -22,10 +23,22 @@ export function App() {
   }, [state]);
 
   const theme = state?.settings.theme ?? 'system';
+  const skinId = state?.settings.skin ?? 'fluent';
+  // The state object is rebuilt on every engine update: depend on the skins' content, not identity.
+  const customKey = JSON.stringify(state?.settings.customSkins ?? []);
   useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-    void bridge.setTheme(theme);
-  }, [theme]);
+    const skin = findSkin(skinId, JSON.parse(customKey));
+    const apply = () => {
+      const mode = applySkin(skin, theme);
+      document.documentElement.dataset.theme = mode;
+      void bridge.setTheme(mode);
+    };
+    apply();
+    // Per-mode skin tokens must follow Windows when the theme is "Match Windows".
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    mq.addEventListener('change', apply);
+    return () => mq.removeEventListener('change', apply);
+  }, [theme, skinId, customKey]);
 
   useEffect(
     () =>

@@ -73,6 +73,8 @@ json Engine::call(const std::string& method, const json& params) {
         if (p.contains("recordFolder")) settings_.recordFolder = p["recordFolder"].get<std::string>();
         if (p.contains("oscPort")) settings_.oscPort = std::clamp(p["oscPort"].get<int>(), 0, 65535);
         if (p.contains("midiMappings") && p["midiMappings"].is_array()) settings_.midiMappings = p["midiMappings"];
+        if (p.contains("skin") && p["skin"].is_string()) settings_.skin = p["skin"].get<std::string>();
+        if (p.contains("customSkins") && p["customSkins"].is_array() && p["customSkins"].size() <= 50) settings_.customSkins = p["customSkins"];
         if (p.contains("pluginFolders") && p["pluginFolders"].is_array()) {
             settings_.pluginFolders = p["pluginFolders"].get<std::vector<std::string>>();
             applyPluginFoldersLocked();
@@ -352,6 +354,35 @@ json Engine::call(const std::string& method, const json& params) {
         markDirty();
         return json{{"id", s->id}, {"name", s->name}};
     }
+    if (method == "node.forget") {
+        // Removes a device that isn't connected, with its connections (and its place in scenes).
+        const std::string id = str(p, "id");
+        NodeModel* n = findNode(id);
+        if (!n) fail("Not found");
+        if (n->present || n->bin == Bin::Bus || n->id == "tone") fail("Only devices that aren't connected can be forgotten");
+        for (auto& r : routes_)
+            if ((r.from == id || r.to == id) && r.rt) retireLocked(r.rt);
+        routes_.erase(std::remove_if(routes_.begin(), routes_.end(), [&](const RouteModel& r) { return r.from == id || r.to == id; }), routes_.end());
+        for (auto& sc : scenes_) {
+            if (!sc.snapshot.contains("routes")) continue;
+            json kept = json::array();
+            for (const json& r : sc.snapshot["routes"])
+                if (r.value("from", "") != id && r.value("to", "") != id) kept.push_back(r);
+            sc.snapshot["routes"] = kept;
+            if (sc.snapshot.contains("nodes")) sc.snapshot["nodes"].erase(id);
+        }
+        closeStreamLocked(*n);
+        if (n->rt) retireLocked(n->rt);
+        nodeOrder_.erase(std::remove(nodeOrder_.begin(), nodeOrder_.end(), id), nodeOrder_.end());
+        nodes_.erase(id);
+        rebuildLocked();
+        return nullptr;
+    }
+    if (method == "preset.import") {
+        if (!p.contains("preset")) fail("No preset given");
+        return importPresetLocked(p["preset"]);
+    }
+    if (method == "preset.export") return exportPresetLocked(p.value("name", "My NexTone setup"), p.value("description", ""));
     if (method == "scene.load") {
         const std::string id = str(p, "id");
         for (auto& sc : scenes_) {

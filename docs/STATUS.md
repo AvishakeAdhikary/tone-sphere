@@ -30,6 +30,10 @@ _Last updated: 2026-10-10._
 | OSC remote control | ✅ | unit tests (messages, bundles, junk); `tests/integration/osc.mjs` 5/5 with real UDP packets |
 | MIDI controllers (mappings + learn, Windows) | ⚠️ logic tested only | unit tests for the mapping logic; no MIDI input on this PC, so the winmm input path is untested with hardware |
 | UI fonts | ✅ | Segoe UI Variable for text; JetBrains Mono (bundled, OFL) for numbers, ports and paths |
+| **Portable presets** (import/export routing maps that find devices by name; placeholders for devices not plugged in yet; re-binding when a device returns under a new id) | ✅ | unit tests (matching rules); `tests/integration/presets.mjs` 9/9: import with a missing device, placeholder keeps its connection, portable export, idempotent re-import, `node.forget` |
+| **Guitar Rig live scenario** (`presets/guitar-rig-obs-ai04.nextone.json`) | ✅ core flow in the VM; ⏳ your check with the AI-04 | `vm/Test-GuitarRig.ps1`: the real Guitar Rig 7 (this PC's copy) on NexTone ASIO joins the preset in ~25 s; OBS and speaker stand-ins get its sound; virtual devices unplugged → shown disconnected, connections kept; Guitar Rig closed/reopened → sound returns clean; 0 engine xruns. On this PC the preset matched Line (AI-04), Speakers (Realtek(R) Audio) and CABLE Output at import |
+| **Skins** (Fluent, Midnight, Studio, Neon, Paper; import/export as JSON) | ✅ | UI e2e: picking Studio applies its tokens and forces dark mode; Fluent restores |
+| Virtual devices notice the driver going away while streaming (driver marks rings as gone) | ✅ in the VM | Guitar Rig scenario unplug step |
 | CLI | ✅ | `tools/nextone-ctl.mjs` (also finds a Store-installed engine) |
 
 ## How to run
@@ -91,4 +95,5 @@ wsl -e bash scripts/package-linux.sh # Linux AppImage → ui\release\
   - Linux: per-app output redirection and app microphones (only app capture exists); plugin windows; MIDI. macOS: not started.
   - MIDI/OSC control.
   - FLAC recording (WAV only).
+- **Reconnect transients.** Re-enabling the virtual audio driver in the VM makes Windows re-create all 8 endpoints, and the audio stack glitches for roughly 10–15 s (the test recorder itself loses data). The sound comes back by itself, and later measurements are clean, with no xruns. Streams that have just started can click during their first seconds. Unplugging the AI-04 over USB is a different, single-device path; that's for the owner's manual test.
 - **Intermittent:** asio-host "shared interface" clicked once (13 clicks, −4.95 dB) in a `run-all` that started right after a full rebuild. It passed 5 times in a row afterwards on an idle machine.

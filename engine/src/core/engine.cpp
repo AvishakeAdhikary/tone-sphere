@@ -251,6 +251,8 @@ void Engine::refreshDevicesLocked() {
 #endif
     vadPresent_ = std::any_of(nodes_.begin(), nodes_.end(), [](auto& kv) { return kv.second.kind == DeviceKind::Vad && kv.second.present; });
     seen.insert("tone");
+    // Devices that (re)appear take over the routing of a preset placeholder or of their old id.
+    rebindDevicesLocked(seen);
     // Mark vanished devices; drop ones nobody refers to.
     for (auto it = nodes_.begin(); it != nodes_.end();) {
         NodeModel& n = it->second;

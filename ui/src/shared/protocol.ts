@@ -228,6 +228,10 @@ export interface EngineSettings {
   oscPort?: number;
   /** MIDI controller mappings. */
   midiMappings?: MidiMapping[];
+  /** UI skin id (built-in or imported). */
+  skin?: string;
+  /** Imported skins (see ui/src/renderer/skins.ts). */
+  customSkins?: Array<Record<string, unknown>>;
 }
 
 export interface EngineStatus {
@@ -334,6 +338,12 @@ export interface RpcMethods {
   /** Waits for the next MIDI knob/fader/pad move (MIDI learn). */
   'midi.learn': { params: { seconds?: number }; result: { type: 'cc' | 'note'; channel: number; number: number; value: number } };
   'midi.devices': { params: void; result: string[] };
+  /** Removes a disconnected device together with its connections. */
+  'node.forget': { params: { id: string }; result: void };
+  /** Applies a portable preset (see engine/src/core/presets.h) and keeps it as a scene. */
+  'preset.import': { params: { preset: unknown }; result: { sceneId: string; name: string; connections: number; waiting: string[]; skipped: number } };
+  /** The current routing as a portable preset. */
+  'preset.export': { params: { name: string; description?: string }; result: Record<string, unknown> };
   'scene.delete': { params: { id: string }; result: void };
   'recorder.start': {
     params: { nodeIds: string[]; folder?: string; format: 'wav' | 'flac' };

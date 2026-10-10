@@ -9,6 +9,7 @@
 #include "core/graph.h"
 #include "control/remote.h"
 #include "core/latency.h"
+#include "core/presets.h"
 #include "dsp/fx.h"
 #include "util/encoding.h"
 
@@ -329,4 +330,22 @@ TEST_CASE("MIDI controller messages map to remote actions", "[remote]") {
     REQUIRE_FALSE(nt::midiToAction(maps, 0x90, 60, 0));     // note on with velocity 0 = note off
     REQUIRE_FALSE(nt::midiToAction(maps, 0xB0, 30, 0));     // scene triggers only on press
     REQUIRE(nt::midiToAction(maps, 0xB0, 30, 127));
+}
+TEST_CASE("Preset device rules match devices by bin, kind and name", "[presets]") {
+    const auto rule = nlohmann::json::parse(R"json({"bin":"physical-in","kind":"wasapi","match":["Line (AI-04)","AI-04"]})json");
+    // Windows names endpoints "Line (AI-04)": NexTone shows name "Line", subtitle "AI-04".
+    const int exact = nt::presetMatchScore(rule, "physical-in", "wasapi", "Line", "AI-04");
+    const int loose = nt::presetMatchScore(rule, "physical-in", "wasapi", "Microphone", "AI-04 USB");
+    REQUIRE(exact > loose);
+    REQUIRE(loose > 0);
+    REQUIRE(nt::presetMatchScore(rule, "physical-out", "wasapi", "Line", "AI-04") == 0);  // wrong direction
+    REQUIRE(nt::presetMatchScore(rule, "physical-in", "asio", "Line", "AI-04") == 0);     // wrong kind
+    REQUIRE(nt::presetMatchScore(rule, "physical-in", "wasapi", "Microphone Array", "Intel Smart Sound") == 0);
+    REQUIRE(nt::presetMatchScore(rule, "physical-in", "wasapi", "LINE", "ai-04") == exact);  // case-insensitive
+    // Earlier patterns win over later ones.
+    const auto two = nlohmann::json::parse(R"json({"bin":"physical-out","match":["Speakers (Realtek(R) Audio)","Speakers"]})json");
+    REQUIRE(nt::presetMatchScore(two, "physical-out", "wasapi", "Speakers", "Realtek(R) Audio") >
+            nt::presetMatchScore(two, "physical-out", "wasapi", "Speakers", "AI-04"));
+    REQUIRE(nt::deviceLabel("Line", "AI-04") == "Line (AI-04)");
+    REQUIRE(nt::deviceLabel("Stream mix", "") == "Stream mix");
 }

@@ -1732,3 +1732,45 @@ details[open].insp-section summary h3::after {
   font-feature-settings: 'zero' 0;
   letter-spacing: -0.01em;
 }
+
+/* Skins paint their own background instead of the Windows Mica material. */
+:root:not([data-skin='fluent'])[data-shell='electron'] body {
+  background: var(--bg-solid);
+}
+.skin-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+  margin: 8px 0 12px;
+}
+.skin-card {
+  border: 1px solid var(--stroke-strong);
+  border-radius: var(--radius);
+  padding: 8px;
+  background: var(--surface-2);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.skin-card.on {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.skin-swatch {
+  display: flex;
+  height: 34px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--stroke);
+}
+.skin-swatch span {
+  flex: 1;
+}
+.skin-card .skin-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}

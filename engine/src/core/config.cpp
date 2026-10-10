@@ -2,6 +2,7 @@
 #include <cmath>
 
 #include "core/engine.h"
+#include "core/serialize.h"
 #include "util/log.h"
 #include "util/platform.h"
 
@@ -32,6 +33,8 @@ DeviceKind kindFromString(const std::string& s) {
 namespace {
 
 std::string configPath() { return dataDir() + "/config.json"; }
+
+}  // namespace
 
 json settingsJson(const NodeSettingsData& s) {
     return {{"exclusive", s.exclusive}, {"bufferMs", s.bufferMs}, {"safetyMs", s.safetyMs}, {"delayMs", s.delayMs},
@@ -95,8 +98,6 @@ RouteModel routeFrom(const json& j) {
     return r;
 }
 
-}  // namespace
-
 void Engine::saveConfigLocked() {
     json j;
     j["version"] = 1;
@@ -104,7 +105,7 @@ void Engine::saveConfigLocked() {
                      {"clockMaster", settings_.clockMaster}, {"compatMode", settings_.compatMode},
                      {"startWithSystem", settings_.startWithSystem}, {"startMinimized", settings_.startMinimized},
                      {"hotkeys", settings_.hotkeys},         {"replayBufferSeconds", settings_.replayBufferSeconds},
-                     {"recordFolder", settings_.recordFolder}, {"theme", settings_.theme}, {"pluginFolders", settings_.pluginFolders}, {"oscPort", settings_.oscPort}, {"midiMappings", settings_.midiMappings},
+                     {"recordFolder", settings_.recordFolder}, {"theme", settings_.theme}, {"pluginFolders", settings_.pluginFolders}, {"oscPort", settings_.oscPort}, {"midiMappings", settings_.midiMappings}, {"skin", settings_.skin}, {"customSkins", settings_.customSkins},
                      {"advancedMode", settings_.advancedMode}};
     json nodes = json::array();
     for (const std::string& id : nodeOrder_) {
@@ -134,6 +135,7 @@ void Engine::saveConfigLocked() {
                    {"settings", settingsJson(n.settings)},
                    {"fx", fx}};
         if (n.kind == DeviceKind::App) nj["app"] = {{"exe", n.app.exe}, {"mode", n.app.mode}, {"pinned", n.app.pinned}};
+        if (!n.match.is_null()) nj["match"] = n.match;
         nodes.push_back(nj);
     }
     j["nodes"] = nodes;
@@ -175,6 +177,8 @@ void Engine::loadConfig() {
     if (s.contains("pluginFolders") && s["pluginFolders"].is_array()) settings_.pluginFolders = s["pluginFolders"].get<std::vector<std::string>>();
     settings_.oscPort = s.value("oscPort", 0);
     if (s.contains("midiMappings") && s["midiMappings"].is_array()) settings_.midiMappings = s["midiMappings"];
+    settings_.skin = s.value("skin", settings_.skin);
+    if (s.contains("customSkins") && s["customSkins"].is_array()) settings_.customSkins = s["customSkins"];
         settings_.theme = s.value("theme", settings_.theme);
         settings_.advancedMode = s.value("advancedMode", settings_.advancedMode);
     }
@@ -201,6 +205,7 @@ void Engine::loadConfig() {
             n.app.mode = nj["app"].value("mode", "copy");
             n.app.pinned = nj["app"].value("pinned", false);
         }
+        if (nj.contains("match")) n.match = nj["match"];
         n.present = n.bin == Bin::Bus || n.kind == DeviceKind::Vban;
     }
     for (const json& rj : j.value("routes", json::array())) routes_.push_back(routeFrom(rj));

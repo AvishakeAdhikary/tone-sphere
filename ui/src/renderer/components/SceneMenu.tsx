@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { Bookmark, Check, ChevronDown, Plus, Trash2 } from 'lucide-react';
+import { Bookmark, Check, ChevronDown, Download, Plus, Trash2, Upload } from 'lucide-react';
 import { act, engine, useStore } from '../store';
+import { bridge } from '../engine/bridge';
 
 /** Scenes = saved routing snapshots (ASIO Link Pro's "Profiles", but unlimited). */
 export function SceneMenu() {
@@ -23,6 +24,38 @@ export function SceneMenu() {
     const n = name.trim() || `Scene ${state.scenes.length + 1}`;
     await act(engine.call('scene.save', { name: n }));
     setName('');
+  };
+
+  const toast = useStore.getState().toast;
+  const importPreset = async () => {
+    try {
+      const f = await bridge.openFile('Import a NexTone preset', ['json']);
+      if (!f) return;
+      let preset: unknown;
+      try {
+        preset = JSON.parse(f.text);
+      } catch {
+        throw new Error("This file isn't a NexTone preset (it isn't valid JSON).");
+      }
+      const r = await engine.call('preset.import', { preset });
+      setOpen(false);
+      toast('info', `Preset “${r.name}” is active: ${r.connections} connection${r.connections === 1 ? '' : 's'}.`);
+      if (r.waiting.length)
+        toast('info', `Waiting for: ${r.waiting.join(', ')}. They connect automatically as soon as they appear.`);
+    } catch (e) {
+      toast('error', (e as Error).message);
+    }
+  };
+  const exportPreset = async () => {
+    const name = active?.name ?? 'My NexTone setup';
+    try {
+      const p = await engine.call('preset.export', { name });
+      const file = `${name.replace(/[^\w -]+/g, '').trim() || 'preset'}.nextone.json`;
+      const path = await bridge.saveFile('Export preset', file, JSON.stringify(p, null, 2) + '\n', ['json']);
+      if (path) toast('info', `Saved ${path}`);
+    } catch (e) {
+      toast('error', (e as Error).message);
+    }
   };
 
   return (
@@ -77,6 +110,16 @@ export function SceneMenu() {
             />
             <button className="btn primary small" onClick={() => void save()}>
               <Plus size={13} /> Save
+            </button>
+          </div>
+          <div className="popover-title">Presets</div>
+          <p className="muted small">Presets are routing maps you can share. They find devices by name, so they work on any PC.</p>
+          <div className="menu-row">
+            <button className="btn small" onClick={() => void importPreset()}>
+              <Upload size={13} /> Import preset…
+            </button>
+            <button className="btn small" onClick={() => void exportPreset()}>
+              <Download size={13} /> Export as preset…
             </button>
           </div>
         </div>

@@ -1,0 +1,57 @@
+{
+  "format": "nextone-preset",
+  "version": 1,
+  "name": "Guitar Rig live: AI-04 → speakers + OBS",
+  "description": "Guitar on AI-04 input 1 (Hi-Z) → Guitar Rig 7 (through the NexTone ASIO driver) → laptop speakers for you to hear and VB-CABLE for OBS. Desktop audio (YouTube…) keeps playing on the speakers as usual. In Guitar Rig: Audio and MIDI Settings → Driver: ASIO, Device: NexTone ASIO. In OBS: add an Audio Input Capture with the device “CABLE Output (VB-Audio Virtual Cable)”. Devices that are unplugged keep their connections and reconnect when plugged back in.",
+  "app": "NexTone 0.1.0",
+  "devices": [
+    {
+      "key": "guitar",
+      "label": "AI-04 input (guitar on input 1)",
+      "bin": "physical-in",
+      "kind": "wasapi",
+      "match": ["Line (AI-04)", "AI-04"],
+      "channels": 2,
+      "settings": { "exclusive": false, "bufferMs": 3 }
+    },
+    {
+      "key": "rig-in",
+      "label": "Guitar Rig 7 input (NexTone ASIO)",
+      "bin": "app-in",
+      "kind": "asioclient",
+      "exe": "guitar rig 7.exe",
+      "channels": 2
+    },
+    {
+      "key": "rig-out",
+      "label": "Guitar Rig 7 output (NexTone ASIO)",
+      "bin": "app-out",
+      "kind": "asioclient",
+      "exe": "guitar rig 7.exe",
+      "channels": 2
+    },
+    {
+      "key": "speakers",
+      "label": "Laptop speakers (Realtek)",
+      "bin": "physical-out",
+      "kind": "wasapi",
+      "match": ["Speakers (Realtek(R) Audio)", "Speakers (Realtek", "Realtek"],
+      "channels": 2,
+      "settings": { "exclusive": false, "bufferMs": 3 }
+    },
+    {
+      "key": "obs",
+      "label": "To OBS (VB-CABLE: pick “CABLE Output” in OBS)",
+      "bin": "virtual-in",
+      "kind": "compat",
+      "match": ["CABLE Output (VB-Audio Virtual Cable)", "CABLE Output"],
+      "channels": 2
+    }
+  ],
+  "mixes": [],
+  "routes": [
+    { "from": "guitar", "to": "rig-in", "channels": [[0, 0, 0], [0, 1, 0]] },
+    { "from": "rig-out", "to": "speakers", "channels": [[0, 0, 0], [1, 1, 0]] },
+    { "from": "rig-out", "to": "obs", "channels": [[0, 0, 0], [1, 1, 0]] }
+  ]
+}

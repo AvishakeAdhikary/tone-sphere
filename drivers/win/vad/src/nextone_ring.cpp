@@ -29,6 +29,13 @@ static NTVAD_RING g_Mic[NT_MICS];
 static BOOLEAN g_Created = FALSE;
 
 static void DestroyRing(NTVAD_RING* r) {
+    if (r->hdr) {
+        // Tell engines that still map this ring (their handles keep the section alive) that the
+        // endpoint is gone; a new instance of the driver re-initialises the header.
+        InterlockedExchange(&r->hdr->streamActive, 0);
+        r->hdr->magic = 0;
+        KeMemoryBarrier();
+    }
     if (r->mdl) {
         if (r->locked) MmUnlockPages(r->mdl);
         IoFreeMdl(r->mdl);

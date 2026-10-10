@@ -98,3 +98,16 @@ See `ui/src/shared/protocol.ts` (the source of truth for types) and `engine/src/
 - **Saved state.** It is stored with the configuration and scenes (`state`, base64).
 - **Problems.** `FxInfo.error` is set when the plugin is not installed on this PC (settings are
   kept) or stopped after an internal error (the effect is switched off, so the engine keeps running).
+## Presets and skins
+
+| Method | Params | Result |
+|---|---|---|
+| `preset.import` | `{preset}` (see `engine/src/core/presets.h`) | `{sceneId, name, connections, waiting[], skipped}` |
+| `preset.export` | `{name, description?}` | the preset object |
+| `node.forget` | `{id}`: a device that isn't connected | – |
+
+- **Presets** describe devices by bin, kind and name patterns (`"match": ["Line (AI-04)", "AI-04"]`). NexTone ASIO clients and apps are described by `exe`.
+- **Import** replaces the routing and saves it as a scene with the preset's name.
+- **Devices that aren't connected yet** become placeholders. They bind to the device when it appears.
+- **A device that returns under a new id** (another USB port, for example) takes over the routing of its old entry. This works by label or by preset rule.
+- **Skins** are UI-only (`settings.skin`, `settings.customSkins`). The format is in `ui/src/renderer/skins.ts`.

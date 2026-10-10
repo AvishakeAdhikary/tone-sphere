@@ -54,6 +54,8 @@ const state = {
     advancedMode: false,
   pluginFolders: [],
   oscPort: 0,
+  skin: 'fluent',
+  customSkins: [],
   midiMappings: [],
   },
   status: {
@@ -298,6 +300,9 @@ const handlers = {
   'recorder.saveReplay': () => ({ file: `${state.recorder.folder}\\Replay.wav` }),
   'tone.set': () => {},
   'midi.devices': () => [],
+  'node.forget': ({ id }) => { state.nodes = state.nodes.filter((n) => n.id !== id); state.routes = state.routes.filter((r) => r.from !== id && r.to !== id); },
+  'preset.import': ({ preset }) => ({ sceneId: 'sc_mock', name: preset?.name ?? 'Preset', connections: (preset?.routes ?? []).length, waiting: [], skipped: 0 }),
+  'preset.export': ({ name }) => ({ format: 'nextone-preset', version: 1, name, devices: [], mixes: [], routes: [] }),
   'midi.learn': () => { throw new Error('No MIDI control moved.'); },
   'latency.measure': () => ({ latencyMs: 7.4, samples: 355.2, sampleRate: 48000, confidence: 0.98 }),
 };

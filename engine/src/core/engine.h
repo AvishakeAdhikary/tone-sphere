@@ -38,6 +38,8 @@ struct EngineSettings {
     std::vector<std::string> pluginFolders;  // extra VST3 folders
     int oscPort = 0;                         // OSC control over UDP (0 = off)
     json midiMappings = json::array();       // MIDI controller mappings (see control/remote.h)
+    std::string skin = "fluent";           // UI skin id
+    json customSkins = json::array();        // imported UI skins (validated by the UI)
 };
 
 struct NodeSettingsData {
@@ -86,6 +88,7 @@ struct NodeModel {
     AppData app;
     std::vector<std::shared_ptr<Fx>> fx;
     std::vector<FxConfig> pendingFx;  // fx from config not yet instantiated
+    json match;  // preset device rule (bin/kind/name patterns): re-binds this node to a matching device
 
     std::shared_ptr<NodeRuntime> rt;
     std::unique_ptr<DeviceStream> stream;
@@ -160,6 +163,12 @@ private:
     void applyNodeParamsLocked(NodeModel& n);
     void instantiatePendingFxLocked(NodeModel& n);
     void applyPluginFoldersLocked();
+    // ---- presets (core/presets.cpp) ----
+    json importPresetLocked(const json& preset);
+    json exportPresetLocked(const std::string& name, const std::string& description) const;
+    std::string resolvePresetDeviceLocked(const json& ref, bool& waiting);
+    void rebindDevicesLocked(const std::set<std::string>& seen);
+    void renameNodeRefsLocked(const std::string& from, const std::string& to);
     /// latency.measure: runs without holding the engine lock while it waits for audio.
     json measureLatency(const json& params);
     std::set<std::string> forcedOpen_;  // nodes kept open during a measurement

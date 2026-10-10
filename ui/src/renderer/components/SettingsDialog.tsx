@@ -3,6 +3,7 @@ import { CheckCircle2, FolderOpen, X, XCircle } from 'lucide-react';
 import { isSource, type EngineSettings, type MidiMapping } from '@shared/protocol';
 import { act, engine, useStore } from '../store';
 import { bridge } from '../engine/bridge';
+import { allSkins, parseSkin, skinPreview, skinToFile } from '../skins';
 
 const RATES = [44100, 48000, 88200, 96000, 176400, 192000];
 const BLOCKS = [32, 64, 128, 256, 512, 1024, 2048];
@@ -28,6 +29,77 @@ function acceleratorFromEvent(e: React.KeyboardEvent): string | null {
   const k = e.key.length === 1 ? e.key.toUpperCase() : e.key;
   parts.push(k === ' ' ? 'Space' : k);
   return parts.join('+');
+}
+
+// Skins: built-in looks plus skins imported from .json files (and exported for sharing/editing).
+function SkinPicker() {
+  const s = useStore((st) => st.state)!.settings;
+  const set = (p: Partial<EngineSettings>) => void act(engine.call('engine.setSettings', p));
+  const skins = allSkins(s.customSkins);
+  const current = s.skin ?? 'fluent';
+  const importSkin = async () => {
+    try {
+      const f = await bridge.openFile('Import a NexTone skin', ['json']);
+      if (!f) return;
+      const skin = parseSkin(f.text);
+      const others = (s.customSkins ?? []).filter((x) => x.id !== skin.id);
+      set({ customSkins: [...others, skin as unknown as Record<string, unknown>], skin: skin.id });
+      useStore.getState().toast('info', `Skin “${skin.name}” added`);
+    } catch (e) {
+      useStore.getState().toast('error', (e as Error).message);
+    }
+  };
+  const exportSkin = async () => {
+    const skin = skins.find((k) => k.id === current) ?? skins[0];
+    const path = await bridge.saveFile('Export skin', `${skin.name.replace(/[^\w -]+/g, '')}.nextone-skin.json`, skinToFile(skin), ['json']);
+    if (path) useStore.getState().toast('info', `Saved ${path}`);
+  };
+  return (
+    <>
+      <h2>Skin</h2>
+      {skins.find((k) => k.id === current)?.mode && (
+        <p className="hint">This skin is always {skins.find((k) => k.id === current)?.mode}, whatever the theme setting above.</p>
+      )}
+      <div className="skin-grid" role="radiogroup" aria-label="Skin">
+        {skins.map((k) => (
+          <button
+            key={k.id}
+            role="radio"
+            aria-checked={current === k.id}
+            className={`skin-card ${current === k.id ? 'on' : ''}`}
+            onClick={() => set({ skin: k.id })}
+          >
+            <span className="skin-swatch" aria-hidden>
+              {skinPreview(k).map((c, i) => (
+                <span key={i} style={{ background: c }} />
+              ))}
+            </span>
+            <span className="skin-row">
+              <span className="grow">{k.name}</span>
+              {k.mode && <span className="muted small">{k.mode}</span>}
+            </span>
+          </button>
+        ))}
+      </div>
+      <div className="field-row">
+        <button className="btn small" onClick={() => void importSkin()}>
+          Import skin…
+        </button>
+        <button className="btn small" onClick={() => void exportSkin()}>
+          Export current skin…
+        </button>
+        {current.startsWith('custom-') && (
+          <button
+            className="btn small"
+            onClick={() => set({ customSkins: (s.customSkins ?? []).filter((x) => x.id !== current), skin: 'fluent' })}
+          >
+            <X size={13} /> Remove this skin
+          </button>
+        )}
+      </div>
+      <p className="hint">Skins are small .json files: export one, change its colours in any text editor, and import it back.</p>
+    </>
+  );
 }
 
 const MIDI_ACTIONS: [MidiMapping['action'], string][] = [
@@ -551,6 +623,7 @@ export function SettingsDialog() {
                   </label>
                 ))}
               </div>
+              <SkinPicker />
               <label className="toggle-row">
                 <span className="grow">
                   <span>Show advanced options by default</span>

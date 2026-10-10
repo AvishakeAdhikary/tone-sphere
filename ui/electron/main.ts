@@ -246,7 +246,32 @@ ipcMain.handle('nextone:install-drivers', async (): Promise<{ ok: boolean; messa
   if (code === 1223) return { ok: false, message: 'Installation was cancelled.' };
   if (code !== 0) return { ok: false, message: `Driver installation failed (code ${code}).` };
   return { ok: true, message: 'Drivers installed.' };
-});ipcMain.handle('nextone:set-login-item', (_e, enabled: boolean) => {
+});// Presets and skins: the user picks the file; only that file is read or written.
+const fileFilters = (extensions: string[]) => [
+  { name: 'NexTone files', extensions: extensions.filter((e) => /^[a-z0-9]+$/i.test(e)) },
+  { name: 'All files', extensions: ['*'] },
+];
+ipcMain.handle('nextone:open-file', async (_e, title: string, extensions: string[]) => {
+  if (!win) return null;
+  const r = await dialog.showOpenDialog(win, { title: String(title), properties: ['openFile'], filters: fileFilters(extensions) });
+  const p = r.filePaths[0];
+  if (r.canceled || !p) return null;
+  if (fs.statSync(p).size > 2_000_000) throw new Error('That file is too large to be a NexTone file.');
+  return { name: path.basename(p), text: fs.readFileSync(p, 'utf8') };
+});
+ipcMain.handle('nextone:save-file', async (_e, title: string, defaultName: string, text: string, extensions: string[]) => {
+  if (!win || typeof text !== 'string') return null;
+  const safeName = String(defaultName).replace(/[\\/:*?"<>|]+/g, '-');
+  const r = await dialog.showSaveDialog(win, {
+    title: String(title),
+    defaultPath: path.join(app.getPath('documents'), safeName),
+    filters: fileFilters(extensions),
+  });
+  if (r.canceled || !r.filePath) return null;
+  fs.writeFileSync(r.filePath, text, 'utf8');
+  return r.filePath;
+});
+ipcMain.handle('nextone:set-login-item', (_e, enabled: boolean) => {
   app.setLoginItemSettings({ openAtLogin: !!enabled, args: ['--hidden'] });
 });
 

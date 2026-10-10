@@ -207,6 +207,8 @@ private:
         const uint32_t mask = h->dataBytes - 1;
         std::vector<float> tmp;
         double lastFeed = nowSeconds();
+        int64_t lastDriverBytes = h->driverBytes;
+        double lastDriverMove = lastFeed;
         if (!mic_) h->readPos = h->writePos;  // start at "now"
         else h->writePos = h->readPos;
         while (running_) {
@@ -214,6 +216,13 @@ private:
             due.QuadPart = -static_cast<LONGLONG>(kPollSec * 1e7);
             SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE);
             WaitForSingleObject(timer, 50);
+            if (h->magic != NTVAD_MAGIC) {
+                // The driver tore the endpoint down (device disabled, driver updated…): our mapping
+                // keeps the memory alive, so it has to be noticed here.
+                error_ = "Device was removed";
+                failed_ = true;
+                break;
+            }
             h->engineHeartbeat = qpcNow();
             const double now = nowSeconds();
 
@@ -276,7 +285,14 @@ private:
                 // NexTone -> ring -> apps recording the virtual microphone.
                 const int64_t r = h->readPos;
                 int64_t w = h->writePos;
-                if (!active) {
+                // Windows can leave the stream in RUN state after the app stopped recording, without
+                // reading: the driver bumps driverBytes on every read, so no change = nobody listening.
+                const int64_t db = h->driverBytes;
+                if (db != lastDriverBytes) {
+                    lastDriverBytes = db;
+                    lastDriverMove = now;
+                }
+                if (!active || now - lastDriverMove > 0.04) {  // the driver reads every ~10 ms
                     // Keep the ring empty (lowest latency when an app starts recording) but keep
                     // pulling from the bridge so its clock stays locked.
                     h->writePos = r;

@@ -33,6 +33,10 @@ confusion. See [docs/parity.md](docs/parity.md) for the feature-by-feature compa
 - **Recording.** Multitrack recording and an instant-replay buffer.
 - **Control.** Scenes with global hotkeys, push-to-talk, OSC and MIDI controllers, and a
   command-line tool.
+- **Presets.** Shareable routing maps that find devices by name. Connections survive unplugging
+  and come back by themselves (see [presets/](presets/README.md)).
+- **Skins.** Five built-in looks (Fluent, Midnight, Studio, Neon, Paper), plus your own, imported
+  from small JSON files.
 - **Diagnostics.** Round-trip latency measurement and per-device latency, drift and dropout
   statistics.
 
@@ -92,7 +96,7 @@ engine/        C++20 audio engine: graph, bridges, effects, VST3 host, backends 
 ui/            Electron + React app (bins, matrix, inspector, settings) and packaging
 drivers/win/   NexTone ASIO driver (user mode) and virtual audio driver (kernel, WaveRT)
 shared/        Engine ⇄ UI protocol (PROTOCOL.md; TypeScript types live in ui/src/shared)
-tools/         nextone-ctl (CLI), nextone-setup (driver installer), audio-probe, asio-test-host
+presets/       ready-made routing presets (.nextone.json) and how to use them/         nextone-ctl (CLI), nextone-setup (driver installer), audio-probe, asio-test-host
 tests/         Integration suites (Node) that drive the real engine with real audio
 vm/            Hyper-V test VM automation
 packaging/     Microsoft Store listing, privacy policy, submission guide

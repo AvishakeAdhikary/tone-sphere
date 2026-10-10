@@ -7,6 +7,10 @@ export interface NexToneBridge {
   platform(): Promise<{ platform: string; version: string; arch: string; store?: boolean }>;
   openStartupSettings(): Promise<void>;
   installDrivers(): Promise<{ ok: boolean; message: string }>;
+  /** Native open dialog; returns the file's name and text, or null when cancelled. */
+  openFile(title: string, extensions: string[]): Promise<{ name: string; text: string } | null>;
+  /** Native save dialog; returns the saved path, or null when cancelled. */
+  saveFile(title: string, defaultName: string, text: string, extensions: string[]): Promise<string | null>;
   setTheme(theme: 'system' | 'light' | 'dark'): Promise<void>;
   pickFolder(): Promise<string | null>;
   openPath(p: string): Promise<void>;
@@ -42,6 +46,12 @@ const browserFallback: NexToneBridge = {
   async openStartupSettings() {},
   async installDrivers() {
     return { ok: false, message: 'Not available in the browser preview.' };
+  },
+  async openFile() {
+    return null;
+  },
+  async saveFile() {
+    return null;
   },
   async setLoginItem() {},
   onCommand() {

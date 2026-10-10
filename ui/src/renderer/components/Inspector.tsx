@@ -366,6 +366,16 @@ function NodeInspector({ node, onClose }: { node: NodeInfo; onClose: () => void 
           </button>
         </div>
       )}
+      {node.state === 'unavailable' && node.kind !== 'bus' && node.kind !== 'vban' && (
+        <div className="insp-section">
+          <p className="hint">
+            This device isn’t connected. NexTone keeps its connections and restores them when it comes back.
+          </p>
+          <button className="btn danger small" onClick={() => void act(engine.call('node.forget', { id: node.id })).then(onClose)}>
+            <Trash2 size={13} /> Forget this device
+          </button>
+        </div>
+      )}
     </div>
   );
 }
