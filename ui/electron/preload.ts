@@ -8,6 +8,7 @@ const api = {
   pickFolder: () => ipcRenderer.invoke('nextone:pick-folder') as Promise<string | null>,
   openPath: (p: string) => ipcRenderer.invoke('nextone:open-path', p),
   openSoundSettings: () => ipcRenderer.invoke('nextone:open-sound-settings'),
+  openStartupSettings: () => ipcRenderer.invoke('nextone:open-startup-settings'),
   setLoginItem: (enabled: boolean) => ipcRenderer.invoke('nextone:set-login-item', enabled),
   onCommand: (cb: (cmd: string) => void) => {
     const listener = (_e: unknown, cmd: string) => cb(cmd);

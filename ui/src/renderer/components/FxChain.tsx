@@ -65,6 +65,11 @@ function FxItem({ node, fx, index, count }: { node: NodeInfo; fx: FxInfo; index:
           <Trash2 size={13} />
         </button>
       </div>
+      {fx.error && (
+        <div className="fx-error" role="status">
+          {fx.error}
+        </div>
+      )}
       {open && (
         <div className="fx-params">
           {fx.type === 'ducker' && (
@@ -123,7 +128,12 @@ export function FxChain({ node }: { node: NodeInfo }) {
 
   const add = (type: FxType, pluginId?: string) => {
     setMenu(false);
-    void act(engine.call('fx.add', { nodeId: node.id, type, pluginId }));
+    void act(
+      engine.call('fx.add', { nodeId: node.id, type, pluginId }).then(async (fx) => {
+        // A new plugin opens its window right away, as in a DAW.
+        if (type === 'vst3' && fx.hasEditor !== false) await engine.call('fx.openEditor', { nodeId: node.id, fxId: fx.id });
+      }),
+    );
   };
 
   return (
@@ -146,11 +156,20 @@ export function FxChain({ node }: { node: NodeInfo }) {
           ))}
           <div className="popover-title with-action">
             <span>VST3 plugins</span>
-            <button className="icon-btn subtle" title="Scan for plugins" onClick={() => void act(engine.call('plugins.scan'))}>
-              <RefreshCw size={13} />
+            <button
+              className="icon-btn subtle"
+              title={state.pluginsScanning ? 'Scanning…' : 'Scan for plugins'}
+              disabled={state.pluginsScanning}
+              onClick={() => void act(engine.call('plugins.scan'))}
+            >
+              <RefreshCw size={13} className={state.pluginsScanning ? 'spin' : ''} />
             </button>
           </div>
-          {state.plugins.length === 0 && <div className="muted small pad">No plugins found yet. Click refresh to scan your VST3 folder.</div>}
+          {state.plugins.length === 0 && (
+            <div className="muted small pad">
+              {state.pluginsScanning ? 'Looking for plugins…' : 'No VST3 plugins found. Install plugins, or add your plugin folder in Settings › Plugins.'}
+            </div>
+          )}
           <div className="plugin-list">
             {state.plugins.map((p) => (
               <button key={p.id} className="menu-item two-line" onClick={() => add('vst3', p.id)}>

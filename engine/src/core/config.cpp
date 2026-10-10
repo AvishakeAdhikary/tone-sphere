@@ -57,7 +57,7 @@ json fxJson(const Fx& fx) {
     for (size_t i = 0; i < fx.paramDefs().size(); ++i) params[fx.paramDefs()[i].id] = fx.param(i);
     return {{"id", fx.id},           {"type", fx.type()},         {"pluginId", fx.pluginId},
             {"bypass", fx.bypass.load()}, {"params", params},     {"sidechain", fx.sidechainId},
-            {"state", fx.saveState()}};
+            {"state", fx.saveState()}, {"name", fx.name()}};
 }
 
 FxConfig fxConfigFrom(const json& j) {
@@ -68,6 +68,7 @@ FxConfig fxConfigFrom(const json& j) {
     c.bypass = j.value("bypass", false);
     c.sidechain = j.value("sidechain", "");
     c.state = j.value("state", "");
+    c.name = j.value("name", "");
     if (j.contains("params") && j["params"].is_object())
         for (auto& [k, v] : j["params"].items())
             if (v.is_number()) c.params[k] = v.get<float>();
@@ -103,7 +104,7 @@ void Engine::saveConfigLocked() {
                      {"clockMaster", settings_.clockMaster}, {"compatMode", settings_.compatMode},
                      {"startWithSystem", settings_.startWithSystem}, {"startMinimized", settings_.startMinimized},
                      {"hotkeys", settings_.hotkeys},         {"replayBufferSeconds", settings_.replayBufferSeconds},
-                     {"recordFolder", settings_.recordFolder}, {"theme", settings_.theme},
+                     {"recordFolder", settings_.recordFolder}, {"theme", settings_.theme}, {"pluginFolders", settings_.pluginFolders},
                      {"advancedMode", settings_.advancedMode}};
     json nodes = json::array();
     for (const std::string& id : nodeOrder_) {
@@ -115,7 +116,7 @@ void Engine::saveConfigLocked() {
             json params = json::object();
             for (auto& [k, v] : pf.params) params[k] = v;
             fx.push_back({{"id", pf.id}, {"type", pf.type}, {"pluginId", pf.pluginId}, {"bypass", pf.bypass}, {"params", params},
-                          {"sidechain", pf.sidechain}, {"state", pf.state}});
+                          {"sidechain", pf.sidechain}, {"state", pf.state}, {"name", pf.name}});
         }
         json nj = {{"id", n.id},
                    {"bin", binName(n.bin)},
@@ -171,6 +172,7 @@ void Engine::loadConfig() {
         if (s.contains("hotkeys") && s["hotkeys"].is_object()) settings_.hotkeys = s["hotkeys"].get<std::map<std::string, std::string>>();
         settings_.replayBufferSeconds = s.value("replayBufferSeconds", settings_.replayBufferSeconds);
         settings_.recordFolder = s.value("recordFolder", settings_.recordFolder);
+    if (s.contains("pluginFolders") && s["pluginFolders"].is_array()) settings_.pluginFolders = s["pluginFolders"].get<std::vector<std::string>>();
         settings_.theme = s.value("theme", settings_.theme);
         settings_.advancedMode = s.value("advancedMode", settings_.advancedMode);
     }

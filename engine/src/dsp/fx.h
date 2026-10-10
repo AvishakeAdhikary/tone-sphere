@@ -48,6 +48,8 @@ public:
     /// Plugin state for persistence (VST3), base64 or empty.
     virtual std::string saveState() const { return {}; }
     virtual void loadState(const std::string&) {}
+    /// A user-facing problem with this effect (e.g. plugin missing or failed), or empty.
+    virtual std::string status() const { return {}; }
     std::string pluginId;
 
 protected:

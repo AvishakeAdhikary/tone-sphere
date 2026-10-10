@@ -52,6 +52,7 @@ const state = {
     recordFolder: 'C:\\Users\\you\\Music\\NexTone',
     theme: 'system',
     advancedMode: false,
+  pluginFolders: [],
   },
   status: {
     running: true,

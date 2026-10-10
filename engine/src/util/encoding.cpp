@@ -29,6 +29,31 @@ std::string base64Encode(const void* data, size_t len) {
     return out;
 }
 
+std::string base64Decode(std::string_view s) {
+    auto val = [](char c) -> int {
+        if (c >= 'A' && c <= 'Z') return c - 'A';
+        if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+        if (c >= '0' && c <= '9') return c - '0' + 52;
+        if (c == '+') return 62;
+        if (c == '/') return 63;
+        return -1;
+    };
+    std::string out;
+    out.reserve(s.size() / 4 * 3);
+    uint32_t acc = 0;
+    int bits = 0;
+    for (char c : s) {
+        const int v = val(c);
+        if (v < 0) continue;
+        acc = (acc << 6) | static_cast<uint32_t>(v);
+        bits += 6;
+        if (bits >= 8) {
+            bits -= 8;
+            out += static_cast<char>((acc >> bits) & 0xFF);
+        }
+    }
+    return out;
+}
 std::string base64Encode(std::string_view s) { return base64Encode(s.data(), s.size()); }
 
 std::array<uint8_t, 20> sha1(std::string_view s) {

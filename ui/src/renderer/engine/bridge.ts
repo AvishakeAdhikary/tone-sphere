@@ -4,7 +4,8 @@ import type { EngineDiscovery } from '@shared/protocol';
 
 export interface NexToneBridge {
   discover(): Promise<EngineDiscovery | null>;
-  platform(): Promise<{ platform: string; version: string; arch: string }>;
+  platform(): Promise<{ platform: string; version: string; arch: string; store?: boolean }>;
+  openStartupSettings(): Promise<void>;
   setTheme(theme: 'system' | 'light' | 'dark'): Promise<void>;
   pickFolder(): Promise<string | null>;
   openPath(p: string): Promise<void>;
@@ -37,6 +38,7 @@ const browserFallback: NexToneBridge = {
   },
   async openPath() {},
   async openSoundSettings() {},
+  async openStartupSettings() {},
   async setLoginItem() {},
   onCommand() {
     return () => {};

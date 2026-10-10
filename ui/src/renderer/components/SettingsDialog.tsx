@@ -6,7 +6,7 @@ import { bridge } from '../engine/bridge';
 
 const RATES = [44100, 48000, 88200, 96000, 176400, 192000];
 const BLOCKS = [32, 64, 128, 256, 512, 1024, 2048];
-const TABS = ['Audio', 'Devices', 'Startup', 'Recording', 'Shortcuts', 'Appearance', 'About'] as const;
+const TABS = ['Audio', 'Devices', 'Startup', 'Recording', 'Plugins', 'Shortcuts', 'Appearance', 'About'] as const;
 type Tab = (typeof TABS)[number];
 
 const HOTKEY_ACTIONS: [string, string][] = [
@@ -34,6 +34,7 @@ export function SettingsDialog() {
   const state = useStore((s) => s.state)!;
   const close = () => useStore.getState().setSettingsOpen(false);
   const [tab, setTab] = useState<Tab>('Audio');
+  const [storeBuild, setStoreBuild] = useState(false);
   const dlg = useRef<HTMLDivElement>(null);
   const s = state.settings;
   const st = state.status;
@@ -43,6 +44,7 @@ export function SettingsDialog() {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && close();
     window.addEventListener('keydown', onKey);
     dlg.current?.focus();
+    void bridge.platform().then((p) => setStoreBuild(!!p.store));
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
@@ -164,6 +166,17 @@ export function SettingsDialog() {
           {tab === 'Startup' && (
             <>
               <h2>Startup</h2>
+              {storeBuild ? (
+                <div className="toggle-row">
+                  <span className="grow">
+                    <span>Start NexTone when I sign in</span>
+                    <span className="hint">Windows manages this for apps from the Microsoft Store. It is on by default.</span>
+                  </span>
+                  <button className="btn small" onClick={() => void bridge.openStartupSettings()}>
+                    Startup apps…
+                  </button>
+                </div>
+              ) : (
               <label className="toggle-row">
                 <span className="grow">
                   <span>Start NexTone when I sign in</span>
@@ -180,6 +193,7 @@ export function SettingsDialog() {
                   }}
                 />
               </label>
+              )}
               <label className="toggle-row">
                 <span className="grow">
                   <span>Start minimized to the tray</span>
@@ -226,6 +240,52 @@ export function SettingsDialog() {
                   Save replay now
                 </button>
               )}
+            </>
+          )}
+          {tab === 'Plugins' && (
+            <>
+              <h2>Plugins</h2>
+              <p className="hint">
+                NexTone loads VST3 effects from the standard VST3 folders. Add a folder here if your plugins are installed somewhere else.
+              </p>
+              <div className="field">
+                <span>Extra plugin folders</span>
+                {(s.pluginFolders ?? []).length === 0 && <span className="muted small">None</span>}
+                {(s.pluginFolders ?? []).map((f) => (
+                  <div className="field-row" key={f}>
+                    <input readOnly value={f} className="grow mono small" aria-label="Plugin folder" />
+                    <button
+                      className="btn small"
+                      aria-label={`Remove ${f}`}
+                      onClick={() => set({ pluginFolders: (s.pluginFolders ?? []).filter((x) => x !== f) })}
+                    >
+                      <X size={13} /> Remove
+                    </button>
+                  </div>
+                ))}
+                <div className="field-row">
+                  <button
+                    className="btn small"
+                    onClick={async () => {
+                      const f = await bridge.pickFolder();
+                      if (f && !(s.pluginFolders ?? []).includes(f)) set({ pluginFolders: [...(s.pluginFolders ?? []), f] });
+                    }}
+                  >
+                    <FolderOpen size={13} /> Add folder…
+                  </button>
+                </div>
+              </div>
+              <div className="field-row">
+                <button className="btn small" disabled={state.pluginsScanning} onClick={() => void act(engine.call('plugins.scan'))}>
+                  {state.pluginsScanning ? 'Scanning…' : 'Scan now'}
+                </button>
+                <span className="muted small" role="status">
+                  {state.plugins.length === 1 ? '1 plugin found' : `${state.plugins.length} plugins found`}
+                </span>
+              </div>
+              <p className="hint">
+                Each plugin is tested in a separate process first, so a broken plugin can't crash NexTone while scanning.
+              </p>
             </>
           )}
           {tab === 'Shortcuts' && (

@@ -67,6 +67,17 @@ static std::string knownFolder(REFKNOWNFOLDERID id) {
 }
 #endif
 
+std::string exeDir() {
+#ifdef _WIN32
+    wchar_t buf[MAX_PATH * 2];
+    const DWORD n = GetModuleFileNameW(nullptr, buf, static_cast<DWORD>(std::size(buf)));
+    return toUtf8(fs::path(std::wstring(buf, n)).parent_path().wstring());
+#else
+    std::error_code ec;
+    return fs::read_symlink("/proc/self/exe", ec).parent_path().string();
+#endif
+}
+
 std::string dataDir() {
 #ifdef _WIN32
     std::string base = knownFolder(FOLDERID_LocalAppData);

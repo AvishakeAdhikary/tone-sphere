@@ -5,6 +5,7 @@
 #include <stdexcept>
 
 #include "core/engine.h"
+#include "plugins/vst3_host.h"
 #include "util/log.h"
 #include "util/platform.h"
 
@@ -63,6 +64,11 @@ json Engine::call(const std::string& method, const json& params) {
             updateTapsLocked();
         }
         if (p.contains("recordFolder")) settings_.recordFolder = p["recordFolder"].get<std::string>();
+        if (p.contains("pluginFolders") && p["pluginFolders"].is_array()) {
+            settings_.pluginFolders = p["pluginFolders"].get<std::vector<std::string>>();
+            applyPluginFoldersLocked();
+            plugins_->scanAsync();
+        }
         if (p.contains("theme")) settings_.theme = p["theme"].get<std::string>();
         if (p.contains("advancedMode")) settings_.advancedMode = p["advancedMode"].get<bool>();
         if (restartAudio) {
@@ -263,8 +269,8 @@ json Engine::call(const std::string& method, const json& params) {
         NodeModel* n = findNode(str(p, "nodeId"));
         if (!n) fail("Not found");
         const std::string type = str(p, "type");
-        std::shared_ptr<Fx> fx = createBuiltinFx(type);
-        if (!fx) fail(type == "vst3" ? "VST3 plugin hosting is not available in this build yet" : "Unknown effect");
+        std::shared_ptr<Fx> fx = type == "vst3" ? plugins_->create(str(p, "pluginId")) : createBuiltinFx(type);
+        if (!fx) fail("Unknown effect");
         fx->id = newId("fx");
         fx->prepare(runningRate_, kMaxBlock, n->channels);
         const size_t idx = std::min<size_t>(p.value("index", n->fx.size()), n->fx.size());
@@ -303,7 +309,11 @@ json Engine::call(const std::string& method, const json& params) {
         markDirty();
         return nullptr;
     }
-    if (method == "plugins.scan") return nullptr;
+    if (method == "plugins.scan") {
+        plugins_->scanAsync();
+        if (onStateChanged) onStateChanged();
+        return nullptr;
+    }
 
     // ------------------------------------------------------------ apps
 #ifdef _WIN32
@@ -354,9 +364,9 @@ json Engine::call(const std::string& method, const json& params) {
 
     // ------------------------------------------------------------ tone / misc
     if (method == "tone.set") {
-        tone_->enabled.store(p.value("enabled", false));
-        tone_->freq.store(std::clamp(p.value("freq", 440.0f), 10.0f, 20000.0f));
-        tone_->levelDb.store(std::clamp(p.value("levelDb", -18.0f), -90.0f, 0.0f));
+        tone_->enabled.store(p.value("enabled", tone_->enabled.load()));
+        tone_->freq.store(std::clamp(p.value("freq", tone_->freq.load()), 10.0f, 20000.0f));
+        tone_->levelDb.store(std::clamp(p.value("levelDb", tone_->levelDb.load()), -90.0f, 0.0f));
         if (p.contains("target") && p["target"].is_string()) {
             const std::string to = p["target"].get<std::string>();
             const bool exists = std::any_of(routes_.begin(), routes_.end(), [&](auto& r) { return r.from == "tone" && r.to == to; });

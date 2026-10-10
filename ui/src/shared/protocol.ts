@@ -80,6 +80,8 @@ export interface FxInfo {
   hasEditor?: boolean;
   /** Gain reduction in dB (dynamics processors), updated with state. */
   reductionDb?: number;
+  /** A problem with this effect (plugin missing or stopped), shown to the user. */
+  error?: string;
 }
 
 export interface NodeCaps {
@@ -210,6 +212,8 @@ export interface EngineSettings {
   theme: 'system' | 'light' | 'dark';
   /** Show advanced controls by default. */
   advancedMode: boolean;
+  /** Extra folders searched for VST3 plugins (besides the standard VST3 folders). */
+  pluginFolders?: string[];
 }
 
 export interface EngineStatus {
@@ -237,6 +241,8 @@ export interface EngineState {
   scenes: SceneInfo[];
   activeScene?: string;
   plugins: PluginInfo[];
+  /** A plugin scan is running. */
+  pluginsScanning?: boolean;
   recorder: RecorderState;
 }
 

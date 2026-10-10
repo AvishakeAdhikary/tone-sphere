@@ -5,6 +5,7 @@
 #include <set>
 
 #include "net/vban.h"
+#include "plugins/vst3_host.h"
 #include "util/log.h"
 #include "util/platform.h"
 
@@ -42,7 +43,18 @@ Engine::~Engine() { shutdown(); }
 // ============================================================ lifecycle
 bool Engine::start() {
     std::lock_guard lock(mu_);
+#ifdef _WIN32
+    const char* scanner = "nextone-plugscan.exe";
+#else
+    const char* scanner = "nextone-plugscan";
+#endif
+    plugins_ = std::make_unique<PluginManager>(dataDir() + "/plugins.json", exeDir() + "/" + scanner);
+    plugins_->onChanged = [this] {
+        if (onStateChanged) onStateChanged();
+    };
     loadConfig();
+    applyPluginFoldersLocked();
+    plugins_->init();
     runningRate_ = clampRate(settings_.sampleRate);
 #ifdef _WIN32
     auto wasapi = std::make_unique<WasapiBackend>();
@@ -96,10 +108,30 @@ void Engine::shutdown() {
     program_.store(nullptr);
     programOwner_.reset();
     retired_.clear();
+    // Unload plugins now, while COM and the main thread are still up.
+    for (auto& [id, n] : nodes_) n.fx.clear();
     NT_INFO("Engine stopped");
 }
 
 // ============================================================ helpers
+void Engine::applyPluginFoldersLocked() {
+    // User folders from settings, plus NEXTONE_VST3_PATH (tests, portable setups).
+    std::vector<std::string> folders = settings_.pluginFolders;
+#ifdef _WIN32
+    const char sep = ';';
+#else
+    const char sep = ':';
+#endif
+    if (const char* extra = std::getenv("NEXTONE_VST3_PATH")) {
+        const std::string s = extra;
+        for (size_t a = 0, b; a <= s.size(); a = b + 1) {
+            b = s.find(sep, a);
+            if (b == std::string::npos) b = s.size();
+            if (b > a) folders.push_back(s.substr(a, b - a));
+        }
+    }
+    plugins_->setExtraFolders(folders);
+}
 NodeModel* Engine::findNode(const std::string& id) {
     auto it = nodes_.find(id);
     return it == nodes_.end() ? nullptr : &it->second;
@@ -148,8 +180,19 @@ void Engine::applyNodeParamsLocked(NodeModel& n) {
 
 void Engine::instantiatePendingFxLocked(NodeModel& n) {
     for (const FxConfig& fc : n.pendingFx) {
-        std::shared_ptr<Fx> fx = createBuiltinFx(fc.type);
-        if (!fx) continue;  // VST3 restored by the plugin host (M5)
+        std::shared_ptr<Fx> fx;
+        if (fc.type == "vst3") {
+            try {
+                fx = plugins_->create(fc.pluginId);
+                fx->loadState(fc.state);
+            } catch (const std::exception& e) {
+                NT_WARN("Plugin %s on %s: %s", fc.name.c_str(), n.id.c_str(), e.what());
+                fx = createMissingPluginFx(fc.pluginId, fc.name, fc.state);
+            }
+        } else {
+            fx = createBuiltinFx(fc.type);
+        }
+        if (!fx) continue;
         fx->id = fc.id.empty() ? newId("fx") : fc.id;
         fx->bypass.store(fc.bypass);
         for (auto& [k, v] : fc.params) fx->setParam(k, v);

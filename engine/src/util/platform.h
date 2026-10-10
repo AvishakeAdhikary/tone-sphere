@@ -10,6 +10,8 @@ double nowSeconds();
 
 /// Per-user data directory (created on demand): %LOCALAPPDATA%\NexTone, ~/.local/share/nextone, ...
 std::string dataDir();
+/// Folder containing the running executable.
+std::string exeDir();
 /// Discovery file path (see shared/protocol/PROTOCOL.md).
 std::string discoveryPath();
 /// Default recordings folder (Music\NexTone).

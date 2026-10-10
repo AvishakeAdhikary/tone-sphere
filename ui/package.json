@@ -66,6 +66,10 @@
         "from": "../build/x64-release/bin/nextone-engine.exe"
       },
       {
+        "to": "engine/nextone-plugscan.exe",
+        "from": "../build/x64-release/bin/nextone-plugscan.exe"
+      },
+      {
         "to": "drivers/NexToneASIO64.dll",
         "from": "../build/x64-release/bin/NexToneASIO64.dll"
       },

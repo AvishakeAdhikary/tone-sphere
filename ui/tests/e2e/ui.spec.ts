@@ -87,6 +87,9 @@ test('settings dialog opens', async () => {
   await page.locator('button[aria-label="Settings"]').click();
   await expect(page.locator('.modal.settings')).toBeVisible();
   await page.screenshot({ path: path.join(shots, '05-settings.png') });
+  await page.locator('.settings-nav button', { hasText: 'Plugins' }).click();
+  await expect(page.locator('.modal.settings', { hasText: 'Extra plugin folders' })).toBeVisible();
+  await expect(page.locator('.modal.settings', { hasText: '1 plugin found' })).toBeVisible();
   await page.keyboard.press('Escape');
 });
 

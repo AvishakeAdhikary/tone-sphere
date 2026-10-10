@@ -57,13 +57,16 @@ std::wstring processFileName() {
     return slash == std::wstring::npos ? p : p.substr(slash + 1);
 }
 
-// Tries to start the NexTone engine (path written by the Driver Pack installer).
+// Tries to start the NexTone engine: the path written by the desktop installer, else the
+// Store app's execution alias (%LOCALAPPDATA%\Microsoft\WindowsApps\nextone-engine.exe).
 void tryLaunchEngine() {
     wchar_t path[MAX_PATH] = {};
     DWORD size = sizeof(path);
     if (RegGetValueW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\NexTone", L"EnginePath", RRF_RT_REG_SZ | RRF_SUBKEY_WOW6464KEY, nullptr, path, &size) !=
-        ERROR_SUCCESS)
-        return;
+        ERROR_SUCCESS) {
+        const DWORD n = ExpandEnvironmentStringsW(L"%LOCALAPPDATA%\\Microsoft\\WindowsApps\\nextone-engine.exe", path, MAX_PATH);
+        if (n == 0 || n > MAX_PATH || GetFileAttributesW(path) == INVALID_FILE_ATTRIBUTES) return;
+    }
     STARTUPINFOW si{sizeof(si)};
     PROCESS_INFORMATION pi{};
     std::wstring cmd = L"\"" + std::wstring(path) + L"\" --background";
@@ -265,6 +268,8 @@ public:
             ShellExecuteW(nullptr, L"open", path, nullptr, nullptr, SW_SHOWNORMAL);
             return ASE_OK;
         }
+        // Store build: the package registers the nextone: protocol.
+        if (reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", L"nextone:", nullptr, nullptr, SW_SHOWNORMAL)) > 32) return ASE_OK;
         MessageBoxW(nullptr, L"Open the NexTone app to route this program's audio.", L"NexTone ASIO", MB_OK | MB_ICONINFORMATION);
         return ASE_OK;
     }

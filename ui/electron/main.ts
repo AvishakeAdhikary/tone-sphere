@@ -207,6 +207,8 @@ ipcMain.handle('nextone:platform', () => ({
   platform: process.platform,
   version: app.getVersion(),
   arch: process.arch,
+  // Microsoft Store (MSIX) build: sign-in startup is a package startup task managed by Windows.
+  store: !!process.windowsStore,
 }));
 ipcMain.handle('nextone:set-theme', (_e, theme: 'system' | 'light' | 'dark') => {
   nativeTheme.themeSource = theme;
@@ -222,6 +224,9 @@ ipcMain.handle('nextone:open-path', async (_e, p: string) => {
 });
 ipcMain.handle('nextone:open-sound-settings', async () => {
   if (isWin) await shell.openExternal('ms-settings:sound');
+});
+ipcMain.handle('nextone:open-startup-settings', async () => {
+  if (isWin) await shell.openExternal('ms-settings:startupapps');
 });
 ipcMain.handle('nextone:set-login-item', (_e, enabled: boolean) => {
   app.setLoginItemSettings({ openAtLogin: !!enabled, args: ['--hidden'] });

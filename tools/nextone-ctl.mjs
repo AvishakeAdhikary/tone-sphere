@@ -13,7 +13,18 @@ import path from 'node:path';
 
 function discoveryPath() {
   if (process.env.NEXTONE_DISCOVERY) return process.env.NEXTONE_DISCOVERY;
-  if (process.platform === 'win32') return path.join(process.env.LOCALAPPDATA ?? path.join(os.homedir(), 'AppData', 'Local'), 'NexTone', 'engine.json');
+  if (process.platform === 'win32') {
+    const local = process.env.LOCALAPPDATA ?? path.join(os.homedir(), 'AppData', 'Local');
+    const desktop = path.join(local, 'NexTone', 'engine.json');
+    if (fs.existsSync(desktop)) return desktop;
+    // The Store (MSIX) build's AppData writes land in the package's private LocalCache.
+    const pkgs = path.join(local, 'Packages');
+    for (const p of fs.existsSync(pkgs) ? fs.readdirSync(pkgs) : []) {
+      const f = path.join(pkgs, p, 'LocalCache', 'Local', 'NexTone', 'engine.json');
+      if (/nextone/i.test(p) && fs.existsSync(f)) return f;
+    }
+    return desktop;
+  }
   if (process.platform === 'darwin') return path.join(os.homedir(), 'Library', 'Application Support', 'NexTone', 'engine.json');
   return path.join(process.env.XDG_RUNTIME_DIR ?? path.join(os.homedir(), '.local', 'state'), 'nextone', 'engine.json');
 }

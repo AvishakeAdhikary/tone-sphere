@@ -34,6 +34,62 @@ else()
   target_compile_options(rnnoise PRIVATE -w)
 endif()
 
+# ---- VST3 SDK (MIT since 3.8) for plugin hosting; only the parts we need are compiled.
+FetchContent_Declare(vst3sdk
+  GIT_REPOSITORY https://github.com/steinbergmedia/vst3sdk.git
+  GIT_TAG v3.8.1_build_84
+  GIT_SHALLOW TRUE
+  GIT_SUBMODULES base pluginterfaces public.sdk)
+FetchContent_GetProperties(vst3sdk)
+if(NOT vst3sdk_POPULATED)
+  FetchContent_Populate(vst3sdk)
+endif()
+set(VST3_SDK ${vst3sdk_SOURCE_DIR} CACHE INTERNAL "")
+set(VST3_PUB ${VST3_SDK}/public.sdk/source)
+# interfaces + base classes shared by the host and the test plugin
+add_library(vst3_base STATIC
+  ${VST3_SDK}/pluginterfaces/base/coreiids.cpp
+  ${VST3_SDK}/pluginterfaces/base/funknown.cpp
+  ${VST3_SDK}/pluginterfaces/base/ustring.cpp
+  ${VST3_SDK}/pluginterfaces/base/conststringtable.cpp
+  ${VST3_SDK}/base/source/baseiids.cpp
+  ${VST3_SDK}/base/source/fobject.cpp
+  ${VST3_SDK}/base/source/fstring.cpp
+  ${VST3_SDK}/base/source/fdebug.cpp
+  ${VST3_SDK}/base/source/fbuffer.cpp
+  ${VST3_SDK}/base/source/fstreamer.cpp
+  ${VST3_SDK}/base/source/updatehandler.cpp
+  ${VST3_SDK}/base/thread/source/flock.cpp
+  ${VST3_SDK}/base/thread/source/fcondition.cpp
+  ${VST3_PUB}/common/commoniids.cpp
+  ${VST3_PUB}/common/memorystream.cpp
+  ${VST3_PUB}/common/commonstringconvert.cpp
+  ${VST3_PUB}/vst/vstinitiids.cpp
+  ${VST3_PUB}/vst/utility/stringconvert.cpp
+  $<IF:$<BOOL:${WIN32}>,${VST3_PUB}/common/threadchecker_win32.cpp,${VST3_PUB}/common/threadchecker_linux.cpp>)
+target_include_directories(vst3_base PUBLIC ${VST3_SDK})
+target_compile_definitions(vst3_base PUBLIC $<IF:$<CONFIG:Debug>,DEVELOPMENT=1,RELEASE=1>)
+target_compile_options(vst3_base PRIVATE $<IF:$<CXX_COMPILER_ID:MSVC>,/W0,-w>)
+set(VST3_MODULE_SRC ${VST3_PUB}/vst/hosting/module_linux.cpp)
+if(WIN32)
+  set(VST3_MODULE_SRC ${VST3_PUB}/vst/hosting/module_win32.cpp)
+endif()
+add_library(vst3_hosting STATIC
+  ${VST3_PUB}/vst/hosting/module.cpp
+  ${VST3_MODULE_SRC}
+  ${VST3_PUB}/vst/hosting/hostclasses.cpp
+  ${VST3_PUB}/vst/hosting/pluginterfacesupport.cpp
+  ${VST3_PUB}/vst/hosting/plugprovider.cpp
+  ${VST3_PUB}/vst/hosting/processdata.cpp
+  ${VST3_PUB}/vst/hosting/parameterchanges.cpp
+  ${VST3_PUB}/vst/hosting/eventlist.cpp
+  ${VST3_PUB}/vst/hosting/connectionproxy.cpp)
+target_link_libraries(vst3_hosting PUBLIC vst3_base)
+target_compile_options(vst3_hosting PRIVATE $<IF:$<CXX_COMPILER_ID:MSVC>,/W0,-w>)
+if(NOT WIN32)
+  target_link_libraries(vst3_hosting PUBLIC ${CMAKE_DL_LIBS})
+endif()
+
 # ---- real-time core (platform independent, unit tested)
 add_library(nextone_core STATIC
   src/core/resampler.cpp
@@ -55,7 +111,9 @@ set(ENGINE_SOURCES
   src/util/log.cpp
   src/util/platform.cpp
   src/util/encoding.cpp
+  src/util/ui_thread.cpp
   src/net/vban.cpp
+  src/plugins/vst3_host.cpp
 )
 if(WIN32)
   list(APPEND ENGINE_SOURCES
@@ -68,7 +126,7 @@ if(WIN32)
     src/backends/win/hotkeys.cpp)
 endif()
 add_library(nextone_engine_lib STATIC ${ENGINE_SOURCES})
-target_link_libraries(nextone_engine_lib PUBLIC nextone_core nlohmann_json::nlohmann_json rnnoise)
+target_link_libraries(nextone_engine_lib PUBLIC nextone_core nlohmann_json::nlohmann_json rnnoise vst3_hosting)
 target_compile_definitions(nextone_engine_lib PUBLIC NEXTONE_WITH_RNNOISE)
 if(WIN32)
   target_compile_definitions(nextone_engine_lib PUBLIC UNICODE _UNICODE)
@@ -85,6 +143,27 @@ if(WIN32)
   # GUI subsystem (no console window) but keep the standard main() entry point.
   set_target_properties(nextone-engine PROPERTIES WIN32_EXECUTABLE ON LINK_FLAGS "/ENTRY:mainCRTStartup")
   target_sources(nextone-engine PRIVATE src/engine.rc)
+endif()
+
+# Out-of-process plugin scanner (a crashing plugin cannot take the engine down while scanning).
+add_executable(nextone-plugscan src/plugins/plugscan_main.cpp)
+target_link_libraries(nextone-plugscan PRIVATE nextone_engine_lib)
+
+# Small VST3 effect used by the automated tests (gain + a native editor window).
+if(WIN32)
+  add_library(nextone_test_gain MODULE
+    tests/test_plugin/test_gain.cpp
+    ${VST3_PUB}/main/dllmain.cpp
+    ${VST3_PUB}/main/pluginfactory.cpp
+    ${VST3_PUB}/main/moduleinit.cpp
+    ${VST3_PUB}/vst/vstsinglecomponenteffect.cpp
+    ${VST3_PUB}/vst/vstcomponentbase.cpp
+    ${VST3_PUB}/vst/vstbus.cpp
+    ${VST3_PUB}/vst/vstparameters.cpp
+    ${VST3_PUB}/common/pluginview.cpp)
+  target_link_libraries(nextone_test_gain PRIVATE vst3_base comctl32)
+  set_target_properties(nextone_test_gain PROPERTIES PREFIX "" SUFFIX ".vst3"
+    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/test-plugins)
 endif()
 
 if(NEXTONE_BUILD_TESTS)

@@ -1701,3 +1701,23 @@ details[open].insp-section summary h3::after {
     stroke: CanvasText;
   }
 }
+
+/* plugin problems + scanning indicator */
+.fx-error {
+  margin: 2px 6px 6px 30px;
+  font-size: 12px;
+  color: var(--danger);
+}
+.spin {
+  animation: spin 0.9s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spin {
+    animation: none;
+  }
+}

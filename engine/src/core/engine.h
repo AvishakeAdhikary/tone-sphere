@@ -34,6 +34,7 @@ struct EngineSettings {
     std::string recordFolder;
     std::string theme = "system";
     bool advancedMode = false;
+    std::vector<std::string> pluginFolders;  // extra VST3 folders
 };
 
 struct NodeSettingsData {
@@ -59,7 +60,7 @@ struct AppData {
 };
 
 struct FxConfig {
-    std::string id, type, pluginId, sidechain, state;
+    std::string id, type, pluginId, sidechain, state, name;
     bool bypass = false;
     std::map<std::string, float> params;
 };
@@ -109,6 +110,7 @@ struct SceneModel {
 
 class AppAudio;    // per-application audio (Windows)
 class PeakMeters;  // OS peak meters for idle devices (Windows)
+class PluginManager;  // VST3 plugins
 
 class Engine {
 public:
@@ -151,6 +153,7 @@ private:
     NodeModel& ensureNode(const std::string& id);
     void applyNodeParamsLocked(NodeModel& n);
     void instantiatePendingFxLocked(NodeModel& n);
+    void applyPluginFoldersLocked();
     std::vector<std::tuple<int, int, float>> defaultCrosspoints(const NodeModel& a, const NodeModel& b, const std::string& mode) const;
     void markDirty();
     void saveConfigLocked();
@@ -179,6 +182,7 @@ private:
     std::vector<std::unique_ptr<Backend>> backends_;
     std::unique_ptr<AppAudio> apps_;
     std::unique_ptr<PeakMeters> peaks_;
+    std::unique_ptr<PluginManager> plugins_;
     void updateExternalMetersLocked();
     std::shared_ptr<ToneGen> tone_;
 

@@ -18,7 +18,8 @@ $suites = @(
   @('asio-host', 'tests\integration\asio-host.mjs', 'FlexASIO', '8'),
   @('vban', 'tests\integration\vban.mjs', '8'),
   @('recorder', 'tests\integration\recorder.mjs'),
-  @('meters-hotkeys', 'tests\integration\meters-hotkeys.mjs')
+  @('meters-hotkeys', 'tests\integration\meters-hotkeys.mjs'),
+  @('plugins', 'tests\integration\plugins.mjs')
 )
 $summary = @()
 foreach ($s in $suites) {

@@ -2,6 +2,7 @@
 #include <algorithm>
 
 #include "core/engine.h"
+#include "plugins/vst3_host.h"
 #include "util/platform.h"
 
 #ifdef _WIN32
@@ -32,6 +33,7 @@ json fxInfo(const Fx& fx) {
               {"hasEditor", fx.hasEditor()}, {"reductionDb", fx.reductionDb.load()}};
     if (fx.type() == "ducker") j["sidechain"] = fx.sidechainId.empty() ? json(nullptr) : json(fx.sidechainId);
     if (!fx.pluginId.empty()) j["pluginId"] = fx.pluginId;
+    if (const std::string s = fx.status(); !s.empty()) j["error"] = s;
     return j;
 }
 
@@ -165,7 +167,7 @@ json Engine::state() {
                      {"clockMaster", settings_.clockMaster},   {"compatMode", settings_.compatMode},
                      {"startWithSystem", settings_.startWithSystem}, {"startMinimized", settings_.startMinimized},
                      {"hotkeys", settings_.hotkeys},           {"replayBufferSeconds", settings_.replayBufferSeconds},
-                     {"recordFolder", settings_.recordFolder}, {"theme", settings_.theme},
+                     {"recordFolder", settings_.recordFolder}, {"theme", settings_.theme}, {"pluginFolders", settings_.pluginFolders},
                      {"advancedMode", settings_.advancedMode}};
     json j = {{"version", version()},
               {"protocol", 1},
@@ -175,7 +177,8 @@ json Engine::state() {
               {"nodes", nodes},
               {"routes", routes},
               {"scenes", scenes},
-              {"plugins", json::array()},
+              {"plugins", plugins_ ? plugins_->listJson() : json::array()},
+              {"pluginsScanning", plugins_ && plugins_->scanning()},
               {"recorder", {{"recording", recorder_->recording()}, {"files", lastRecordings_}, {"folder", settings_.recordFolder},
                             {"replaySeconds", settings_.replayBufferSeconds}}}};
     if (!activeScene_.empty()) j["activeScene"] = activeScene_;

@@ -36,7 +36,7 @@ struct MeterBank {
 
 /// Simple test-tone / signal generator source.
 struct ToneGen {
-    std::atomic<bool> enabled{false};
+    std::atomic<bool> enabled{true};  // audible as soon as the user connects it
     std::atomic<float> freq{440.0f};
     std::atomic<float> levelDb{-18.0f};
     double phase = 0.0;

@@ -54,12 +54,12 @@ See `ui/src/shared/protocol.ts` (the source of truth for types) and `engine/src/
 | `route.applyPreset` | `{id, mode: "one-to-one" \| "mono-sum" \| "spread" \| "clear"}` | – |
 | `bus.create` | `{name, channels}` | `NodeInfo` |
 | `bus.delete` | `{id}` | – |
-| `fx.add` | `{nodeId, type, pluginId?, index?}` | `FxInfo` |
+| `fx.add` | `{nodeId, type, pluginId?, index?}` (`type: "vst3"` needs a `pluginId` from `EngineState.plugins`) | `FxInfo` |
 | `fx.remove` | `{nodeId, fxId}` | – |
 | `fx.update` | `{nodeId, fxId, bypass?, params?: {[k]: number}}` | – |
 | `fx.move` | `{nodeId, fxId, index}` | – |
-| `fx.openEditor` | `{nodeId, fxId}` | – |
-| `plugins.scan` | – | – |
+| `fx.openEditor` | `{nodeId, fxId}`: opens (or raises) the plugin's own window, owned by the engine | – |
+| `plugins.scan` | – (starts a background scan; `EngineState.pluginsScanning` is true until it ends) | – |
 | `app.setMode` | `{exe, mode: "off" \| "copy" \| "isolate"}` | – |
 | `app.setRule` | `{exe, inputFrom?: nodeId \| null, autoCapture?: boolean}` | – |
 | `vban.add` | `VbanStreamConfig` | `NodeInfo` |
@@ -86,3 +86,15 @@ See `ui/src/shared/protocol.ts` (the source of truth for types) and `engine/src/
 | Bus | `bus:<uuid>` |
 | VBAN | `vban:in:<uuid>` / `vban:out:<uuid>` |
 | Built-in | `tone` |
+
+## VST3 plugins
+
+- **Scanning.** Plugins come from the standard VST3 folders plus `EngineSettings.pluginFolders`
+  (and the `NEXTONE_VST3_PATH` environment variable). Each module is loaded by
+  `nextone-plugscan` in its own process, and the results are cached in `plugins.json` (data
+  directory), keyed by modification time.
+- **Plugin effects.** `FxInfo.type` is `"vst3"` and `FxInfo.pluginId` is the VST3 class id.
+  Plugin parameters are edited in the plugin window, so `params` is empty.
+- **Saved state.** It is stored with the configuration and scenes (`state`, base64).
+- **Problems.** `FxInfo.error` is set when the plugin is not installed on this PC (settings are
+  kept) or stopped after an internal error (the effect is switched off, so the engine keeps running).

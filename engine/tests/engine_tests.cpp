@@ -208,3 +208,13 @@ TEST_CASE("Shortcut accelerators parse like the UI writes them", "[hotkeys]") {
     REQUIRE_FALSE(Hotkeys::parse("Ctrl+Shift", vk, c, a, s, w));
 }
 #endif
+
+TEST_CASE("Base64 round-trips binary plugin state", "[util]") {
+    std::string bin;
+    for (int i = 0; i < 1000; ++i) bin += static_cast<char>((i * 37 + 11) & 0xFF);
+    for (size_t n : {size_t(0), size_t(1), size_t(2), size_t(3), size_t(999), size_t(1000)}) {
+        const std::string part = bin.substr(0, n);
+        REQUIRE(nt::base64Decode(nt::base64Encode(part)) == part);
+    }
+    REQUIRE(nt::base64Decode("TmV4VG9uZQ==") == "NexTone");
+}

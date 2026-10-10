@@ -19,9 +19,11 @@
 #include "ipc/ws_server.h"
 #include "util/log.h"
 #include "util/platform.h"
+#include "util/ui_thread.h"
 
 #ifdef _WIN32
 #include <windows.h>
+#include <appmodel.h>
 #include <objbase.h>
 #else
 #include <unistd.h>
@@ -64,10 +66,13 @@ LRESULT CALLBACK hiddenProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
     if (msg == WM_CREATE) engine = static_cast<Engine*>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams);
     if (msg == WM_POWERBROADCAST && (wp == PBT_APMRESUMEAUTOMATIC || wp == PBT_APMRESUMESUSPEND) && engine) {
         NT_INFO("System resumed: re-opening devices");
-        try {
-            engine->call("devices.refresh", json::object());
-        } catch (...) {
-        }
+        // Never block the main thread on the engine (plugins run work on it while holding the engine lock).
+        std::thread([e = engine] {
+            try {
+                e->call("devices.refresh", json::object());
+            } catch (...) {
+            }
+        }).detach();
     }
     if (msg == WM_ENDSESSION && wp) requestQuit();
     if (msg == WM_QUERYENDSESSION) return TRUE;
@@ -111,6 +116,7 @@ int main(int argc, char** argv) {
         freopen_s(&f, "CONOUT$", "w", stderr);
     }
     g_mainThread = GetCurrentThreadId();
+    ui::init();  // plugin windows and plugin calls run on this thread (queued until the message loop runs)
     SetConsoleCtrlHandler(consoleHandler, TRUE);
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     // Never let a background audio app throttle us.
@@ -120,6 +126,23 @@ int main(int argc, char** argv) {
     pt.StateMask = 0;
     SetProcessInformation(GetCurrentProcess(), ProcessPowerThrottling, &pt, sizeof(pt));
     SetPriorityClass(GetCurrentProcess(), ABOVE_NORMAL_PRIORITY_CLASS);
+    // Store build: the sign-in startup task runs the engine with no arguments (the app and
+    // the ASIO driver always pass some). Bring up the app in the tray as well.
+    UINT32 pkgLen = 0;
+    if (argc == 1 && GetCurrentPackageFullName(&pkgLen, nullptr) == ERROR_INSUFFICIENT_BUFFER) {
+        wchar_t self[MAX_PATH];
+        std::wstring dir(self, GetModuleFileNameW(nullptr, self, MAX_PATH));
+        dir = dir.substr(0, dir.find_last_of(L'\\'));  // ...\app\resources\engine
+        dir = dir.substr(0, dir.find_last_of(L'\\'));  // ...\app\resources
+        dir = dir.substr(0, dir.find_last_of(L'\\'));  // ...\app
+        std::wstring cmd = L"\"" + dir + L"\\NexTone.exe\" --hidden";
+        STARTUPINFOW si{sizeof(si)};
+        PROCESS_INFORMATION pi{};
+        if (CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi)) {
+            CloseHandle(pi.hThread);
+            CloseHandle(pi.hProcess);
+        }
+    }
 #else
     std::signal(SIGINT, [](int) { requestQuit(); });
     std::signal(SIGTERM, [](int) { requestQuit(); });
@@ -232,6 +255,7 @@ int main(int argc, char** argv) {
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
     }
+    ui::stop();
     if (hidden) DestroyWindow(hidden);
 #else
     while (!g_quit) std::this_thread::sleep_for(std::chrono::milliseconds(200));
