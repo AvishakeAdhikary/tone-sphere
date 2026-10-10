@@ -57,7 +57,11 @@ json Engine::call(const std::string& method, const json& params) {
         if (p.contains("startWithSystem")) settings_.startWithSystem = p["startWithSystem"].get<bool>();
         if (p.contains("startMinimized")) settings_.startMinimized = p["startMinimized"].get<bool>();
         if (p.contains("hotkeys") && p["hotkeys"].is_object()) settings_.hotkeys = p["hotkeys"].get<std::map<std::string, std::string>>();
-        if (p.contains("replayBufferSeconds")) settings_.replayBufferSeconds = std::clamp(p["replayBufferSeconds"].get<int>(), 0, 3600);
+        if (p.contains("replayBufferSeconds")) {
+            settings_.replayBufferSeconds = std::clamp(p["replayBufferSeconds"].get<int>(), 0, 3600);
+            recorder_->setReplaySeconds(settings_.replayBufferSeconds);
+            updateTapsLocked();
+        }
         if (p.contains("recordFolder")) settings_.recordFolder = p["recordFolder"].get<std::string>();
         if (p.contains("theme")) settings_.theme = p["theme"].get<std::string>();
         if (p.contains("advancedMode")) settings_.advancedMode = p["advancedMode"].get<bool>();
@@ -389,8 +393,43 @@ json Engine::call(const std::string& method, const json& params) {
         rebuildLocked();
         return nodeJsonLocked(n);
     }
-    if (method == "recorder.start" || method == "recorder.stop" || method == "recorder.saveReplay")
-        fail("Recording arrives in a later update of this build");
+    if (method == "recorder.start") {
+        std::vector<std::string> ids;
+        if (p.contains("nodeIds") && p["nodeIds"].is_array())
+            for (auto& v : p["nodeIds"])
+                if (v.is_string() && findNode(v.get<std::string>())) ids.push_back(v.get<std::string>());
+        if (ids.empty()) fail("Choose something to record");
+        if (p.value("format", "wav") != "wav") fail("Only WAV recording is available in this version");
+        recordingNodes_ = ids;
+        updateTapsLocked();
+        std::string err;
+        const std::string folder = p.value("folder", settings_.recordFolder);
+        if (!recorder_->start(ids, folder.empty() ? defaultRecordFolder() : folder, err)) {
+            recordingNodes_.clear();
+            updateTapsLocked();
+            fail(err);
+        }
+        markDirty();
+        return nullptr;
+    }
+    if (method == "recorder.stop") {
+        auto files = recorder_->stop();
+        recordingNodes_.clear();
+        updateTapsLocked();
+        lastRecordings_.insert(lastRecordings_.end(), files.begin(), files.end());
+        if (lastRecordings_.size() > 20) lastRecordings_.erase(lastRecordings_.begin(), lastRecordings_.end() - 20);
+        markDirty();
+        return json{{"files", files}};
+    }
+    if (method == "recorder.saveReplay") {
+        if (recorder_->replaySeconds() <= 0) fail("Turn on the instant replay buffer in Settings first");
+        std::string err;
+        auto files = recorder_->saveReplay(p.value("seconds", recorder_->replaySeconds()), settings_.recordFolder, err);
+        if (files.empty()) fail(err);
+        lastRecordings_.insert(lastRecordings_.end(), files.begin(), files.end());
+        markDirty();
+        return json{{"file", files.front()}, {"files", files}};
+    }
     if (method == "latency.measure") fail("Latency measurement arrives in a later update of this build");
 
     fail("Unknown method: " + method);

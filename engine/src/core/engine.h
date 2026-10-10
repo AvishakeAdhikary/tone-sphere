@@ -16,6 +16,7 @@
 
 #include "backends/device.h"
 #include "core/graph.h"
+#include "core/recorder.h"
 
 namespace nt {
 
@@ -206,7 +207,10 @@ private:
     std::atomic<bool> devicesChanged_{false};
     std::atomic<bool> configDirty_{false};
     std::atomic<bool> shutdown_{false};
-    bool recording_ = false;
+    std::unique_ptr<Recorder> recorder_;
+    std::vector<std::string> recordingNodes_;
+    std::vector<std::string> lastRecordings_;
+    void updateTapsLocked();
     bool vadPresent_ = false;
 };
 

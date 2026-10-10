@@ -29,6 +29,7 @@ void NodeRuntime::allocate(int ch, double sampleRate) {
     for (int c = 0; c < kMaxChannels; ++c) buf[c] = c < channels ? &storage[static_cast<size_t>(c) * kMaxBlock] : nullptr;
     delayCap = static_cast<int>(sampleRate * 2.0) + kMaxBlock;
     delayLine.assign(static_cast<size_t>(channels) * delayCap, 0.0f);
+    tapScratch.assign(static_cast<size_t>(channels) * kMaxBlock, 0.0f);
     delayPos = 0;
 }
 
@@ -185,6 +186,12 @@ void processProgram(Program& p, int frames, double nowSec) {
         applyDelay(n, frames, sr);
         applyGainPanInvert(n, frames);
         if (bank) meter(n, *bank, pn.meterOffset, frames, sr);
+        if (FrameRing* tap = n.tap.load(std::memory_order_acquire)) {
+            float* dst = n.tapScratch.data();
+            for (int i = 0; i < frames; ++i)
+                for (int c = 0; c < n.channels; ++c) *dst++ = n.buf[c][i];
+            tap->write(n.tapScratch.data(), static_cast<size_t>(frames));  // drops if the writer falls behind
+        }
         if (pn.isDest) {
             if (RenderBridge* rb = n.render.load(std::memory_order_acquire)) rb->engineWrite(n.buf, static_cast<size_t>(frames), nowSec);
         }

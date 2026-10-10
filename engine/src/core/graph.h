@@ -61,6 +61,8 @@ struct NodeRuntime {
     std::atomic<CaptureBridge*> capture{nullptr};  // sources backed by a device/app/network stream
     std::atomic<RenderBridge*> render{nullptr};    // destinations backed by a device/app/network stream
     std::shared_ptr<ToneGen> tone;
+    // Recording / replay tap (owned by the Recorder; null when not tapped).
+    std::atomic<FrameRing*> tap{nullptr};
 
     // Statistics (audio writes, control reads).
     std::atomic<float> cpuUs{0.0f};
@@ -71,6 +73,7 @@ struct NodeRuntime {
     float curGain = 0.0f;  // fade in when a node first appears
     std::vector<float> delayLine;
     int delayCap = 0, delayPos = 0;
+    std::vector<float> tapScratch;  // interleaved copy for the tap
 
     void allocate(int ch, double sampleRate);
 };

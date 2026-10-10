@@ -32,6 +32,7 @@ std::string Engine::version() const { return kVersion; }
 
 Engine::Engine() {
     tone_ = std::make_shared<ToneGen>();
+    recorder_ = std::make_unique<Recorder>();
     settings_.recordFolder = defaultRecordFolder();
 }
 
@@ -72,6 +73,7 @@ bool Engine::start() {
     t.present = true;
     t.persistent = true;
 
+    recorder_->setReplaySeconds(settings_.replayBufferSeconds);
     refreshDevicesLocked();
     rebuildLocked();
     startClock();
@@ -502,6 +504,34 @@ void Engine::compileAndPublishLocked() {
     if (programOwner_) retireLocked(programOwner_);
     programOwner_ = std::move(p);
     reclaimLocked();
+    updateTapsLocked();
+}
+
+// Recording taps: nodes being recorded, plus every mix (or the outputs when there are no mixes)
+// for the instant-replay buffer.
+void Engine::updateTapsLocked() {
+    std::vector<Recorder::Tap> taps;
+    auto add = [&](const std::string& id) {
+        auto it = nodes_.find(id);
+        if (it == nodes_.end() || !it->second.rt) return;
+        for (auto& t : taps)
+            if (t.nodeId == id) return;
+        const NodeModel& n = it->second;
+        taps.push_back({id, n.customName.empty() ? n.name : n.customName, n.rt, n.channels});
+    };
+    for (auto& id : recordingNodes_) add(id);
+    if (recorder_->replaySeconds() > 0) {
+        bool anyBus = false;
+        for (auto& id : nodeOrder_)
+            if (nodes_[id].bin == Bin::Bus) {
+                add(id);
+                anyBus = true;
+            }
+        if (!anyBus)
+            for (auto& id : nodeOrder_)
+                if (nodes_[id].bin == Bin::PhysicalOut && nodes_[id].present) add(id);
+    }
+    recorder_->setTaps(taps, runningRate_);
 }
 
 // ============================================================ clock

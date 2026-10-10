@@ -176,7 +176,7 @@ json Engine::state() {
               {"routes", routes},
               {"scenes", scenes},
               {"plugins", json::array()},
-              {"recorder", {{"recording", recording_}, {"files", json::array()}, {"folder", settings_.recordFolder},
+              {"recorder", {{"recording", recorder_->recording()}, {"files", lastRecordings_}, {"folder", settings_.recordFolder},
                             {"replaySeconds", settings_.replayBufferSeconds}}}};
     if (!activeScene_.empty()) j["activeScene"] = activeScene_;
     return j;

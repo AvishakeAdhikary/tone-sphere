@@ -48,6 +48,7 @@ set(ENGINE_SOURCES
   src/core/config.cpp
   src/core/state.cpp
   src/core/rpc.cpp
+  src/core/recorder.cpp
   src/dsp/fx.cpp
   src/backends/device.cpp
   src/ipc/ws_server.cpp
