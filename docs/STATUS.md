@@ -22,6 +22,8 @@ _Last updated: 2026-10-10._
 | **Desktop installer** (`NexTone-Setup-<ver>.exe`): app + engine + ASIO driver + virtual driver | ✅ in a pristine VM | `vm/Test-Installer.ps1`: silent install, drivers present, ASIO registered, the app starts the engine, vad-audio 14/14 against the installed build |
 | **Microsoft Store package** (MSIX) | ✅ sideload-tested in a pristine VM | `vm/Test-Msix.ps1`: installs, launches, finds the engine; sign-in startup task starts the engine plus the app in the tray; `nextone-engine.exe` alias and `nextone:` link are registered |
 | Windows App Certification Kit | ⚠️ 15 tests pass; no real failures found | `vm/Test-Wack.ps1` (see below) |
+| **Linux (PipeWire)**: physical devices + hot-plug, persistent NexTone virtual outputs/mics usable by any app, app capture | ✅ in WSL Ubuntu 24.04, PipeWire 1.0.5 | `tests/integration/linux-pipewire.mjs` 11/11 (×4 runs; one click seen once at stream start in an earlier run). Engine unit tests pass on GCC 13 |
+| **Linux desktop app** (AppImage) | ✅ launches under WSLg | `scripts/package-linux.sh`: the app starts its bundled engine and connects |
 | CLI | ✅ | `tools/nextone-ctl.mjs` (also finds a Store-installed engine) |
 
 ## How to run
@@ -40,6 +42,9 @@ cd ui; npm run build; npx electron . # UI (starts the engine automatically when 
 
 cd ui; npm run dist:win              # desktop installer  → ui\release\
 cd ui; npm run dist:store            # Store package      → ui\release-store\  (see packaging\store\README.md)
+wsl -e bash scripts/build-linux.sh   # Linux engine + unit tests (WSL)
+node tests\integration\linux-pipewire.mjs   # Linux end-to-end (PipeWire in WSL)
+wsl -e bash scripts/package-linux.sh # Linux AppImage → ui\release\
 ```
 
 ## Pending / known limitations
@@ -77,7 +82,7 @@ cd ui; npm run dist:store            # Store package      → ui\release-store\ 
   - Plugin windows are DPI-unaware, so Windows scales them.
   - Plugin windows are Windows-only for now.
 - **Not implemented yet:**
-  - Linux PipeWire backend (planned M8), macOS (experimental).
+  - Linux: per-app output redirection and app microphones (only app capture exists); plugin windows. macOS: not started.
   - MIDI/OSC control.
   - Round-trip latency measurement (`latency.measure`).
   - FLAC recording (WAV only).

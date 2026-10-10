@@ -19,7 +19,8 @@
     "test": "vitest run",
     "test:e2e": "playwright test",
     "dist:win": "npm run build && electron-builder --win nsis",
-    "dist:store": "npm run build && electron-builder --config electron-builder.store.json --win appx"
+    "dist:store": "npm run build && electron-builder --config electron-builder.store.json --win appx",
+    "dist:linux": "npm run build && electron-builder --linux AppImage"
   },
   "dependencies": {},
   "devDependencies": {
@@ -62,34 +63,6 @@
     ],
     "extraResources": [
       {
-        "to": "engine/nextone-engine.exe",
-        "from": "../build/x64-release/bin/nextone-engine.exe"
-      },
-      {
-        "to": "engine/nextone-plugscan.exe",
-        "from": "../build/x64-release/bin/nextone-plugscan.exe"
-      },
-      {
-        "to": "drivers/NexToneASIO64.dll",
-        "from": "../build/x64-release/bin/NexToneASIO64.dll"
-      },
-      {
-        "to": "drivers/NexToneASIO32.dll",
-        "from": "../build/x86-release/bin/NexToneASIO32.dll"
-      },
-      {
-        "to": "drivers/nextone-setup.exe",
-        "from": "../build/x64-release/bin/nextone-setup.exe"
-      },
-      {
-        "from": "../drivers/win/vad/build/package",
-        "to": "drivers/vad",
-        "filter": [
-          "nextonevad.*",
-          "NexToneTest.cer"
-        ]
-      },
-      {
         "to": "LICENSE.txt",
         "from": "../LICENSE"
       }
@@ -99,7 +72,37 @@
       "target": [
         "nsis"
       ],
-      "executableName": "NexTone"
+      "executableName": "NexTone",
+      "extraResources": [
+        {
+          "to": "engine/nextone-engine.exe",
+          "from": "../build/x64-release/bin/nextone-engine.exe"
+        },
+        {
+          "to": "engine/nextone-plugscan.exe",
+          "from": "../build/x64-release/bin/nextone-plugscan.exe"
+        },
+        {
+          "to": "drivers/NexToneASIO64.dll",
+          "from": "../build/x64-release/bin/NexToneASIO64.dll"
+        },
+        {
+          "to": "drivers/NexToneASIO32.dll",
+          "from": "../build/x86-release/bin/NexToneASIO32.dll"
+        },
+        {
+          "to": "drivers/nextone-setup.exe",
+          "from": "../build/x64-release/bin/nextone-setup.exe"
+        },
+        {
+          "from": "../drivers/win/vad/build/package",
+          "to": "drivers/vad",
+          "filter": [
+            "nextonevad.*",
+            "NexToneTest.cer"
+          ]
+        }
+      ]
     },
     "nsis": {
       "oneClick": false,
@@ -128,6 +131,28 @@
       ],
       "customExtensionsPath": "build/appx-extensions.xml",
       "artifactName": "NexTone-${version}.${ext}"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "icon": "assets/icon.png",
+      "category": "Audio",
+      "executableName": "nextone",
+      "synopsis": "Route any audio anywhere",
+      "extraResources": [
+        {
+          "from": "../build/linux-release/bin/nextone-engine",
+          "to": "engine/nextone-engine"
+        },
+        {
+          "from": "../build/linux-release/bin/nextone-plugscan",
+          "to": "engine/nextone-plugscan"
+        }
+      ]
+    },
+    "appImage": {
+      "artifactName": "NexTone-${version}-${arch}.${ext}"
     }
   }
 }
