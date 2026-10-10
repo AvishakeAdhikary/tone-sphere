@@ -3,6 +3,8 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <cmath>
+#include <cstring>
+#include <vector>
 
 #include "core/graph.h"
 #include "dsp/fx.h"
@@ -136,4 +138,53 @@ TEST_CASE("SHA-1 and base64 match the WebSocket RFC example", "[encoding]") {
     const auto d = sha1("dGhlIHNhbXBsZSBub25jZQ==258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
     REQUIRE(base64Encode(d.data(), d.size()) == "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=");
     REQUIRE(base64Encode(std::string_view("hello")) == "aGVsbG8=");
+}
+
+#include "net/vban.h"
+
+TEST_CASE("VBAN header matches the protocol specification", "[vban]") {
+    vban::Header h;
+    h.sampleRate = 48000;
+    h.samples = 256;
+    h.channels = 2;
+    h.type = vban::DataType::Int16;
+    h.stream = "Stream1";
+    h.frame = 0x01020304;
+    std::vector<float> in(512, 0.5f);
+    uint8_t pkt[2048];
+    const size_t len = vban::encode(h, in.data(), pkt, sizeof(pkt));
+    REQUIRE(len == 28 + 256 * 2 * 2);
+    REQUIRE(std::memcmp(pkt, "VBAN", 4) == 0);
+    REQUIRE(pkt[4] == 3);    // 48 kHz index, audio sub-protocol
+    REQUIRE(pkt[5] == 255);  // samples - 1
+    REQUIRE(pkt[6] == 1);    // channels - 1
+    REQUIRE(pkt[7] == 1);    // INT16, PCM codec
+    REQUIRE(std::memcmp(pkt + 8, "Stream1\0\0\0\0\0\0\0\0\0", 16) == 0);
+    REQUIRE(pkt[24] == 0x04);
+    REQUIRE(pkt[27] == 0x01);
+}
+
+TEST_CASE("VBAN encode/decode round trip for every PCM type", "[vban]") {
+    for (auto t : {vban::DataType::Int16, vban::DataType::Int24, vban::DataType::Int32, vban::DataType::Float32}) {
+        vban::Header h;
+        h.sampleRate = 44100;
+        h.channels = 2;
+        h.type = t;
+        h.samples = vban::framesPerPacket(2, t);
+        h.stream = "rt";
+        std::vector<float> in(static_cast<size_t>(h.samples) * 2), out(in.size());
+        for (size_t i = 0; i < in.size(); ++i) in[i] = std::sin(static_cast<float>(i) * 0.1f) * 0.8f;
+        uint8_t pkt[2048];
+        const size_t len = vban::encode(h, in.data(), pkt, sizeof(pkt));
+        REQUIRE(len <= 28 + 1436);
+        vban::Header p;
+        const uint8_t* payload = nullptr;
+        size_t pbytes = 0;
+        REQUIRE(vban::parse(pkt, len, p, payload, pbytes));
+        REQUIRE(p.sampleRate == 44100);
+        REQUIRE(p.samples == h.samples);
+        REQUIRE(p.stream == "rt");
+        vban::decode(p, payload, out.data(), 2);
+        for (size_t i = 0; i < in.size(); ++i) REQUIRE_THAT(out[i], WithinAbs(in[i], t == vban::DataType::Int16 ? 1e-4 : 1e-6));
+    }
 }

@@ -4,6 +4,7 @@
 #include <cmath>
 #include <set>
 
+#include "net/vban.h"
 #include "util/log.h"
 #include "util/platform.h"
 
@@ -58,6 +59,8 @@ bool Engine::start() {
     backends_.push_back(std::move(asioHost));
     apps_ = std::make_unique<AppAudio>();
 #endif
+    backends_.push_back(std::make_unique<vban::VbanBackend>());
+
     // Built-in test tone source (hidden in the simple view).
     NodeModel& t = ensureNode("tone");
     t.bin = Bin::PhysicalIn;
@@ -207,6 +210,7 @@ void Engine::refreshDevicesLocked() {
 bool Engine::nodeNeededLocked(const NodeModel& n) const {
     if (!n.present || !n.userEnabled) return false;
     if (n.bin == Bin::Bus || n.id == "tone") return false;
+    // (VBAN nodes are opened like devices when connected.)
     for (const RouteModel& r : routes_) {
         if (r.from == n.id || r.to == n.id) return true;
     }
@@ -221,6 +225,7 @@ Backend* Engine::backendFor(DeviceKind k) const {
     const char* want = k == DeviceKind::Vad          ? "vad"
                        : k == DeviceKind::AsioClient ? "asioclient"
                        : k == DeviceKind::Asio       ? "asio"
+                       : k == DeviceKind::Vban       ? "vban"
                        : (k == DeviceKind::Wasapi || k == DeviceKind::Compat) ? "wasapi"
                                                                               : nullptr;
     if (!want) return nullptr;
@@ -253,12 +258,22 @@ bool Engine::openStreamLocked(NodeModel& n) {
     }
 #endif
     if (viaBackend) {
-        Backend* be = backendFor(dev.kind);
-        if (!be) return false;
         StreamRequest req;
         req.exclusive = n.settings.exclusive;
         req.bufferMs = n.settings.bufferMs;
         req.preferredRate = runningRate_;
+        req.safetyMs = n.settings.safetyMs;
+        if (n.kind == DeviceKind::Vban) {
+            dev.kind = DeviceKind::Vban;
+            dev.input = n.bin == Bin::VirtualOut;  // network input = a source
+            dev.channels = n.channels;
+            dev.name = n.name;
+            req.host = n.settings.host;
+            req.port = n.settings.port;
+            req.streamName = n.settings.streamName;
+        }
+        Backend* be = backendFor(dev.kind);
+        if (!be) return false;
         std::string err;
         n.stream = be->open(dev, req, err);
         if (!n.stream) {
@@ -337,7 +352,7 @@ void Engine::updateStreamsLocked() {
 #endif
     for (const std::string& id : nodeOrder_) {
         NodeModel& n = nodes_[id];
-        if (n.bin == Bin::Bus || n.kind == DeviceKind::Vban || n.id == "tone") continue;
+        if (n.bin == Bin::Bus || n.id == "tone") continue;
         if (nodeNeededLocked(n)) {
             if (!n.stream && n.streamError.empty()) openStreamLocked(n);
         } else if (n.stream) {

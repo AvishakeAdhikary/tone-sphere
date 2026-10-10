@@ -54,6 +54,7 @@ set(ENGINE_SOURCES
   src/util/log.cpp
   src/util/platform.cpp
   src/util/encoding.cpp
+  src/net/vban.cpp
 )
 if(WIN32)
   list(APPEND ENGINE_SOURCES

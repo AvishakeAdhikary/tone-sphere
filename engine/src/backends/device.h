@@ -37,6 +37,11 @@ struct StreamRequest {
     double bufferMs = 10.0;
     double preferredRate = 0.0;  // 0 = device default
     int preferredBlock = 0;      // ASIO buffer size / exclusive period hint (frames)
+    // Network streams (VBAN)
+    std::string host;
+    int port = 0;
+    std::string streamName;
+    double safetyMs = 0.0;
 };
 
 /// An open device stream. Created (initialised) by a backend; started with a bridge.

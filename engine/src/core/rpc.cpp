@@ -124,6 +124,8 @@ json Engine::call(const std::string& method, const json& params) {
             if (s.contains("port")) d.port = s["port"].get<int>(), reopen = true;
             if (s.contains("streamName")) d.streamName = s["streamName"].get<std::string>().substr(0, 16), reopen = true;
         }
+        if (n->kind == DeviceKind::Vban)
+            n->subtitle = n->settings.streamName + " · " + n->settings.host + ":" + std::to_string(n->settings.port);
         applyNodeParamsLocked(*n);
         if (reopen) {
             closeStreamLocked(*n);
@@ -366,7 +368,27 @@ json Engine::call(const std::string& method, const json& params) {
         markDirty();
         return nullptr;
     }
-    if (method == "vban.add") fail("Network streams arrive in a later update of this build");
+    if (method == "vban.add") {
+        const bool in = p.value("direction", "in") == "in";
+        const std::string id = std::string(in ? "vban:in:" : "vban:out:") + randomHex(4);
+        NodeModel& n = ensureNode(id);
+        n.kind = DeviceKind::Vban;
+        n.bin = in ? Bin::VirtualOut : Bin::VirtualIn;  // network input is a source, output a destination
+        n.name = p.value("name", in ? std::string("Network in") : std::string("Network out"));
+        n.channels = std::clamp(p.value("channels", 2), 1, 16);
+        n.channelNames.clear();
+        if (n.channels == 2) n.channelNames = {"L", "R"};
+        else for (int c = 0; c < n.channels; ++c) n.channelNames.push_back(std::to_string(c + 1));
+        n.settings.host = p.value("host", in ? std::string("0.0.0.0") : std::string("127.0.0.1"));
+        n.settings.port = std::clamp(p.value("port", 6980), 1, 65535);
+        n.settings.streamName = p.value("streamName", std::string("Stream1")).substr(0, 16);
+        n.settings.safetyMs = 20.0;  // network jitter cushion
+        n.subtitle = n.settings.streamName + " · " + n.settings.host + ":" + std::to_string(n.settings.port);
+        n.persistent = true;
+        n.present = true;
+        rebuildLocked();
+        return nodeJsonLocked(n);
+    }
     if (method == "recorder.start" || method == "recorder.stop" || method == "recorder.saveReplay")
         fail("Recording arrives in a later update of this build");
     if (method == "latency.measure") fail("Latency measurement arrives in a later update of this build");
