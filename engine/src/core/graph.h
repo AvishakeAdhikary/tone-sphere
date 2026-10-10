@@ -35,6 +35,17 @@ struct MeterBank {
 };
 
 /// Simple test-tone / signal generator source.
+/// Round-trip latency measurement: a short chirp is added to one destination node while a
+/// source node is recorded, both on the engine's sample clock (see core/latency.cpp).
+struct LatencyProbe {
+    std::vector<float> stimulus;  // mono
+    std::vector<float> captured;  // first channel of the input node (audio thread writes)
+    size_t emitAt = 0;            // the chirp starts this many samples after arming
+    std::atomic<bool> armed{false};
+    std::atomic<bool> done{false};
+    size_t pos = 0;  // audio thread: samples since arming (advanced by the output node)
+};
+
 struct ToneGen {
     std::atomic<bool> enabled{true};  // audible as soon as the user connects it
     std::atomic<float> freq{440.0f};
@@ -63,6 +74,9 @@ struct NodeRuntime {
     std::shared_ptr<ToneGen> tone;
     // Recording / replay tap (owned by the Recorder; null when not tapped).
     std::atomic<FrameRing*> tap{nullptr};
+    // Latency measurement (owned by the engine, retired via RCU): this node is recorded / plays the chirp.
+    std::atomic<LatencyProbe*> probeIn{nullptr};
+    std::atomic<LatencyProbe*> probeOut{nullptr};
     // Levels come from Windows' peak meter (not streaming): the audio thread leaves meters alone.
     std::atomic<bool> externalMeter{false};
 

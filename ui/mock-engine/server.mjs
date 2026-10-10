@@ -53,6 +53,8 @@ const state = {
     theme: 'system',
     advancedMode: false,
   pluginFolders: [],
+  oscPort: 0,
+  midiMappings: [],
   },
   status: {
     running: true,
@@ -295,7 +297,9 @@ const handlers = {
   },
   'recorder.saveReplay': () => ({ file: `${state.recorder.folder}\\Replay.wav` }),
   'tone.set': () => {},
-  'latency.measure': () => ({ ms: 7.4 }),
+  'midi.devices': () => [],
+  'midi.learn': () => { throw new Error('No MIDI control moved.'); },
+  'latency.measure': () => ({ latencyMs: 7.4, samples: 355.2, sampleRate: 48000, confidence: 0.98 }),
 };
 
 function mustNode(id) {

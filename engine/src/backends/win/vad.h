@@ -18,6 +18,10 @@ public:
     std::unique_ptr<DeviceStream> open(const DeviceInfo& dev, const StreamRequest& req, std::string& error) override;
     /// True when the NexTone driver is installed and running (at least one ring exists).
     static bool driverPresent();
+    bool poll() override;
+
+private:
+    int lastPresent_ = -1;  // bit set of rings seen at the last poll
 };
 
 }  // namespace nt

@@ -180,6 +180,16 @@ export interface SceneInfo {
   hotkey?: string;
 }
 
+export interface MidiMapping {
+  type: 'cc' | 'note';
+  /** 1..16, 0 = any channel. */
+  channel: number;
+  number: number;
+  action: 'volume' | 'gain' | 'mute' | 'solo' | 'scene' | 'record' | 'replay';
+  /** Node id (volume/gain/mute/solo) or scene id. */
+  target: string;
+}
+
 export interface PluginInfo {
   id: string;
   name: string;
@@ -214,6 +224,10 @@ export interface EngineSettings {
   advancedMode: boolean;
   /** Extra folders searched for VST3 plugins (besides the standard VST3 folders). */
   pluginFolders?: string[];
+  /** OSC control over UDP (0 = off). */
+  oscPort?: number;
+  /** MIDI controller mappings. */
+  midiMappings?: MidiMapping[];
 }
 
 export interface EngineStatus {
@@ -317,6 +331,9 @@ export interface RpcMethods {
   'vban.remove': { params: { id: string }; result: void };
   'scene.save': { params: { name: string; id?: string }; result: SceneInfo };
   'scene.load': { params: { id: string }; result: void };
+  /** Waits for the next MIDI knob/fader/pad move (MIDI learn). */
+  'midi.learn': { params: { seconds?: number }; result: { type: 'cc' | 'note'; channel: number; number: number; value: number } };
+  'midi.devices': { params: void; result: string[] };
   'scene.delete': { params: { id: string }; result: void };
   'recorder.start': {
     params: { nodeIds: string[]; folder?: string; format: 'wav' | 'flac' };
@@ -328,7 +345,8 @@ export interface RpcMethods {
     params: { enabled: boolean; freq: number; levelDb: number; target?: string };
     result: void;
   };
-  'latency.measure': { params: { outId: string; inId: string }; result: { ms: number } };
+  /** Plays a short chirp into output and finds it in input (round trip through a cable/loopback). */
+  'latency.measure': { params: { output: string; input: string }; result: { latencyMs: number; samples: number; sampleRate: number; confidence: number } };
 }
 
 export type RpcMethod = keyof RpcMethods;

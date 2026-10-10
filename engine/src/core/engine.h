@@ -8,6 +8,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -35,6 +36,8 @@ struct EngineSettings {
     std::string theme = "system";
     bool advancedMode = false;
     std::vector<std::string> pluginFolders;  // extra VST3 folders
+    int oscPort = 0;                         // OSC control over UDP (0 = off)
+    json midiMappings = json::array();       // MIDI controller mappings (see control/remote.h)
 };
 
 struct NodeSettingsData {
@@ -132,6 +135,9 @@ public:
 
     /// Called whenever the observable state changed (coalesced by the IPC layer).
     std::function<void()> onStateChanged;
+    /// MIDI learn / device list (set by the host process; see control/remote.h).
+    std::function<json(double)> onMidiLearn;
+    std::function<json()> onMidiDevices;
     /// Called to request process exit.
     std::function<void()> onShutdownRequested;
 
@@ -154,6 +160,9 @@ private:
     void applyNodeParamsLocked(NodeModel& n);
     void instantiatePendingFxLocked(NodeModel& n);
     void applyPluginFoldersLocked();
+    /// latency.measure: runs without holding the engine lock while it waits for audio.
+    json measureLatency(const json& params);
+    std::set<std::string> forcedOpen_;  // nodes kept open during a measurement
     std::vector<std::tuple<int, int, float>> defaultCrosspoints(const NodeModel& a, const NodeModel& b, const std::string& mode) const;
     void markDirty();
     void saveConfigLocked();

@@ -9,6 +9,7 @@ const api = {
   openPath: (p: string) => ipcRenderer.invoke('nextone:open-path', p),
   openSoundSettings: () => ipcRenderer.invoke('nextone:open-sound-settings'),
   openStartupSettings: () => ipcRenderer.invoke('nextone:open-startup-settings'),
+  installDrivers: () => ipcRenderer.invoke('nextone:install-drivers'),
   setLoginItem: (enabled: boolean) => ipcRenderer.invoke('nextone:set-login-item', enabled),
   onCommand: (cb: (cmd: string) => void) => {
     const listener = (_e: unknown, cmd: string) => cb(cmd);

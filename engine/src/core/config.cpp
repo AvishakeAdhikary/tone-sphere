@@ -104,7 +104,7 @@ void Engine::saveConfigLocked() {
                      {"clockMaster", settings_.clockMaster}, {"compatMode", settings_.compatMode},
                      {"startWithSystem", settings_.startWithSystem}, {"startMinimized", settings_.startMinimized},
                      {"hotkeys", settings_.hotkeys},         {"replayBufferSeconds", settings_.replayBufferSeconds},
-                     {"recordFolder", settings_.recordFolder}, {"theme", settings_.theme}, {"pluginFolders", settings_.pluginFolders},
+                     {"recordFolder", settings_.recordFolder}, {"theme", settings_.theme}, {"pluginFolders", settings_.pluginFolders}, {"oscPort", settings_.oscPort}, {"midiMappings", settings_.midiMappings},
                      {"advancedMode", settings_.advancedMode}};
     json nodes = json::array();
     for (const std::string& id : nodeOrder_) {
@@ -173,6 +173,8 @@ void Engine::loadConfig() {
         settings_.replayBufferSeconds = s.value("replayBufferSeconds", settings_.replayBufferSeconds);
         settings_.recordFolder = s.value("recordFolder", settings_.recordFolder);
     if (s.contains("pluginFolders") && s["pluginFolders"].is_array()) settings_.pluginFolders = s["pluginFolders"].get<std::vector<std::string>>();
+    settings_.oscPort = s.value("oscPort", 0);
+    if (s.contains("midiMappings") && s["midiMappings"].is_array()) settings_.midiMappings = s["midiMappings"];
         settings_.theme = s.value("theme", settings_.theme);
         settings_.advancedMode = s.value("advancedMode", settings_.advancedMode);
     }

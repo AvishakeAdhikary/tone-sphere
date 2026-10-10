@@ -4,6 +4,7 @@
 //   nextone-setup uninstall-asio <dir>
 //   nextone-setup install-vad   <dir>      (dir contains nextonevad.inf/.sys/.cat [+ NexToneTest.cer])
 //   nextone-setup uninstall-vad
+//   nextone-setup install-all   <dir> [--engine <path>] [--ui <path>]   (ASIO from <dir>, driver from <dir>\vad)
 // Prints one JSON line with the result; exit code 0 on success.
 #include <windows.h>
 
@@ -265,5 +266,10 @@ int wmain(int argc, wchar_t** argv) {
     if (cmd == L"uninstall-asio") return uninstallAsio(dir);
     if (cmd == L"install-vad") return installVad(dir);
     if (cmd == L"uninstall-vad") return uninstallVad();
+    if (cmd == L"install-all") {  // one elevation for the app's "Install drivers" button
+        const int asio = installAsio(dir, engine, ui);
+        const int vad = installVad(dir + L"\\vad");
+        return asio ? asio : vad;
+    }
     return result(false, "unknown command");
 }

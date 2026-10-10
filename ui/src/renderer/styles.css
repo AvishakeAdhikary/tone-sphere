@@ -3,7 +3,7 @@
   color-scheme: light dark;
   --font: 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, 'Inter', 'Ubuntu', sans-serif;
   --font-display: 'Segoe UI Variable Display', 'Segoe UI', system-ui, sans-serif;
-  --mono: 'Cascadia Mono', 'Consolas', ui-monospace, monospace;
+  --mono: 'JetBrains Mono Variable', 'JetBrains Mono', 'Cascadia Mono', 'Consolas', ui-monospace, monospace;
 
   --bg: #f3f3f3;
   --bg-solid: #f3f3f3;
@@ -1720,4 +1720,15 @@ details[open].insp-section summary h3::after {
   .spin {
     animation: none;
   }
+}
+/* Numeric readouts (levels, dB, statistics) use JetBrains Mono so digits line up and don't jitter. */
+.engine-pill,
+.fader-value,
+.cell,
+.route-db,
+.stats dd,
+.param-value {
+  font-family: var(--mono);
+  font-feature-settings: 'zero' 0;
+  letter-spacing: -0.01em;
 }

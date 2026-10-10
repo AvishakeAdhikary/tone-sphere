@@ -7,6 +7,8 @@
 #include <vector>
 
 #include "core/graph.h"
+#include "control/remote.h"
+#include "core/latency.h"
 #include "dsp/fx.h"
 #include "util/encoding.h"
 
@@ -217,4 +219,114 @@ TEST_CASE("Base64 round-trips binary plugin state", "[util]") {
         REQUIRE(nt::base64Decode(nt::base64Encode(part)) == part);
     }
     REQUIRE(nt::base64Decode("TmV4VG9uZQ==") == "NexTone");
+}
+
+TEST_CASE("Latency estimate finds a delayed, noisy chirp", "[latency]") {
+    const double sr = 48000;
+    const auto chirp = nt::makeLatencyChirp(sr);
+    const size_t emitAt = 4800;
+    std::vector<float> cap(52800, 0.0f);
+    uint32_t seed = 1;
+    for (auto& v : cap) {
+        seed = seed * 1664525u + 1013904223u;
+        v = 0.02f * (static_cast<float>(seed >> 8) / 16777216.0f - 0.5f);  // noise
+    }
+    for (size_t k = 0; k < chirp.size(); ++k) cap[emitAt + 1234 + k] += 0.3f * chirp[k];
+    const auto e = nt::estimateLatency(cap, chirp, emitAt);
+    REQUIRE_THAT(e.samples, Catch::Matchers::WithinAbs(1234.0, 0.5));
+    REQUIRE(e.confidence > 0.8);
+
+    // Half-sample delay (linear interpolation of the chirp): refined below one sample.
+    std::vector<float> cap2(52800, 0.0f);
+    for (size_t k = 0; k + 1 < chirp.size(); ++k) cap2[emitAt + 500 + k + 1] += 0.5f * (chirp[k] + chirp[k + 1]);
+    const auto e2 = nt::estimateLatency(cap2, chirp, emitAt);
+    REQUIRE_THAT(e2.samples, Catch::Matchers::WithinAbs(500.5, 0.3));
+
+    // Nothing came back: low confidence.
+    std::vector<float> silence(52800, 0.0f);
+    for (auto& v : silence) {
+        seed = seed * 1664525u + 1013904223u;
+        v = 0.02f * (static_cast<float>(seed >> 8) / 16777216.0f - 0.5f);
+    }
+    REQUIRE(nt::estimateLatency(silence, chirp, emitAt).confidence < 0.3);
+}
+namespace {
+// Minimal OSC encoder for the tests.
+void oscStr(std::vector<uint8_t>& b, const std::string& s) {
+    b.insert(b.end(), s.begin(), s.end());
+    b.push_back(0);
+    while (b.size() % 4) b.push_back(0);
+}
+void oscF(std::vector<uint8_t>& b, float f) {
+    uint32_t u;
+    std::memcpy(&u, &f, 4);
+    for (int s = 24; s >= 0; s -= 8) b.push_back(static_cast<uint8_t>(u >> s));
+}
+}  // namespace
+
+TEST_CASE("OSC messages and bundles map to remote actions", "[remote]") {
+    std::vector<uint8_t> m;
+    oscStr(m, "/nextone/volume");
+    oscStr(m, ",sf");
+    oscStr(m, "Stream mix");
+    oscF(m, 0.5f);
+    std::vector<std::pair<std::string, std::vector<nt::OscArg>>> msgs;
+    REQUIRE(nt::parseOscPacket(m.data(), m.size(), msgs));
+    REQUIRE(msgs.size() == 1);
+    auto a = nt::oscToAction(msgs[0].first, msgs[0].second);
+    REQUIRE(a);
+    REQUIRE(a->action == "volume");
+    REQUIRE(a->target == "Stream mix");
+    REQUIRE_THAT(*a->value, Catch::Matchers::WithinAbs(0.5, 1e-6));
+    REQUIRE_THAT(nt::faderToDb(0.5f), Catch::Matchers::WithinAbs(-27.0, 1e-4));
+    REQUIRE(nt::faderToDb(0.0f) == -90.0f);
+    REQUIRE_THAT(nt::faderToDb(1.0f), Catch::Matchers::WithinAbs(6.0, 1e-4));
+
+    // Bundle with a toggle (no value) and a scene change.
+    std::vector<uint8_t> e1, e2, b;
+    oscStr(e1, "/nextone/mute");
+    oscStr(e1, ",s");
+    oscStr(e1, "Microphone");
+    oscStr(e2, "/nextone/scene");
+    oscStr(e2, ",s");
+    oscStr(e2, "Gaming");
+    oscStr(b, "#bundle");
+    for (int i = 0; i < 8; ++i) b.push_back(i == 7 ? 1 : 0);
+    for (auto* e : {&e1, &e2}) {
+        const uint32_t n = static_cast<uint32_t>(e->size());
+        for (int s = 24; s >= 0; s -= 8) b.push_back(static_cast<uint8_t>(n >> s));
+        b.insert(b.end(), e->begin(), e->end());
+    }
+    msgs.clear();
+    REQUIRE(nt::parseOscPacket(b.data(), b.size(), msgs));
+    REQUIRE(msgs.size() == 2);
+    auto mute = nt::oscToAction(msgs[0].first, msgs[0].second);
+    REQUIRE((mute && mute->action == "mute" && !mute->value));
+    auto scene = nt::oscToAction(msgs[1].first, msgs[1].second);
+    REQUIRE((scene && scene->action == "scene" && scene->target == "Gaming"));
+
+    // Garbage and foreign addresses are ignored.
+    const uint8_t junk[] = {1, 2, 3};
+    msgs.clear();
+    REQUIRE_FALSE(nt::parseOscPacket(junk, sizeof(junk), msgs));
+    REQUIRE_FALSE(nt::oscToAction("/other/volume", {}));
+}
+
+TEST_CASE("MIDI controller messages map to remote actions", "[remote]") {
+    const nlohmann::json maps = nlohmann::json::parse(R"([
+        {"type":"cc","channel":1,"number":7,"action":"volume","target":"bus_1"},
+        {"type":"cc","channel":0,"number":20,"action":"mute","target":"Microphone"},
+        {"type":"note","channel":0,"number":60,"action":"solo","target":"Music"},
+        {"type":"cc","channel":0,"number":30,"action":"scene","target":"Gaming"}
+    ])");
+    auto v = nt::midiToAction(maps, 0xB0, 7, 127);  // CC7 on channel 1
+    REQUIRE((v && v->action == "volume" && *v->value == 1.0f));
+    REQUIRE_FALSE(nt::midiToAction(maps, 0xB1, 7, 127));  // channel 2: not mapped
+    auto m = nt::midiToAction(maps, 0xB5, 20, 10);         // any channel, switch "off"
+    REQUIRE((m && m->action == "mute" && *m->value == 0.0f));
+    auto s = nt::midiToAction(maps, 0x90, 60, 100);        // note on toggles
+    REQUIRE((s && s->action == "solo" && !s->value));
+    REQUIRE_FALSE(nt::midiToAction(maps, 0x90, 60, 0));     // note on with velocity 0 = note off
+    REQUIRE_FALSE(nt::midiToAction(maps, 0xB0, 30, 0));     // scene triggers only on press
+    REQUIRE(nt::midiToAction(maps, 0xB0, 30, 127));
 }

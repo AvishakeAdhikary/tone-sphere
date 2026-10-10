@@ -6,6 +6,7 @@ export interface NexToneBridge {
   discover(): Promise<EngineDiscovery | null>;
   platform(): Promise<{ platform: string; version: string; arch: string; store?: boolean }>;
   openStartupSettings(): Promise<void>;
+  installDrivers(): Promise<{ ok: boolean; message: string }>;
   setTheme(theme: 'system' | 'light' | 'dark'): Promise<void>;
   pickFolder(): Promise<string | null>;
   openPath(p: string): Promise<void>;
@@ -39,6 +40,9 @@ const browserFallback: NexToneBridge = {
   async openPath() {},
   async openSoundSettings() {},
   async openStartupSettings() {},
+  async installDrivers() {
+    return { ok: false, message: 'Not available in the browser preview.' };
+  },
   async setLoginItem() {},
   onCommand() {
     return () => {};

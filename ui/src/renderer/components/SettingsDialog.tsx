@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { CheckCircle2, FolderOpen, X, XCircle } from 'lucide-react';
-import type { EngineSettings } from '@shared/protocol';
+import { isSource, type EngineSettings, type MidiMapping } from '@shared/protocol';
 import { act, engine, useStore } from '../store';
 import { bridge } from '../engine/bridge';
 
 const RATES = [44100, 48000, 88200, 96000, 176400, 192000];
 const BLOCKS = [32, 64, 128, 256, 512, 1024, 2048];
-const TABS = ['Audio', 'Devices', 'Startup', 'Recording', 'Plugins', 'Shortcuts', 'Appearance', 'About'] as const;
+const TABS = ['Audio', 'Devices', 'Startup', 'Recording', 'Plugins', 'Shortcuts', 'Control', 'Appearance', 'About'] as const;
 type Tab = (typeof TABS)[number];
 
 const HOTKEY_ACTIONS: [string, string][] = [
@@ -30,11 +30,210 @@ function acceleratorFromEvent(e: React.KeyboardEvent): string | null {
   return parts.join('+');
 }
 
+const MIDI_ACTIONS: [MidiMapping['action'], string][] = [
+  ['volume', 'Volume'],
+  ['mute', 'Mute'],
+  ['solo', 'Solo / listen'],
+  ['scene', 'Load scene'],
+  ['record', 'Record'],
+  ['replay', 'Save instant replay'],
+];
+
+// OSC (control surfaces, Stream Deck plugins) and MIDI controllers.
+function RemoteControlSettings() {
+  const state = useStore((s) => s.state)!;
+  const s = state.settings;
+  const set = (p: Partial<EngineSettings>) => void act(engine.call('engine.setSettings', p));
+  const mappings = s.midiMappings ?? [];
+  const [devices, setDevices] = useState<string[] | null>(null);
+  const [action, setAction] = useState<MidiMapping['action']>('volume');
+  const [target, setTarget] = useState('');
+  const [learning, setLearning] = useState(false);
+  const [note, setNote] = useState('');
+  useEffect(() => {
+    void engine.call('midi.devices').then(setDevices, () => setDevices([]));
+  }, []);
+  const needsNode = action === 'volume' || action === 'mute' || action === 'solo';
+  const targets = action === 'scene' ? state.scenes.map((x) => ({ id: x.id, name: x.name })) : needsNode ? state.nodes.filter((n) => n.kind !== 'tone') : [];
+  const label = (m: MidiMapping) => {
+    const what = MIDI_ACTIONS.find(([a]) => a === m.action)?.[1] ?? m.action;
+    const on = state.nodes.find((n) => n.id === m.target)?.name ?? state.scenes.find((x) => x.id === m.target)?.name ?? m.target;
+    const src = `${m.type === 'cc' ? 'CC' : 'Note'} ${m.number}${m.channel ? ` · ch ${m.channel}` : ''}`;
+    return { src, what: on ? `${what}: ${on}` : what };
+  };
+  const learn = async () => {
+    setLearning(true);
+    setNote('Move a knob, fader or pad on your controller…');
+    try {
+      const r = await engine.call('midi.learn', { seconds: 10 });
+      set({ midiMappings: [...mappings, { type: r.type, channel: r.channel, number: r.number, action, target: needsNode || action === 'scene' ? target : '' }] });
+      setNote(`Mapped ${r.type === 'cc' ? 'CC' : 'note'} ${r.number} (channel ${r.channel}).`);
+    } catch (e) {
+      setNote((e as Error).message);
+    } finally {
+      setLearning(false);
+    }
+  };
+  const oscOn = (s.oscPort ?? 0) > 0;
+  return (
+    <>
+      <h2>Control surfaces</h2>
+      <label className="toggle-row">
+        <span className="grow">
+          <span>Allow OSC control</span>
+          <span className="hint">
+            For TouchOSC, Open Stage Control or Stream Deck plugins. Other devices on your network can send commands to NexTone
+            while this is on.
+          </span>
+        </span>
+        <input type="checkbox" role="switch" className="switch" checked={oscOn} onChange={(e) => set({ oscPort: e.target.checked ? 9000 : 0 })} />
+      </label>
+      {oscOn && (
+        <>
+          <label className="field">
+            <span>UDP port</span>
+            <input
+              type="number"
+              min={1024}
+              max={65535}
+              className="mono small"
+              defaultValue={s.oscPort}
+              onBlur={(e) => {
+                const v = Math.round(Number(e.target.value));
+                if (v >= 1024 && v <= 65535 && v !== s.oscPort) set({ oscPort: v });
+              }}
+            />
+          </label>
+          <p className="hint mono small">
+            /nextone/volume "name" 0..1 · /nextone/gain "name" dB · /nextone/mute "name" [0|1] · /nextone/solo "name" [0|1] ·
+            /nextone/scene "name" · /nextone/record [0|1] · /nextone/replay
+          </p>
+        </>
+      )}
+      <h2>MIDI controllers</h2>
+      {devices !== null && devices.length === 0 && <p className="hint">No MIDI controller is connected. Plug one in, then reopen Settings.</p>}
+      {devices && devices.length > 0 && <p className="hint">Connected: {devices.join(', ')}</p>}
+      {mappings.length > 0 && (
+        <div className="status-list">
+          {mappings.map((m, i) => {
+            const l = label(m);
+            return (
+              <div className="field-row" key={i}>
+                <span className="mono small">{l.src}</span>
+                <span className="grow">{l.what}</span>
+                <button className="btn small" aria-label={`Remove ${l.src}`} onClick={() => set({ midiMappings: mappings.filter((_, j) => j !== i) })}>
+                  <X size={13} /> Remove
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <div className="field-row">
+        <select aria-label="What the control does" value={action} onChange={(e) => setAction(e.target.value as MidiMapping['action'])}>
+          {MIDI_ACTIONS.map(([a, l]) => (
+            <option key={a} value={a}>
+              {l}
+            </option>
+          ))}
+        </select>
+        {targets.length > 0 && (
+          <select aria-label="Target" value={target} onChange={(e) => setTarget(e.target.value)}>
+            <option value="">Choose…</option>
+            {targets.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </select>
+        )}
+        <button className="btn small" disabled={learning || !devices?.length || ((needsNode || action === 'scene') && !target)} onClick={() => void learn()}>
+          {learning ? 'Listening…' : 'Learn'}
+        </button>
+      </div>
+      {note && (
+        <div className="muted small" role="status">
+          {note}
+        </div>
+      )}
+    </>
+  );
+}
+
+// Round-trip latency: play a chirp into an output and find it in an input (cable or loopback).
+function LatencyMeter() {
+  const nodes = useStore((s) => s.state)!.nodes.filter((n) => n.state !== 'unavailable' && n.kind !== 'bus' && n.kind !== 'tone');
+  const outs = nodes.filter((n) => !isSource(n.bin));
+  const ins = nodes.filter((n) => isSource(n.bin));
+  const [out, setOut] = useState('');
+  const [inp, setInp] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState('');
+  const measure = async () => {
+    setBusy(true);
+    setResult('');
+    try {
+      const r = await engine.call('latency.measure', { output: out, input: inp });
+      setResult(`Round trip: ${r.latencyMs.toFixed(1)} ms`);
+    } catch (e) {
+      setResult((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <>
+      <h2>Measure latency</h2>
+      <p className="hint">
+        Connect an output to an input with a cable (or a loopback), then measure. NexTone plays a short chirp and listens for it.
+      </p>
+      <div className="field-row">
+        <select aria-label="Output to play the test signal" value={out} onChange={(e) => setOut(e.target.value)}>
+          <option value="">Output…</option>
+          {outs.map((n) => (
+            <option key={n.id} value={n.id}>
+              {n.name}
+            </option>
+          ))}
+        </select>
+        <select aria-label="Input that receives it" value={inp} onChange={(e) => setInp(e.target.value)}>
+          <option value="">Input…</option>
+          {ins.map((n) => (
+            <option key={n.id} value={n.id}>
+              {n.name}
+            </option>
+          ))}
+        </select>
+        <button className="btn small" disabled={!out || !inp || busy} onClick={() => void measure()}>
+          {busy ? 'Measuring…' : 'Measure'}
+        </button>
+      </div>
+      {result && (
+        <div className="muted small" role="status">
+          {result}
+        </div>
+      )}
+    </>
+  );
+}
+
 export function SettingsDialog() {
   const state = useStore((s) => s.state)!;
   const close = () => useStore.getState().setSettingsOpen(false);
   const [tab, setTab] = useState<Tab>('Audio');
   const [storeBuild, setStoreBuild] = useState(false);
+  const [platform, setPlatform] = useState('');
+  const [installing, setInstalling] = useState(false);
+  const installDrivers = async () => {
+    setInstalling(true);
+    try {
+      const r = await bridge.installDrivers();
+      useStore.getState().toast(r.ok ? 'info' : 'error', r.message);
+      if (r.ok) await act(engine.call('devices.refresh'));
+    } finally {
+      setInstalling(false);
+    }
+  };
   const dlg = useRef<HTMLDivElement>(null);
   const s = state.settings;
   const st = state.status;
@@ -44,7 +243,10 @@ export function SettingsDialog() {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && close();
     window.addEventListener('keydown', onKey);
     dlg.current?.focus();
-    void bridge.platform().then((p) => setStoreBuild(!!p.store));
+    void bridge.platform().then((p) => {
+      setStoreBuild(!!p.store);
+      setPlatform(p.platform);
+    });
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
@@ -114,6 +316,7 @@ export function SettingsDialog() {
                   Restart audio
                 </button>
               </div>
+              <LatencyMeter />
             </>
           )}
           {tab === 'Devices' && (
@@ -143,6 +346,26 @@ export function SettingsDialog() {
                   </div>
                 </div>
               </div>
+              {platform === 'win32' && (!st.driverPack.vad || !st.driverPack.asio) && (
+                <div className="field-row">
+                  {storeBuild ? (
+                    <span className="hint">The drivers come with the NexTone desktop installer (Driver Pack). Apps from the Microsoft Store can’t install drivers.</span>
+                  ) : (
+                    <>
+                      <button className="btn small" disabled={installing} onClick={() => void installDrivers()}>
+                        {installing ? 'Installing…' : 'Install drivers…'}
+                      </button>
+                      <span className="hint">Windows will ask for permission.</span>
+                    </>
+                  )}
+                </div>
+              )}
+              {platform === 'win32' && st.driverPack.asio && !st.driverPack.vad && (
+                <p className="hint">
+                  The virtual audio driver is test-signed for now, so Windows only loads it with test signing turned on. Until it is
+                  signed, Compatibility mode provides virtual devices.
+                </p>
+              )}
               <label className="toggle-row">
                 <span className="grow">
                   <span>Compatibility mode</span>
@@ -288,6 +511,7 @@ export function SettingsDialog() {
               </p>
             </>
           )}
+          {tab === 'Control' && <RemoteControlSettings />}
           {tab === 'Shortcuts' && (
             <>
               <h2>Keyboard shortcuts</h2>

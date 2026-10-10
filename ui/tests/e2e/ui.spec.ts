@@ -30,6 +30,8 @@ test.beforeAll(async () => {
   // The app remembers the last view; tests start from the Routing view.
   await page.locator('.segmented button', { hasText: 'Routing' }).click({ timeout: 20_000 });
   await page.waitForSelector('.node-card', { timeout: 20_000 });
+  // Web fonts (JetBrains Mono) can shift the layout when they finish loading: wait first.
+  await page.evaluate(() => document.fonts.ready);
 });
 
 test.afterAll(async () => {
@@ -87,9 +89,14 @@ test('settings dialog opens', async () => {
   await page.locator('button[aria-label="Settings"]').click();
   await expect(page.locator('.modal.settings')).toBeVisible();
   await page.screenshot({ path: path.join(shots, '05-settings.png') });
+  await expect(page.locator('.modal.settings h2', { hasText: 'Measure latency' })).toBeVisible();
   await page.locator('.settings-nav button', { hasText: 'Plugins' }).click();
   await expect(page.locator('.modal.settings', { hasText: 'Extra plugin folders' })).toBeVisible();
   await expect(page.locator('.modal.settings', { hasText: '1 plugin found' })).toBeVisible();
+  await page.locator('.settings-nav button', { hasText: 'Control' }).click();
+  await page.locator('.modal.settings input[role=switch]').first().click(); // state comes back from the engine
+  await expect(page.locator('.modal.settings', { hasText: '/nextone/volume' })).toBeVisible();
+  await page.screenshot({ path: path.join(shots, '07-control.png') });
   await page.keyboard.press('Escape');
 });
 

@@ -274,6 +274,7 @@ void Engine::refreshDevicesLocked() {
 bool Engine::nodeNeededLocked(const NodeModel& n) const {
     if (!n.present || !n.userEnabled) return false;
     if (n.bin == Bin::Bus || n.id == "tone") return false;
+    if (forcedOpen_.count(n.id)) return true;
     // (VBAN nodes are opened like devices when connected.)
     for (const RouteModel& r : routes_) {
         if (r.from == n.id || r.to == n.id) return true;

@@ -12,6 +12,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "control/remote.h"
 #include "core/engine.h"
 #ifdef _WIN32
 #include "backends/win/hotkeys.h"
@@ -205,6 +206,10 @@ int main(int argc, char** argv) {
     };
 
     engine.start();
+    // OSC + MIDI control (off until configured); destroyed before the engine stops.
+    auto remote = std::make_unique<RemoteControl>(engine);
+    engine.onMidiLearn = [&remote](double seconds) { return remote->learn(seconds); };
+    engine.onMidiDevices = [&remote] { return remote->midiDevices(); };
 
     const std::string token = randomHex(16);
     const int actualPort = server.start(token, port);
@@ -281,6 +286,7 @@ int main(int argc, char** argv) {
     stateThread.join();
     meterThread.join();
     server.stop();
+    remote.reset();
     engine.shutdown();
     std::remove(discoveryPath().c_str());
 #ifdef _WIN32

@@ -24,6 +24,12 @@ _Last updated: 2026-10-10._
 | Windows App Certification Kit | ⚠️ 15 tests pass; no real failures found | `vm/Test-Wack.ps1` (see below) |
 | **Linux (PipeWire)**: physical devices + hot-plug, persistent NexTone virtual outputs/mics usable by any app, app capture | ✅ in WSL Ubuntu 24.04, PipeWire 1.0.5 | `tests/integration/linux-pipewire.mjs` 11/11 (×4 runs; one click seen once at stream start in an earlier run). Engine unit tests pass on GCC 13 |
 | **Linux desktop app** (AppImage) | ✅ launches under WSLg | `scripts/package-linux.sh`: the app starts its bundled engine and connects |
+| Round-trip latency measurement (chirp + cross-correlation, Settings › Audio) | ✅ | unit test: delay found within 0.5 sample, sub-sample refinement, no-signal rejected; `tests/integration/latency.mjs` 6/6 through VB-CABLE (~150 ms, VB-CABLE's own buffer; varies by up to ~20 ms between device restarts) |
+| "Install drivers" button (Settings › Devices, desktop build; one UAC prompt via `nextone-setup install-all`) | ✅ in a pristine VM | `vm/Test-DriverInstall.ps1`: with the engine already running, `install-all` installs both drivers in 4 s and the engine picks up the ASIO driver and all 8 virtual devices by itself |
+| **Driver soak under Driver Verifier** (1 h, 54 cycles of the full audio test + hot-unplug while streaming) | ✅ no crash | `vm/Test-Soak.ps1`: 0 bugchecks, no dumps; device and engine survived every disable/enable. Audio clean in 45 of 54 iterations. Iteration 1: the engine started before the driver (now fixed: the VAD backend polls for its rings). Iterations 2–4 overlapped host builds. 2–6 clicks in 5 later iterations; iterations 28–54 all clean |
+| OSC remote control | ✅ | unit tests (messages, bundles, junk); `tests/integration/osc.mjs` 5/5 with real UDP packets |
+| MIDI controllers (mappings + learn, Windows) | ⚠️ logic tested only | unit tests for the mapping logic; no MIDI input on this PC, so the winmm input path is untested with hardware |
+| UI fonts | ✅ | Segoe UI Variable for text; JetBrains Mono (bundled, OFL) for numbers, ports and paths |
 | CLI | ✅ | `tools/nextone-ctl.mjs` (also finds a Store-installed engine) |
 
 ## How to run
@@ -82,8 +88,7 @@ wsl -e bash scripts/package-linux.sh # Linux AppImage → ui\release\
   - Plugin windows are DPI-unaware, so Windows scales them.
   - Plugin windows are Windows-only for now.
 - **Not implemented yet:**
-  - Linux: per-app output redirection and app microphones (only app capture exists); plugin windows. macOS: not started.
+  - Linux: per-app output redirection and app microphones (only app capture exists); plugin windows; MIDI. macOS: not started.
   - MIDI/OSC control.
-  - Round-trip latency measurement (`latency.measure`).
   - FLAC recording (WAV only).
-- **Not run yet:** Driver Verifier soak of the virtual driver (1 h).
+- **Intermittent:** asio-host "shared interface" clicked once (13 clicks, −4.95 dB) in a `run-all` that started right after a full rebuild. It passed 5 times in a row afterwards on an idle machine.

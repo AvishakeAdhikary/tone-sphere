@@ -22,7 +22,9 @@
     "dist:store": "npm run build && electron-builder --config electron-builder.store.json --win appx",
     "dist:linux": "npm run build && electron-builder --linux AppImage"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@fontsource-variable/jetbrains-mono": "^5.3.0"
+  },
   "devDependencies": {
     "@dnd-kit/core": "^6.3.1",
     "@playwright/test": "^1.54.0",

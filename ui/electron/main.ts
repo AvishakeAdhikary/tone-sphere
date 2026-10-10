@@ -12,7 +12,7 @@ import {
   nativeTheme,
   shell,
 } from 'electron';
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
@@ -228,7 +228,25 @@ ipcMain.handle('nextone:open-sound-settings', async () => {
 ipcMain.handle('nextone:open-startup-settings', async () => {
   if (isWin) await shell.openExternal('ms-settings:startupapps');
 });
-ipcMain.handle('nextone:set-login-item', (_e, enabled: boolean) => {
+// Desktop build: installs the ASIO driver + virtual audio driver shipped in resources/drivers
+// (one UAC prompt). The Store build doesn't contain drivers (MSIX can't install them).
+ipcMain.handle('nextone:install-drivers', async (): Promise<{ ok: boolean; message: string }> => {
+  if (!isWin || process.windowsStore) return { ok: false, message: 'Drivers come with the NexTone desktop installer (Driver Pack).' };
+  const dir = path.join(process.resourcesPath, 'drivers');
+  const setup = path.join(dir, 'nextone-setup.exe');
+  if (!fs.existsSync(setup)) return { ok: false, message: 'This build does not include the drivers.' };
+  const engineExe = path.join(process.resourcesPath, 'engine', 'nextone-engine.exe');
+  const q = (s: string) => `"${s}"`.replace(/'/g, "''");
+  const argList = ['install-all', q(dir), '--engine', q(engineExe), '--ui', q(process.execPath)].join(' ');
+  const ps = `try { $p = Start-Process -FilePath '${setup.replace(/'/g, "''")}' -ArgumentList '${argList}' -Verb RunAs -Wait -PassThru -WindowStyle Hidden; exit $p.ExitCode } catch { exit 1223 }`;
+  const code = await new Promise<number>((resolve) => {
+    const child = execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], { windowsHide: true }, () => {});
+    child.on('exit', (c) => resolve(c ?? 1));
+  });
+  if (code === 1223) return { ok: false, message: 'Installation was cancelled.' };
+  if (code !== 0) return { ok: false, message: `Driver installation failed (code ${code}).` };
+  return { ok: true, message: 'Drivers installed.' };
+});ipcMain.handle('nextone:set-login-item', (_e, enabled: boolean) => {
   app.setLoginItemSettings({ openAtLogin: !!enabled, args: ['--hidden'] });
 });
 

@@ -105,6 +105,8 @@ set(ENGINE_SOURCES
   src/core/state.cpp
   src/core/rpc.cpp
   src/core/recorder.cpp
+  src/core/latency.cpp
+  src/control/remote.cpp
   src/dsp/fx.cpp
   src/backends/device.cpp
   src/ipc/ws_server.cpp

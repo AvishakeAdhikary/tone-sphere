@@ -340,6 +340,20 @@ bool VadBackend::driverPresent() {
     return m.open(false, 1) || m.open(true, 1);
 }
 
+// The driver can come up after the engine (slow boot, driver install, device re-enabled):
+// report a change whenever the set of rings changes, so the virtual devices appear on their own.
+bool VadBackend::poll() {
+    int present = 0;
+    for (int mic = 0; mic < 2; ++mic)
+        for (int i = 1; i <= kMaxRings; ++i) {
+            RingMap m;
+            if (m.open(mic != 0, i)) present |= 1 << (mic * kMaxRings + i - 1);
+        }
+    const bool changed = present != lastPresent_;
+    lastPresent_ = present;
+    return changed;
+}
+
 std::vector<DeviceInfo> VadBackend::enumerate() {
     std::vector<DeviceInfo> out;
     for (int mic = 0; mic < 2; ++mic) {

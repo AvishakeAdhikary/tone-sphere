@@ -163,6 +163,13 @@ void processProgram(Program& p, int frames, double nowSec) {
                 tone(n, frames, sr);
             else
                 zero(n, frames);
+            // Latency probe: record the raw input (sources run before destinations in a cycle).
+            if (LatencyProbe* lp = n.probeIn.load(std::memory_order_acquire);
+                lp && lp->armed.load(std::memory_order_acquire) && !lp->done.load(std::memory_order_relaxed)) {
+                const size_t room = lp->captured.size() > lp->pos ? lp->captured.size() - lp->pos : 0;
+                const size_t k = std::min(room, static_cast<size_t>(frames));
+                std::copy(n.buf[0], n.buf[0] + k, lp->captured.begin() + static_cast<std::ptrdiff_t>(lp->pos));
+            }
         } else {
             zero(n, frames);
             if (pn.physicalOut && !p.soloBuses.empty()) {
@@ -191,6 +198,17 @@ void processProgram(Program& p, int frames, double nowSec) {
             for (int i = 0; i < frames; ++i)
                 for (int c = 0; c < n.channels; ++c) *dst++ = n.buf[c][i];
             tap->write(n.tapScratch.data(), static_cast<size_t>(frames));  // drops if the writer falls behind
+        }
+        if (LatencyProbe* lp = n.probeOut.load(std::memory_order_acquire);
+            lp && lp->armed.load(std::memory_order_acquire) && !lp->done.load(std::memory_order_relaxed)) {
+            // Latency probe: add the chirp (after this node's gain, so muting can't hide it).
+            for (int i = 0; i < frames; ++i) {
+                const size_t t = lp->pos + static_cast<size_t>(i);
+                if (t < lp->emitAt || t - lp->emitAt >= lp->stimulus.size()) continue;
+                for (int c = 0; c < n.channels; ++c) n.buf[c][i] += lp->stimulus[t - lp->emitAt];
+            }
+            lp->pos += static_cast<size_t>(frames);
+            if (lp->pos >= lp->captured.size()) lp->done.store(true, std::memory_order_release);
         }
         if (pn.isDest) {
             if (RenderBridge* rb = n.render.load(std::memory_order_acquire)) rb->engineWrite(n.buf, static_cast<size_t>(frames), nowSec);

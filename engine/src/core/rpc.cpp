@@ -30,6 +30,13 @@ std::string str(const json& p, const char* k) {
 }  // namespace
 
 json Engine::call(const std::string& method, const json& params) {
+    if (method == "latency.measure") return measureLatency(params.is_object() ? params : json::object());
+    // MIDI learn waits for the user: never under the engine lock.
+    if (method == "midi.learn" || method == "midi.devices") {
+        if (!onMidiLearn || !onMidiDevices) throw std::runtime_error("MIDI control is not available");
+        if (method == "midi.devices") return onMidiDevices();
+        return onMidiLearn(std::clamp(params.is_object() ? params.value("seconds", 10.0) : 10.0, 1.0, 30.0));
+    }
     std::lock_guard lock(mu_);
     const json& p = params.is_object() ? params : json::object();
 
@@ -64,6 +71,8 @@ json Engine::call(const std::string& method, const json& params) {
             updateTapsLocked();
         }
         if (p.contains("recordFolder")) settings_.recordFolder = p["recordFolder"].get<std::string>();
+        if (p.contains("oscPort")) settings_.oscPort = std::clamp(p["oscPort"].get<int>(), 0, 65535);
+        if (p.contains("midiMappings") && p["midiMappings"].is_array()) settings_.midiMappings = p["midiMappings"];
         if (p.contains("pluginFolders") && p["pluginFolders"].is_array()) {
             settings_.pluginFolders = p["pluginFolders"].get<std::vector<std::string>>();
             applyPluginFoldersLocked();
@@ -441,7 +450,6 @@ json Engine::call(const std::string& method, const json& params) {
         markDirty();
         return json{{"file", files.front()}, {"files", files}};
     }
-    if (method == "latency.measure") fail("Latency measurement arrives in a later update of this build");
 
     fail("Unknown method: " + method);
 }

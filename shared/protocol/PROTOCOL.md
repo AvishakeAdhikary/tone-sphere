@@ -71,7 +71,7 @@ See `ui/src/shared/protocol.ts` (the source of truth for types) and `engine/src/
 | `recorder.stop` | – | `{files: string[]}` |
 | `recorder.saveReplay` | `{seconds}` | `{file}` |
 | `tone.set` | `{enabled, freq, levelDb, target?: nodeId}` | – |
-| `latency.measure` | `{outId, inId}` | `{ms}` |
+| `latency.measure` | `{output, input}`: plays a 10 ms chirp into `output` and finds it in `input` (takes ~3 s) | `{latencyMs, samples, sampleRate, confidence}` |
 
 ## Node id scheme (stable across restarts)
 
