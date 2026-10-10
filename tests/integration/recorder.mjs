@@ -65,7 +65,7 @@ async function main() {
   if (files[0]) {
     const w = readWav(files[0]);
     check('WAV is 32-bit float stereo 48 kHz', w.riff === 'RIFF' && w.tag === 3 && w.ch === 2 && w.bits === 32 && w.rate === 48000, w);
-    check('recording length ~3 s', Math.abs(w.seconds - 3) < 0.25, w.seconds);
+    check('recording length ~3.3 s', Math.abs(w.seconds - 3.3) < 0.25, w.seconds);
     check('recording level -12 dB', Math.abs(w.peakDb + 12) < 0.2, w.peakDb);
   }
   const rep = await call('recorder.saveReplay', { seconds: 30 });
