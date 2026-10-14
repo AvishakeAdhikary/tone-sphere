@@ -1,6 +1,7 @@
 import { Circle, LayoutGrid, Settings, Square, Workflow } from 'lucide-react';
 import { act, engine, useStore } from '../store';
 import { SceneMenu } from './SceneMenu';
+import logo from '../assets/logo.png';
 
 export function TitleBar() {
   const state = useStore((s) => s.state);
@@ -30,18 +31,7 @@ export function TitleBar() {
   return (
     <header className="titlebar">
       <div className="titlebar-brand">
-        <span className="brand-mark" aria-hidden>
-          <svg viewBox="0 0 24 24" width="20" height="20">
-            <path
-              d="M3 12c2.5 0 2.5-6 5-6s2.5 12 5 12 2.5-12 5-12 2.5 6 3 6"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.4"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-        </span>
+        <img className="brand-mark" src={logo} alt="" aria-hidden width={26} height={26} />
         <span className="brand-name">ToneSphere</span>
       </div>
 

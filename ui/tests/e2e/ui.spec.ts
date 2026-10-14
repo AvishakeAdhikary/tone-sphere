@@ -10,6 +10,9 @@ const PORT = 47900 + Math.floor(Math.random() * 90);
 let mock: ChildProcess | null = null;
 let app: ElectronApplication;
 let page: Page;
+let splashUrl = '';
+let profile = '';
+let launchEnv: Record<string, string> = {};
 const shots = path.join(process.cwd(), 'test-results', 'screens');
 
 test.beforeAll(async () => {
@@ -25,9 +28,15 @@ test.beforeAll(async () => {
   delete env.ELECTRON_RUN_AS_NODE;
   if (process.env.TONESPHERE_E2E_REAL !== '1') env.TONESPHERE_DISCOVERY = discovery;
   // Own profile: the tests must not collide with a ToneSphere the user has open (single-instance lock).
-  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'tonesphere-e2e-profile-'));
+  profile = fs.mkdtempSync(path.join(os.tmpdir(), 'tonesphere-e2e-profile-'));
+  launchEnv = env;
   app = await electron.launch({ args: ['.', `--user-data-dir=${profile}`], env });
-  page = await app.firstWindow();
+  // The splash (the ToneSphere banner) is the first window; the main window follows.
+  const splash = await app.firstWindow();
+  splashUrl = splash.url();
+  await splash.waitForLoadState().then(() => splash.screenshot({ path: path.join(shots, '00-splash.png') })).catch((e) => console.log('splash shot', e));
+  const isMain = (p: Page) => p.url().includes('index.html') || (!!process.env.TONESPHERE_DEV_URL && !p.url().includes('splash'));
+  page = app.windows().find(isMain) ?? (await app.waitForEvent('window', { predicate: isMain, timeout: 20_000 }));
   await page.setViewportSize({ width: 1400, height: 880 });
   // The app remembers the last view; tests start from the Routing view.
   await page.locator('.segmented button', { hasText: 'Routing' }).click({ timeout: 20_000 });
@@ -120,4 +129,32 @@ test('dark theme renders', async () => {
   await page.evaluate(() => (document.documentElement.dataset.theme = 'dark'));
   await page.waitForTimeout(300);
   await page.screenshot({ path: path.join(shots, '06-dark.png') });
+});
+
+test('the splash shows the banner, then hands over to the main window', async () => {
+  expect(splashUrl).toContain('splash.html');
+  // The splash closes once the main window has rendered and the engine answered.
+  await expect.poll(() => app.windows().filter((w) => w.url().includes('splash.html')).length, { timeout: 15_000 }).toBe(0);
+  const visible = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().filter((w) => w.isVisible()).length);
+  expect(visible).toBe(1);
+});
+
+test('a second launch focuses the running window instead of starting another ToneSphere', async () => {
+  const electronBin = (await import('electron')).default as unknown as string;
+  const second = spawn(electronBin, ['.', `--user-data-dir=${profile}`], { env: launchEnv, stdio: 'ignore' });
+  const code = await new Promise<number | null>((resolve) => {
+    const timer = setTimeout(() => {
+      second.kill();
+      resolve(-1);
+    }, 15_000);
+    second.on('exit', (c) => {
+      clearTimeout(timer);
+      resolve(c);
+    });
+  });
+  expect(code).toBe(0); // the second process gave up at once (single-instance lock)
+  const windows = await app.evaluate(({ BrowserWindow }) =>
+    BrowserWindow.getAllWindows().map((w) => ({ visible: w.isVisible(), title: w.getTitle() })),
+  );
+  expect(windows.filter((w) => w.visible)).toHaveLength(1);
 });

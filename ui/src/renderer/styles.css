@@ -197,13 +197,10 @@ button:disabled {
   margin-right: 8px;
 }
 .brand-mark {
-  display: grid;
-  place-items: center;
+  display: block;
   width: 26px;
   height: 26px;
-  border-radius: 7px;
-  color: #fff;
-  background: linear-gradient(135deg, #4c8dff, #8a5cf5 55%, #e5484d);
+  flex: none;
 }
 .titlebar-spacer {
   flex: 1;

@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; media-src 'self'; img-src 'self'; style-src 'unsafe-inline'" />
+    <title>ToneSphere</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #000;
+        overflow: hidden;
+        user-select: none;
+        -webkit-app-region: drag;
+        font: 12px 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+        color: #c9b8ff;
+      }
+      video {
+        display: block;
+        width: 660px;
+        height: 330px;
+      }
+      #status {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 9px;
+        text-align: center;
+        letter-spacing: 0.02em;
+        opacity: 0.85;
+      }
+    </style>
+  </head>
+  <body>
+    <video src="splash.webm" poster="splash-poster.jpg" autoplay muted loop playsinline aria-label="ToneSphere"></video>
+    <div id="status" role="status" aria-live="polite">Starting…</div>
+  </body>
+</html>

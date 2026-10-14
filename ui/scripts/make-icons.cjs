@@ -1,34 +1,29 @@
-// Renders the ToneSphere logo (SVG) to all icon sizes with Electron and writes:
-//   assets/icon.png (512), assets/icon.ico (16-256), assets/tray.png (32), assets/tray@2x.png
+// Derives every icon from the ToneSphere logo (assets/images/ToneSphere.png at the repo root) and writes:
+//   assets/icon.png (512), assets/icon.ico (16-256), assets/tray.png (32), assets/tray@2x.png (64)
+//   src/renderer/assets/logo.png (64, the title-bar mark)
 //   build/appx/*.png (Store/MSIX tile assets)
+// The splash (assets/splash.webm, splash-poster.jpg) is the README banner re-encoded:
+//   ffmpeg -i ../assets/images/ToneSphereBanner.gif -vf "scale=660:330:flags=lanczos,format=yuv420p" \
+//          -c:v libvpx-vp9 -b:v 0 -crf 34 -row-mt 1 -an assets/splash.webm
 // Run: npx electron scripts/make-icons.cjs
-const { app, BrowserWindow } = require('electron');
+const { app, nativeImage } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 
 const root = path.join(__dirname, '..');
-const logo = (size, { tile = false } = {}) => `
-<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 100 100">
-  <defs>
-    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#3d7bff"/>
-      <stop offset="0.55" stop-color="#8a5cf5"/>
-      <stop offset="1" stop-color="#ef4f6b"/>
-    </linearGradient>
-  </defs>
-  ${tile ? '' : '<rect x="4" y="4" width="92" height="92" rx="24" fill="url(#g)"/>'}
-  <path d="M17 50 C27 50 27 26 37 26 S47 74 57 74 S67 26 77 26 S83 50 85 50"
-        fill="none" stroke="#fff" stroke-width="${size <= 24 ? 11 : 9}" stroke-linecap="round" stroke-linejoin="round"/>
-</svg>`;
+const master = nativeImage.createFromPath(path.join(root, '..', 'assets', 'images', 'ToneSphere.png'));
 
-async function render(win, svg, w, h, transparentTile = false) {
-  const html = `<html><body style="margin:0;background:${transparentTile ? 'transparent' : 'transparent'}">
-    <div style="width:${w}px;height:${h}px;display:flex;align-items:center;justify-content:center">${svg}</div></body></html>`;
-  await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
-  win.setContentSize(w, h);
-  await new Promise((r) => setTimeout(r, 80));
-  const img = await win.webContents.capturePage({ x: 0, y: 0, width: w, height: h });
-  return img.resize({ width: w, height: h, quality: 'best' }).toPNG();
+const square = (size) => master.resize({ width: size, height: size, quality: 'best' }).toPNG();
+
+// A tile: the logo centred on a transparent canvas (Windows draws the tile plate).
+function tile(w, h, scale = 0.8) {
+  const s = Math.round(Math.min(w, h) * scale);
+  const logo = master.resize({ width: s, height: s, quality: 'best' }).toBitmap(); // BGRA
+  const out = Buffer.alloc(w * h * 4);
+  const ox = Math.floor((w - s) / 2);
+  const oy = Math.floor((h - s) / 2);
+  for (let y = 0; y < s; y++) logo.copy(out, ((oy + y) * w + ox) * 4, y * s * 4, (y + 1) * s * 4);
+  return nativeImage.createFromBitmap(out, { width: w, height: h }).toPNG();
 }
 
 function ico(pngs) {
@@ -53,21 +48,17 @@ function ico(pngs) {
   return Buffer.concat([header, ...pngs.map((p) => p.data)]);
 }
 
-app.disableHardwareAcceleration();
-app.whenReady().then(async () => {
-  const win = new BrowserWindow({ show: false, frame: false, transparent: true, width: 600, height: 600, webPreferences: { offscreen: true } });
-  fs.mkdirSync(path.join(root, 'assets'), { recursive: true });
-  fs.mkdirSync(path.join(root, 'build', 'appx'), { recursive: true });
+app.whenReady().then(() => {
+  if (master.isEmpty()) throw new Error('assets/images/ToneSphere.png not found');
+  for (const d of ['assets', 'build/appx', 'src/renderer/assets']) fs.mkdirSync(path.join(root, d), { recursive: true });
 
   const sizes = [16, 20, 24, 32, 40, 48, 64, 128, 256];
-  const pngs = [];
-  for (const s of sizes) pngs.push({ size: s, data: await render(win, logo(s), s, s) });
-  fs.writeFileSync(path.join(root, 'assets', 'icon.ico'), ico(pngs));
-  fs.writeFileSync(path.join(root, 'assets', 'icon.png'), await render(win, logo(512), 512, 512));
-  fs.writeFileSync(path.join(root, 'assets', 'tray.png'), await render(win, logo(32), 32, 32));
-  fs.writeFileSync(path.join(root, 'assets', 'tray@2x.png'), await render(win, logo(64), 64, 64));
+  fs.writeFileSync(path.join(root, 'assets', 'icon.ico'), ico(sizes.map((size) => ({ size, data: square(size) }))));
+  fs.writeFileSync(path.join(root, 'assets', 'icon.png'), square(512));
+  fs.writeFileSync(path.join(root, 'assets', 'tray.png'), square(32));
+  fs.writeFileSync(path.join(root, 'assets', 'tray@2x.png'), square(64));
+  fs.writeFileSync(path.join(root, 'src', 'renderer', 'assets', 'logo.png'), square(64));
 
-  // MSIX assets (logo on transparent background; Windows draws the tile plate).
   const appx = [
     ['StoreLogo.png', 50, 50],
     ['Square44x44Logo.png', 44, 44],
@@ -76,10 +67,7 @@ app.whenReady().then(async () => {
     ['LargeTile.png', 310, 310],
     ['SmallTile.png', 71, 71],
   ];
-  for (const [name, w, h] of appx) {
-    const s = Math.round(Math.min(w, h) * 0.8);
-    fs.writeFileSync(path.join(root, 'build', 'appx', name), await render(win, logo(s), w, h));
-  }
+  for (const [name, w, h] of appx) fs.writeFileSync(path.join(root, 'build', 'appx', name), tile(w, h));
   console.log('icons written');
   app.quit();
 });

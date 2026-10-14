@@ -88,6 +88,7 @@ async function ensureEngine(): Promise<Discovery | null> {
   if (d && (await portOpen(d.port))) return d;
   const exe = engineExecutable();
   if (!exe) return null;
+  setSplashStatus('Starting the audio engine…');
   const child = spawn(exe, ['--background'], { detached: true, stdio: 'ignore', windowsHide: true });
   child.unref();
   for (let i = 0; i < 50; i++) {
@@ -96,6 +97,55 @@ async function ensureEngine(): Promise<Discovery | null> {
     if (d && (await portOpen(d.port))) return d;
   }
   return null;
+}
+
+// ---- Splash: the ToneSphere banner while the engine and the window start ----
+let splash: BrowserWindow | null = null;
+let firstEngine: Promise<Discovery | null> | null = null;
+const SPLASH_MIN_MS = 900; // long enough to read, short enough not to be in the way
+
+function createSplash(): void {
+  splash = new BrowserWindow({
+    width: 660,
+    height: 360,
+    frame: false,
+    resizable: false,
+    movable: true,
+    center: true,
+    show: false,
+    skipTaskbar: false,
+    alwaysOnTop: false,
+    title: 'ToneSphere',
+    icon: appIcon(),
+    backgroundColor: '#000000',
+    webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, spellcheck: false },
+  });
+  splash.setMenuBarVisibility(false);
+  splash.once('ready-to-show', () => splash?.show());
+  splash.on('closed', () => {
+    splash = null;
+  });
+  void splash.loadFile(path.join(app.getAppPath(), 'assets', 'splash.html'));
+}
+
+function setSplashStatus(text: string): void {
+  if (!splash || splash.isDestroyed()) return;
+  void splash.webContents
+    .executeJavaScript(`document.getElementById('status').textContent = ${JSON.stringify(text)}`)
+    .catch(() => {});
+}
+
+/** Shows the main window once it has rendered and the engine answered (or gave up), then closes the splash. */
+function handOver(mainReady: Promise<void>, shownAt: number): void {
+  const engineDone = (firstEngine ?? Promise.resolve(null)).then(() => setSplashStatus('Opening…'));
+  const floor = new Promise((r) => setTimeout(r, Math.max(0, SPLASH_MIN_MS - (Date.now() - shownAt))));
+  // Never keep the user waiting on the splash: after 10 s the window opens regardless.
+  const cap = new Promise((r) => setTimeout(r, 10_000));
+  void Promise.race([Promise.all([mainReady, engineDone, floor]), cap]).then(() => {
+    win?.show();
+    win?.focus();
+    splash?.close();
+  });
 }
 
 function appIcon(): Electron.NativeImage {
@@ -141,9 +191,9 @@ function createWindow(): void {
   else void win.loadFile(path.join(app.getAppPath(), 'dist', 'index.html'));
 
   const startHidden = process.argv.includes('--hidden');
-  win.once('ready-to-show', () => {
-    if (!startHidden) win?.show();
-  });
+  const mainReady = new Promise<void>((resolve) => win?.once('ready-to-show', () => resolve()));
+  if (splash) handOver(mainReady, Date.now());
+  else if (!startHidden) void mainReady.then(() => win?.show());
   win.on('close', (e) => {
     if (!quitting && tray) {
       e.preventDefault();
@@ -202,7 +252,12 @@ function createTray(): void {
 }
 
 // ---- IPC API for the renderer (kept deliberately small) -------------------
-ipcMain.handle('tonesphere:discover', async () => ensureEngine());
+// The first discovery was started with the splash; later ones (reconnects) look again.
+ipcMain.handle('tonesphere:discover', async () => {
+  const first = firstEngine;
+  firstEngine = null;
+  return first ?? ensureEngine();
+});
 ipcMain.handle('tonesphere:platform', () => ({
   platform: process.platform,
   version: app.getVersion(),
@@ -304,6 +359,9 @@ if (!app.requestSingleInstanceLock()) {
   app.setAppUserModelId('com.neuralnexusstudios.tonesphere');
   migrateLegacyProfile();
   void app.whenReady().then(() => {
+    // The splash shows on a normal start, not when signing in starts ToneSphere in the tray.
+    if (!process.argv.includes('--hidden') && !process.argv.includes('--no-splash')) createSplash();
+    firstEngine = ensureEngine();
     createWindow();
     createTray();
   });
