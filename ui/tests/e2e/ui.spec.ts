@@ -38,10 +38,17 @@ test.beforeAll(async () => {
   profile = fs.mkdtempSync(path.join(os.tmpdir(), 'tonesphere-e2e-profile-'));
   launchEnv = env;
   app = await electron.launch({ args: ['.', `--user-data-dir=${profile}`], env });
-  // The splash (the ToneSphere banner) is the first window; the main window follows.
-  const splash = await app.firstWindow();
-  splashUrl = splash.url();
-  await splash.waitForLoadState().then(() => splash.screenshot({ path: path.join(shots, '00-splash.png') })).catch((e) => console.log('splash shot', e));
+  // The splash (the ToneSphere banner) and the main window are created back to back, and either
+  // page can be reported first (it varies on CI): look for the splash among them. It stays up
+  // for at least 0.9 s.
+  await app.firstWindow();
+  let splash: Page | undefined;
+  for (let i = 0; i < 200 && !splash; i++) {
+    splash = app.windows().find((p) => p.url().includes('splash.html'));
+    if (!splash) await new Promise((r) => setTimeout(r, 50));
+  }
+  splashUrl = splash?.url() ?? app.windows().map((p) => p.url()).join(', ');
+  await splash?.screenshot({ path: path.join(shots, '00-splash.png') }).catch((e) => console.log('splash shot', e));
   const isMain = (p: Page) => p.url().includes('index.html') || (!!process.env.TONESPHERE_DEV_URL && !p.url().includes('splash'));
   page = app.windows().find(isMain) ?? (await app.waitForEvent('window', { predicate: isMain, timeout: 20_000 }));
   await page.setViewportSize({ width: 1400, height: 880 });
