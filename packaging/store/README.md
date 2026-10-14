@@ -2,8 +2,11 @@
 
 The Store build is an MSIX package with the Electron app and the audio engine. The Store signs
 it for free, so no code-signing certificate is needed. Kernel drivers and HKLM ASIO
-registration cannot ship in an MSIX. Those come from the separate desktop installer, the
-"Driver Pack" (`ui/release/ToneSphere-Setup-*.exe`), which is optional.
+registration cannot ship in an MSIX. Those come from the separate desktop installer
+(`ToneSphere-Setup-<version>.exe` on GitHub Releases), which is optional.
+
+CI builds the unsigned Store package on every push: `ToneSphere-<version>.appx` is attached to
+each GitHub release, ready to upload once the identity below is filled in.
 
 ## What works from the Store package alone
 - Physical inputs and outputs (WASAPI, plus ASIO interfaces already installed on the PC).
@@ -16,7 +19,7 @@ registration cannot ship in an MSIX. Those come from the separate desktop instal
   - **Sign-in.** The package starts the engine at sign-in (startup task), and the engine
     opens the app in the tray.
   - **ASIO launch.** The `tonesphere-engine.exe` execution alias lets the ToneSphere ASIO driver
-    (from the Driver Pack) start the engine.
+    (from the desktop installer) start the engine.
   - **Control panel.** The `tonesphere:` link lets the ASIO driver's control-panel button open
     the app.
 
@@ -37,8 +40,8 @@ registration cannot ship in an MSIX. Those come from the separate desktop instal
 4. Fill in the submission:
    - **Pricing:** Free. Markets: all.
    - **Properties:** Category *Music*, subcategory *Music production* (or *Utilities & tools*).
-   - **Privacy policy URL:** host [PRIVACY.md](PRIVACY.md) somewhere public, e.g. GitHub, and
-     link it. ToneSphere collects no data.
+   - **Privacy policy URL:** <https://avishakeadhikary.github.io/tone-sphere/legal/privacy-policy/>
+     (published from `docs/legal/` by `.github/workflows/pages.yml`). ToneSphere collects no data.
    - **Age ratings:** complete the questionnaire. Answer "no" to everything, giving the
      lowest rating.
    - **Store listing:** use the text in [listing.md](listing.md). Take screenshots with
@@ -48,25 +51,28 @@ registration cannot ship in an MSIX. Those come from the separate desktop instal
      [listing.md](listing.md).
    - **Submission options → Notes for certification:** paste the tester notes from
      [listing.md](listing.md).
-5. **GPLv3 obligation.** Publish the full source, e.g. a public GitHub repository, and link
-   it in the description and the About page. Every Store release must have matching
-   source available.
+5. **GPLv3 obligation.** The source is public at <https://github.com/AvishakeAdhikary/tone-sphere>,
+   and every GitHub release carries the matching `ToneSphere-<version>-source.zip`. Upload the
+   `.appx` from the same release, so the Store version always has matching source.
 
 ## Local testing before upload
 ```powershell
-# Sign with the local dev certificate (CN=Neural Nexus Studios, created on this PC) and test in the VM:
-signtool sign /fd SHA256 /f packaging\msix\tonesphere-dev.pfx /p tonesphere-dev ui\release-store\ToneSphere-0.1.0.appx
+# A local test certificate (git-ignored, never committed), then sign and test in the VM:
+New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=Neural Nexus Studios' -CertStoreLocation Cert:\CurrentUser\My |
+  Export-PfxCertificate -FilePath packaging\msix\tonesphere-dev.pfx -Password (Read-Host -AsSecureString 'pfx password')
+signtool sign /fd SHA256 /f packaging\msix\tonesphere-dev.pfx /p <password> ui\release-store\ToneSphere-<version>.appx
 .\vm\Test-Msix.ps1     # install, launch, sign-in startup, alias, protocol, CLI
 .\vm\Test-Wack.ps1     # Windows App Certification Kit
 ```
 The local `publisher` must stay `CN=Neural Nexus Studios` for the dev certificate to sign the package.
 Change it to the Partner Center value only for the upload build.
 
-## Driver Pack (outside the Store)
+## Desktop installer (outside the Store)
 `cd ui; npm run dist:win` builds `ui\release\ToneSphere-Setup-<version>.exe`. It contains:
 - the ToneSphere ASIO driver (x64 + x86, user-mode; works on every PC);
-- the ToneSphere virtual audio driver.
+- in development builds only, the ToneSphere virtual audio driver.
 
-The virtual audio driver is **test-signed**. It only loads with test signing enabled, so
-public use needs Microsoft attestation signing, which requires an EV certificate. Until then,
-the Store app uses Compatibility mode for virtual devices.
+The virtual audio driver is **test-signed**. It only loads with test signing enabled, so public
+builds leave it out until Microsoft attestation-signs it (which requires an EV certificate).
+Until then virtual devices come from VB-CABLE in Compatibility mode, which the desktop app
+installs from Settings > Devices > Install drivers.

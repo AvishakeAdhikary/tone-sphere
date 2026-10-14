@@ -1,6 +1,6 @@
 # Runs the Windows App Certification Kit against the Store package inside a pristine test VM
 # (WACK installs the package it tests, so this keeps the host clean).
-#   .\vm\Test-Wack.ps1 [-Package ui\release-store\ToneSphere-0.1.0.appx]
+#   .\vm\Test-Wack.ps1 [-Package ui\release-store\ToneSphere-<version>.appx]
 param([string]$VmName = 'ToneSphere-DriverTest', [string]$Package)
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'vmcommon.ps1')

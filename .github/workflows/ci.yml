@@ -1,0 +1,243 @@
+# Builds, tests and packages ToneSphere on every push and pull request. Every green push to main
+# is a release: the version is the latest v* tag plus one patch ([minor] / [major] in the commit
+# message bump more; the VERSION file is the floor, see scripts/release-version.mjs).
+# The downloads are tested the way a user meets them: installed on a clean runner and launched.
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: gitleaks (whole history)
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.28.0/gitleaks_8.28.0_linux_x64.tar.gz | tar -xz gitleaks
+          ./gitleaks git --redact --no-banner --exit-code 1 .
+
+  version:
+    name: Version
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      previous: ${{ steps.v.outputs.previous }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Release script tests
+        run: node --test scripts/
+      - id: v
+        name: Next version
+        run: |
+          echo "version=$(node scripts/release-version.mjs next)" >> "$GITHUB_OUTPUT"
+          echo "previous=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)" >> "$GITHUB_OUTPUT"
+          echo "Releasing $(node scripts/release-version.mjs next)"
+
+  windows:
+    name: Windows build, tests and packages
+    needs: version
+    runs-on: windows-2022
+    env:
+      TS_DEPS_DIR: ${{ github.workspace }}\.deps
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - uses: actions/cache@v4
+        with:
+          path: .deps
+          key: deps-win-${{ hashFiles('CMakeLists.txt', 'engine/CMakeLists.txt') }}
+      - name: Stamp version
+        run: node scripts/release-version.mjs stamp ${{ needs.version.outputs.version }}
+      - name: Build x64 and run unit tests
+        shell: pwsh
+        run: ./scripts/build.ps1 -Test
+      - name: Build x86 (ASIO driver for 32-bit DAWs)
+        shell: pwsh
+        run: ./scripts/build.ps1 -Arch x86
+      - name: UI install, typecheck, catalogs, build
+        working-directory: ui
+        run: |
+          npm ci --no-audit --no-fund
+          npm run check:locales
+          npm run build
+      - name: UI end-to-end tests (Electron, mock engine)
+        working-directory: ui
+        run: npx playwright test
+      - name: Engine integration tests (no audio hardware needed)
+        shell: pwsh
+        run: |
+          node tests/integration/crash-report.mjs
+          $engine = Start-Process .\build\x64-release\bin\tonesphere-engine.exe -PassThru
+          Start-Sleep -Seconds 4
+          $failed = 0
+          foreach ($t in 'http-rpc', 'meters-subscribe', 'instruments') {
+            node "tests/integration/$t.mjs"
+            if ($LASTEXITCODE) { $failed++ }
+          }
+          Stop-Process -Id $engine.Id -Force
+          if ($failed) { throw "$failed integration suite(s) failed" }
+      - name: VB-CABLE signature check (official download)
+        # Needs vb-audio.com to be reachable; the result is informative, not a gate.
+        continue-on-error: true
+        run: node tests/integration/vbcable-signature.mjs
+      - name: Package (installer, portable zip, Store package)
+        working-directory: ui
+        shell: pwsh
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          $v = '${{ needs.version.outputs.version }}'
+          npx electron-builder --win nsis
+          Compress-Archive -Path release\win-unpacked\* -DestinationPath "release\ToneSphere-$v-win-x64-portable.zip"
+          npx electron-builder --config electron-builder.store.json --win appx
+          New-Item -ItemType Directory -Force ..\dist | Out-Null
+          Copy-Item "release\ToneSphere-Setup-$v.exe", "release\ToneSphere-$v-win-x64-portable.zip", "release-store\ToneSphere-$v.appx" ..\dist\
+      - uses: actions/upload-artifact@v4
+        with:
+          name: downloads-windows
+          path: dist/*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: windows-test-results
+          path: ui/test-results
+
+  driver:
+    name: Virtual audio driver (compile and sign check)
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the Windows Driver Kit 10.0.26100
+        shell: pwsh
+        run: |
+          $setup = "$env:RUNNER_TEMP\wdksetup.exe"
+          Invoke-WebRequest 'https://download.microsoft.com/download/41fb59c2-1723-45f9-a270-96b73ad58233/KIT_BUNDLE_WDK_MEDIACREATION/wdksetup.exe' -OutFile $setup
+          $p = Start-Process $setup -ArgumentList '/quiet', '/norestart', '/features', '+' -Wait -PassThru
+          if ($p.ExitCode -ne 0 -and $p.ExitCode -ne 3010) { throw "WDK setup failed: $($p.ExitCode)" }
+      - name: Build, catalog and test-sign
+        shell: pwsh
+        run: ./drivers/win/vad/build.ps1
+
+  linux:
+    name: Linux build, tests (and ThreadSanitizer) and AppImage
+    needs: version
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Packages
+        run: sudo apt-get update && sudo apt-get install -y build-essential cmake ninja-build pkg-config libpipewire-0.3-dev
+      - name: Stamp version
+        run: node scripts/release-version.mjs stamp ${{ needs.version.outputs.version }}
+      - name: Build and unit tests
+        run: |
+          cmake -S . -B build/linux-release -G Ninja -DCMAKE_BUILD_TYPE=Release -DTONESPHERE_BUILD_TESTS=ON
+          cmake --build build/linux-release -j"$(nproc)"
+          ctest --test-dir build/linux-release --output-on-failure
+      - name: Unit tests under ThreadSanitizer (multi-core DSP, rings, bridges)
+        run: |
+          cmake -S . -B build/tsan -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DTONESPHERE_BUILD_TESTS=ON -DTONESPHERE_LTO=OFF \
+            -DCMAKE_CXX_FLAGS="-fsanitize=thread -fno-omit-frame-pointer" -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=thread
+          cmake --build build/tsan -j"$(nproc)" --target tonesphere_parallel_tests tonesphere_core_tests
+          TSAN_OPTIONS=halt_on_error=1 ./build/tsan/bin/tonesphere_parallel_tests
+          TSAN_OPTIONS=halt_on_error=1 ./build/tsan/bin/tonesphere_core_tests
+      - name: Crash report test
+        run: node tests/integration/crash-report.mjs build/linux-release/bin
+      - name: AppImage
+        working-directory: ui
+        run: |
+          npm ci --no-audit --no-fund
+          npm run dist:linux
+          mkdir -p ../dist && cp release/*.AppImage ../dist/
+      - name: Smoke test the AppImage
+        run: bash .github/scripts/smoke-linux.sh dist/ToneSphere-${{ needs.version.outputs.version }}-x86_64.AppImage ${{ needs.version.outputs.version }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: downloads-linux
+          path: dist/*
+          if-no-files-found: error
+
+  smoke-windows:
+    name: Install and launch on a clean Windows
+    needs: [version, windows]
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/scripts
+      - uses: actions/download-artifact@v4
+        with:
+          name: downloads-windows
+          path: dist
+      - name: Install, launch, check, uninstall
+        shell: pwsh
+        run: ./.github/scripts/smoke-windows.ps1 -Installer "dist\ToneSphere-Setup-${{ needs.version.outputs.version }}.exe" -Version ${{ needs.version.outputs.version }}
+
+  release:
+    name: Release
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [secrets, version, windows, driver, linux, smoke-windows]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    concurrency: release
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: downloads-*
+          path: dist
+          merge-multiple: true
+      - name: Source, checksums, notes
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          PREVIOUS: ${{ needs.version.outputs.previous }}
+        run: |
+          git archive --format=zip --prefix="ToneSphere-$VERSION/" -o "dist/ToneSphere-$VERSION-source.zip" HEAD
+          (cd dist && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt)
+          node scripts/release-version.mjs notes "$VERSION" "$PREVIOUS" > notes.md
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            echo "v$VERSION already exists"
+            exit 0
+          fi
+          gh release create "v$VERSION" dist/* --target "$GITHUB_SHA" --title "ToneSphere $VERSION" --notes-file notes.md --latest

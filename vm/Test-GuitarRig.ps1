@@ -1,7 +1,7 @@
 # Guitar Rig live scenario in a pristine test VM:
 #   ToneSphere desktop installer + VC++ runtime + this PC's Guitar Rig 7 (set to the ToneSphere ASIO driver),
 #   then tests/integration/guitar-rig-scenario.mjs in the VM's desktop session.
-#   .\vm\Test-GuitarRig.ps1 [-Installer ui\release\ToneSphere-Setup-0.1.0.exe] [-Screenshot path.png]
+#   .\vm\Test-GuitarRig.ps1 [-Installer ui\release\ToneSphere-Setup-<version>.exe] [-Screenshot path.png]
 param([string]$VmName = 'ToneSphere-DriverTest', [string]$Installer, [string]$Screenshot)
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'vmcommon.ps1')

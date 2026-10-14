@@ -26,7 +26,10 @@ cmd /c "`"$vcvars`" $target >nul && set" | ForEach-Object {
 Remove-Item env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
 
 $tests = if ($Arch -eq 'x64') { 'ON' } else { 'OFF' }
-cmake -S $root -B $build -G Ninja "-DCMAKE_BUILD_TYPE=$Config" "-DTONESPHERE_BUILD_TESTS=$tests"
+$cmakeArgs = @("-DCMAKE_BUILD_TYPE=$Config", "-DTONESPHERE_BUILD_TESTS=$tests")
+# CI keeps the downloaded SDKs (VST3, Catch2, RNNoise, json) in one cached folder.
+if ($env:TS_DEPS_DIR) { $cmakeArgs += "-DFETCHCONTENT_BASE_DIR=$env:TS_DEPS_DIR\$Arch" }
+cmake -S $root -B $build -G Ninja @cmakeArgs
 if ($LASTEXITCODE) { throw 'CMake configure failed' }
 cmake --build $build --parallel
 if ($LASTEXITCODE) { throw 'Build failed' }

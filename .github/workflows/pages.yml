@@ -1,0 +1,55 @@
+# Publishes docs/ as the project's GitHub Pages site: the legal documents the Microsoft Store
+# links to, and the engineering documentation. Built with the same Jekyll and plugin set as
+# GitHub's own Pages build, so docs/_config.yml means the same thing here as it did there.
+#
+# Every push that touches docs/ builds the site, so a broken page fails on the branch that
+# broke it; only main deploys.
+name: Pages
+
+on:
+  push:
+    paths:
+      - 'docs/**'
+      - '.github/workflows/pages.yml'
+  pull_request:
+    paths:
+      - 'docs/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: pages
+        uses: actions/configure-pages@v5
+        if: github.ref == 'refs/heads/main'
+      - uses: actions/jekyll-build-pages@v1
+        with:
+          source: ./docs
+          destination: ./_site
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./_site
+
+  deploy:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

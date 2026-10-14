@@ -1,4 +1,4 @@
-// tonesphere-setup: installs/removes the ToneSphere Driver Pack components (run elevated).
+// tonesphere-setup: installs/removes the ToneSphere drivers and VB-CABLE (run elevated).
 //   tonesphere-setup status
 //   tonesphere-setup install-asio  <dir> [--engine <path>] [--ui <path>]
 //   tonesphere-setup uninstall-asio <dir>

@@ -367,7 +367,7 @@ void AppAudio::applyRouting(Engine& e) {
             if (want && !cableOut_.count(exe)) {
                 NodeModel* dev = freeDevice(Bin::VirtualOut);
                 if (!dev) {
-                    n.streamError = "Isolating an app needs a free virtual output (install the ToneSphere Driver Pack or a virtual cable)";
+                    n.streamError = "Isolating an app needs a free virtual output (install VB-CABLE in Settings › Devices)";
                     continue;
                 }
                 if (setAppEndpoint(n.app.pids, false, dev->device.appEndpointId)) {
@@ -392,7 +392,7 @@ void AppAudio::applyRouting(Engine& e) {
             if (needed && !cableIn_.count(exe)) {
                 NodeModel* dev = freeDevice(Bin::VirtualIn);
                 if (!dev) {
-                    n.streamError = "Sending sound into an app needs a free virtual microphone (install the ToneSphere Driver Pack or a virtual cable)";
+                    n.streamError = "Sending sound into an app needs a free virtual microphone (install VB-CABLE in Settings › Devices)";
                     continue;
                 }
                 if (setAppEndpoint(n.app.pids, true, dev->device.appEndpointId)) {

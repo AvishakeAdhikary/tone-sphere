@@ -1,6 +1,6 @@
 # Sideload-tests the Store package in a pristine test VM: trusts the dev certificate,
 # installs the MSIX, launches ToneSphere from its tile like a user would, and checks the engine.
-#   .\vm\Test-Msix.ps1 [-Package ui\release-store\ToneSphere-0.1.0.appx]
+#   .\vm\Test-Msix.ps1 [-Package ui\release-store\ToneSphere-<version>.appx]
 param([string]$VmName = 'ToneSphere-DriverTest', [string]$Package)
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'vmcommon.ps1')
@@ -31,7 +31,7 @@ try {
     Get-Content C:\ToneSphereTest\install.txt -ErrorAction SilentlyContinue
     "package: $(Get-Content C:\ToneSphereTest\pfn.txt -ErrorAction SilentlyContinue)"
     "discovery: $($found.FullName)"
-    Get-Process -ErrorAction SilentlyContinue | Where-Object Name -like '*exTone*' | Select-Object Name, SessionId, Path -Unique | Format-Table -AutoSize | Out-String -Width 300
+    Get-Process -ErrorAction SilentlyContinue | Where-Object Name -like '*oneSphere*' | Select-Object Name, SessionId, Path -Unique | Format-Table -AutoSize | Out-String -Width 300
     if ($found) {
       Start-Sleep -Seconds 3
       '--- tonesphere-ctl (finds the packaged engine by itself) ---'
@@ -46,13 +46,13 @@ try {
     "tonesphere: protocol registered: $(Test-Path Registry::HKEY_CLASSES_ROOT\tonesphere)"
     "alias present: $(Test-Path C:\Users\tonesphere\AppData\Local\Microsoft\WindowsApps\tonesphere-engine.exe)"
     '--- simulated sign-in: stop everything, run the startup entry (engine, no arguments) ---'
-    Get-Process -ErrorAction SilentlyContinue | Where-Object Name -like '*exTone*' | Stop-Process -Force -ErrorAction SilentlyContinue
+    Get-Process -ErrorAction SilentlyContinue | Where-Object Name -like '*oneSphere*' | Stop-Process -Force -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 2
     Set-Content C:\ToneSphereTest\signin.cmd '@start "" C:\Users\tonesphere\AppData\Local\Microsoft\WindowsApps\tonesphere-engine.exe'
     schtasks /create /f /tn ToneSphereSignin /sc once /st 00:00 /ru tonesphere /it /rl highest /tr C:\ToneSphereTest\signin.cmd 2>$null | Out-Null
     schtasks /run /tn ToneSphereSignin 2>$null | Out-Null
     Start-Sleep -Seconds 20
-    Get-CimInstance Win32_Process | Where-Object Name -like '*exTone*' | Select-Object Name, CommandLine | Format-Table -AutoSize | Out-String -Width 300
+    Get-CimInstance Win32_Process | Where-Object Name -like '*oneSphere*' | Select-Object Name, CommandLine | Format-Table -AutoSize | Out-String -Width 300
   }
 } finally {
   Remove-PSSession $s

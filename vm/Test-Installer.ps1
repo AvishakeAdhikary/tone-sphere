@@ -1,6 +1,6 @@
 # Installs the desktop installer in a pristine test VM, launches ToneSphere like a user would
 # (the app starts the engine), and runs the virtual-device end-to-end test against it.
-#   .\vm\Test-Installer.ps1 [-Installer ui\release\ToneSphere-Setup-0.1.0.exe]
+#   .\vm\Test-Installer.ps1 [-Installer ui\release\ToneSphere-Setup-<version>.exe]
 param([string]$VmName = 'ToneSphere-DriverTest', [string]$Installer, [int]$Seconds = 8)
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'vmcommon.ps1')
@@ -27,7 +27,7 @@ try {
     $deadline = (Get-Date).AddSeconds(120)
     do { Start-Sleep -Seconds 2 } while (-not (Test-Path C:\Users\tonesphere\AppData\Local\ToneSphere\engine.json) -and (Get-Date) -lt $deadline)
     Start-Sleep -Seconds 2
-    Get-Process -ErrorAction SilentlyContinue | Where-Object Name -like '*exTone*' | Select-Object Name, SessionId -Unique | Format-Table | Out-String
+    Get-Process -ErrorAction SilentlyContinue | Where-Object Name -like '*oneSphere*' | Select-Object Name, SessionId -Unique | Format-Table | Out-String
     $cmd = "cmd /c C:\ToneSphereTest\node.exe C:\ToneSphereTest\vad-audio.mjs C:\ToneSphereTest\audio-probe.exe $secs > C:\ToneSphereTest\out.txt 2>&1"
     schtasks /create /f /tn ToneSphereT /sc once /st 00:00 /ru tonesphere /it /rl highest /tr $cmd 2>$null | Out-Null
     schtasks /run /tn ToneSphereT 2>$null | Out-Null

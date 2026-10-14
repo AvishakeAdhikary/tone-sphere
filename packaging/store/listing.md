@@ -23,7 +23,9 @@ When you need more:
 • Effects on any input, output or mix: noise suppression, noise gate, EQ, compressor, limiter, auto-ducking, delay
 • Capture any app's audio separately, or send one app to its own output
 • Feed a mix into any app's microphone
-• ASIO: use your audio interface in several DAWs at once with the ToneSphere ASIO driver (optional Driver Pack)
+• ASIO: use your audio interface in several DAWs at once with the ToneSphere ASIO driver (desktop installer)
+• VST3 effects and instruments, with an on-screen keyboard and MIDI keyboards
+• Uses several processor cores for heavy effect chains, automatically
 • Network audio: VBAN send/receive, compatible with VoiceMeeter and VBAN apps
 • Scenes with global hotkeys, push-to-talk, mute-all
 • Multitrack recording and an instant-replay buffer
@@ -31,7 +33,7 @@ When you need more:
 • Automatic clock-drift compensation between devices, so no clicks or slow drift
 • Light and dark mode, keyboard accessible, lives quietly in the tray
 
-ToneSphere is free software under the GNU GPL v3. Source code: <add your repository URL>.
+ToneSphere is free software under the GNU GPL v3. Source code: https://github.com/AvishakeAdhikary/tone-sphere
 
 ## Keywords
 audio router, virtual audio cable, asio, mixer, streaming, obs, discord, voicemeeter alternative
@@ -48,7 +50,7 @@ ToneSphere needs no account or sign-in. To test it:
 2. Drag that app's card onto a speaker or headphones card under "Physical outputs". The connection line appears, and the meters show the app's audio flowing through ToneSphere.
 3. Optional tone test: open the "Matrix" tab and click the cell where "Test tone" meets your speakers. You will hear a 440 Hz tone. Click the cell again to stop it.
 
-The optional ToneSphere Driver Pack (ASIO and virtual audio drivers) is a separate download. None of the app's core functions need it.
+The optional ToneSphere desktop installer (with the ASIO driver) is a separate download. None of the app's core functions need it.
 
 ## Privacy policy
-See PRIVACY.md. ToneSphere does not collect, store or transmit personal data.
+https://avishakeadhikary.github.io/tone-sphere/legal/privacy-policy/ ToneSphere does not collect, store or transmit personal data.
