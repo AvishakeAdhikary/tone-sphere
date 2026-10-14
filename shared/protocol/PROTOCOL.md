@@ -112,6 +112,7 @@ See `ui/src/shared/protocol.ts` (the source of truth for types) and `engine/src/
 - **Devices that aren't connected yet** become placeholders. They bind to the device when it appears.
 - **A device that returns under a new id** (another USB port, for example) takes over the routing of its old entry. This works by label or by preset rule.
 - **Skins** are UI-only (`settings.skin`, `settings.customSkins`). The format is in `ui/src/renderer/skins.ts`.
+- **Language** is UI-only too: `settings.language` is `system`, `en` or `hi` (catalogs in `ui/src/renderer/locales`).
 
 ## Multi-core DSP
 

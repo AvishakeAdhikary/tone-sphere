@@ -82,6 +82,11 @@ json Engine::call(const std::string& method, const json& params) {
         }
         if (p.contains("theme")) settings_.theme = p["theme"].get<std::string>();
         if (p.contains("advancedMode")) settings_.advancedMode = p["advancedMode"].get<bool>();
+        if (p.contains("language") && p["language"].is_string()) {
+            const std::string l = p["language"].get<std::string>();
+            if (l != "system" && l != "en" && l != "hi") fail("That language isn't available");
+            settings_.language = l;
+        }
         if (p.contains("midiInstrument")) {
             settings_.midiInstrument = p["midiInstrument"].is_object() ? p["midiInstrument"] : json(nullptr);
             resolveMidiTargetLocked();

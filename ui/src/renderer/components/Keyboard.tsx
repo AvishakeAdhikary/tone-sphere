@@ -3,6 +3,7 @@
 // Z / X shift the octave.
 import { useEffect, useRef, useState } from 'react';
 import { engine } from '../store';
+import { t } from '../i18n';
 
 const NAMES = ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'B'];
 const BLACK = new Set([1, 3, 6, 8, 10]);
@@ -62,14 +63,14 @@ export function Keyboard({ nodeId, fxId }: { nodeId: string; fxId: string }) {
   return (
     <div className="keyboard" role="group" aria-label={`On-screen keyboard, octave ${octave}`} tabIndex={0} onKeyDown={onKeyDown} onKeyUp={onKeyUp}>
       <div className="keyboard-bar">
-        <button className="btn small" onClick={() => setOctave((o) => Math.max(0, o - 1))} aria-label="Octave down" title="Octave down (Z)">
+        <button className="btn small" onClick={() => setOctave((o) => Math.max(0, o - 1))} aria-label={t("Octave down")} title={t("Octave down (Z)")}>
           −
         </button>
         <span className="mono small">C{octave}–C{octave + 2}</span>
-        <button className="btn small" onClick={() => setOctave((o) => Math.min(8, o + 1))} aria-label="Octave up" title="Octave up (X)">
+        <button className="btn small" onClick={() => setOctave((o) => Math.min(8, o + 1))} aria-label={t("Octave up")} title={t("Octave up (X)")}>
           +
         </button>
-        <span className="hint">Click here, then play with A–K (W E T Y U for sharps).</span>
+        <span className="hint">{t("Click here, then play with A–K (W E T Y U for sharps).")}</span>
       </div>
       <div className="keys">
         {notes.map((n) => {

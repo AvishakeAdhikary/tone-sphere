@@ -2,6 +2,7 @@ import { Circle, Headphones, LayoutGrid, Settings, Square, Workflow } from 'luci
 import { act, engine, useStore } from '../store';
 import { SceneMenu } from './SceneMenu';
 import logo from '../assets/logo.png';
+import { t } from '../i18n';
 
 export function TitleBar() {
   const state = useStore((s) => s.state);
@@ -32,27 +33,27 @@ export function TitleBar() {
     <header className="titlebar">
       <div className="titlebar-brand">
         <img className="brand-mark" src={logo} alt="" aria-hidden width={26} height={26} />
-        <span className="brand-name">ToneSphere</span>
+        <span className="brand-name">{t("ToneSphere")}</span>
       </div>
 
-      <div className="segmented no-drag" role="tablist" aria-label="View">
+      <div className="segmented no-drag" role="tablist" aria-label={t("View")}>
         <button
           role="tab"
           aria-selected={view === 'simple'}
           className={view === 'simple' ? 'active' : ''}
           onClick={() => setView('simple')}
-          title="Simple view: drag a source onto a destination"
+          title={t("Simple view: drag a source onto a destination")}
         >
-          <Workflow size={15} /> Routing
+          <Workflow size={15} /> {t('Routing')}
         </button>
         <button
           role="tab"
           aria-selected={view === 'matrix'}
           className={view === 'matrix' ? 'active' : ''}
           onClick={() => setView('matrix')}
-          title="Matrix view: every source × every destination"
+          title={t("Matrix view: every source × every destination")}
         >
-          <LayoutGrid size={15} /> Matrix
+          <LayoutGrid size={15} /> {t('Matrix')}
         </button>
       </div>
 
@@ -87,15 +88,15 @@ export function TitleBar() {
           title={recording ? 'Stop recording' : 'Record (selected item, or all mixes and outputs)'}
         >
           {recording ? <Square size={14} fill="currentColor" /> : <Circle size={14} fill="currentColor" />}
-          <span>{recording ? 'Stop' : 'Rec'}</span>
+          <span>{recording ? t('Stop') : t('Rec')}</span>
         </button>
       )}
 
       <button
         className="icon-btn no-drag"
         onClick={() => useStore.getState().setWizardOpen(true)}
-        title="Hear my instrument or microphone"
-        aria-label="Hear my instrument or microphone"
+        title={t("Hear my instrument or microphone")}
+        aria-label={t("Hear my instrument or microphone")}
         disabled={!state}
       >
         <Headphones size={17} />
@@ -103,8 +104,8 @@ export function TitleBar() {
       <button
         className="icon-btn no-drag"
         onClick={() => setSettingsOpen(true)}
-        title="Settings"
-        aria-label="Settings"
+        title={t("Settings")}
+        aria-label={t("Settings")}
         disabled={!state}
       >
         <Settings size={17} />

@@ -1,6 +1,7 @@
 import { Loader2, PlugZap } from 'lucide-react';
 import type { ConnectionStatus } from '../engine/client';
 import { engine } from '../store';
+import { t } from '../i18n';
 
 export function EngineMissing({ status }: { status: ConnectionStatus }) {
   const busy = status === 'connecting' || status === 'connected';
@@ -16,7 +17,7 @@ export function EngineMissing({ status }: { status: ConnectionStatus }) {
         </p>
         {!busy && (
           <button className="btn primary" onClick={() => void engine.connect()}>
-            Try again
+            {t("Try again")}
           </button>
         )}
       </div>

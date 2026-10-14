@@ -4,6 +4,7 @@ import { isSource, type FxInfo, type FxParamInfo, type FxType, type NodeInfo } f
 import { act, engine, useStore } from '../store';
 import { Keyboard } from './Keyboard';
 import { Popover } from './Popover';
+import { t } from '../i18n';
 
 const BUILTINS: { type: FxType; name: string; hint: string }[] = [
   { type: 'denoise', name: 'Noise suppression', hint: 'Removes background noise from voice (AI, RNNoise).' },
@@ -54,22 +55,22 @@ function FxItem({ node, fx, index, count }: { node: NodeInfo; fx: FxInfo; index:
           {fx.reductionDb != null && fx.reductionDb < -0.5 && <span className="gr">{fx.reductionDb.toFixed(1)} dB</span>}
         </button>
         {fx.instrument && (
-          <button className={`icon-btn subtle ${keys ? 'on' : ''}`} title="On-screen keyboard" aria-pressed={keys} onClick={() => setKeys(!keys)}>
+          <button className={`icon-btn subtle ${keys ? 'on' : ''}`} title={t("On-screen keyboard")} aria-pressed={keys} onClick={() => setKeys(!keys)}>
             <Piano size={13} />
           </button>
         )}
         {fx.hasEditor && (
-          <button className="icon-btn subtle" title="Open plugin window" onClick={() => void act(engine.call('fx.openEditor', { nodeId: node.id, fxId: fx.id }))}>
+          <button className="icon-btn subtle" title={t("Open plugin window")} onClick={() => void act(engine.call('fx.openEditor', { nodeId: node.id, fxId: fx.id }))}>
             <ExternalLink size={13} />
           </button>
         )}
-        <button className="icon-btn subtle" disabled={index === 0} title="Move up" onClick={() => void act(engine.call('fx.move', { nodeId: node.id, fxId: fx.id, index: index - 1 }))}>
+        <button className="icon-btn subtle" disabled={index === 0} title={t("Move up")} onClick={() => void act(engine.call('fx.move', { nodeId: node.id, fxId: fx.id, index: index - 1 }))}>
           <ChevronUp size={13} />
         </button>
-        <button className="icon-btn subtle" disabled={index === count - 1} title="Move down" onClick={() => void act(engine.call('fx.move', { nodeId: node.id, fxId: fx.id, index: index + 1 }))}>
+        <button className="icon-btn subtle" disabled={index === count - 1} title={t("Move down")} onClick={() => void act(engine.call('fx.move', { nodeId: node.id, fxId: fx.id, index: index + 1 }))}>
           <ChevronDown size={13} />
         </button>
-        <button className="icon-btn subtle danger" title="Remove effect" onClick={() => void act(engine.call('fx.remove', { nodeId: node.id, fxId: fx.id }))}>
+        <button className="icon-btn subtle danger" title={t("Remove effect")} onClick={() => void act(engine.call('fx.remove', { nodeId: node.id, fxId: fx.id }))}>
           <Trash2 size={13} />
         </button>
       </div>
@@ -81,8 +82,8 @@ function FxItem({ node, fx, index, count }: { node: NodeInfo; fx: FxInfo; index:
       {fx.instrument && (
         <label className="toggle-row compact">
           <span className="grow">
-            <span>My MIDI keyboard plays this</span>
-            <span className="hint">Notes from connected MIDI devices go to this instrument.</span>
+            <span>{t("My MIDI keyboard plays this")}</span>
+            <span className="hint">{t("Notes from connected MIDI devices go to this instrument.")}</span>
           </span>
           <input
             type="checkbox"
@@ -98,9 +99,9 @@ function FxItem({ node, fx, index, count }: { node: NodeInfo; fx: FxInfo; index:
         <div className="fx-params">
           {fx.type === 'ducker' && (
             <label className="param">
-              <span className="param-name">Duck when</span>
+              <span className="param-name">{t("Duck when")}</span>
               <select value={fx.sidechain ?? ''} onChange={(e) => update({ sidechain: e.target.value || null })}>
-                <option value="">— choose a source —</option>
+                <option value="">{t("— choose a source —")}</option>
                 {state.nodes
                   .filter((n) => isSource(n.bin) && n.id !== node.id)
                   .map((n) => (
@@ -138,7 +139,7 @@ function FxItem({ node, fx, index, count }: { node: NodeInfo; fx: FxInfo; index:
               </label>
             ),
           )}
-          {fx.params.length === 0 && fx.type !== 'ducker' && <div className="muted small">No adjustable settings. Use the plugin window.</div>}
+          {fx.params.length === 0 && fx.type !== 'ducker' && <div className="muted small">{t("No adjustable settings. Use the plugin window.")}</div>}
         </div>
       )}
     </div>
@@ -162,7 +163,7 @@ export function FxChain({ node }: { node: NodeInfo }) {
 
   return (
     <div className="fx-chain">
-      {node.fx.length === 0 && <div className="muted small">No effects. Add noise suppression, EQ, compression or your own VST3 plugins.</div>}
+      {node.fx.length === 0 && <div className="muted small">{t("No effects. Add noise suppression, EQ, compression or your own VST3 plugins.")}</div>}
       {node.fx.map((fx, i) => (
         <FxItem key={fx.id} node={node} fx={fx} index={i} count={node.fx.length} />
       ))}
@@ -171,7 +172,7 @@ export function FxChain({ node }: { node: NodeInfo }) {
       </button>
       {menu && (
         <Popover anchor={btn.current} onClose={() => setMenu(false)} label="Add effect" width={320}>
-          <div className="popover-title">Built-in effects</div>
+          <div className="popover-title">{t("Built-in effects")}</div>
           {BUILTINS.map((b) => (
             <button key={b.type} className="menu-item two-line" onClick={() => add(b.type)}>
               <span>{b.name}</span>
@@ -179,7 +180,7 @@ export function FxChain({ node }: { node: NodeInfo }) {
             </button>
           ))}
           <div className="popover-title with-action">
-            <span>VST3 plugins</span>
+            <span>{t("VST3 plugins")}</span>
             <button
               className="icon-btn subtle"
               title={state.pluginsScanning ? 'Scanning…' : 'Scan for plugins'}

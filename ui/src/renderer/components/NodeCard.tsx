@@ -6,6 +6,7 @@ import { act, engine, findRoute, useStore } from '../store';
 import { Meter } from './Meter';
 import { Fader } from './Fader';
 import { SendToMenu } from './SendToMenu';
+import { t } from '../i18n';
 
 const DRAG_TYPE = 'application/x-tonesphere-node';
 
@@ -104,11 +105,11 @@ export const NodeCard = memo(function NodeCard({ node }: { node: NodeInfo }) {
           <div className="node-name" title={node.name}>
             {node.name}
             {node.isDefault && (
-              <span className="badge" title="Windows default device">
+              <span className="badge" title={t("Windows default device")}>
                 Default
               </span>
             )}
-            {node.app?.pinned && <Pin size={11} className="pin" aria-label="Remembered app" />}
+            {node.app?.pinned && <Pin size={11} className="pin" aria-label={t("Remembered app")} />}
           </div>
           <div className="node-sub">
             {status ? <span className={`status s-${node.state}`}>{status} ·</span> : null}
@@ -137,7 +138,7 @@ export const NodeCard = memo(function NodeCard({ node }: { node: NodeInfo }) {
         {node.bin === 'bus' && (
           <button
             className={`icon-btn subtle ${node.solo ? 'on' : ''}`}
-            title="Listen (solo this mix on monitor outputs)"
+            title={t("Listen (solo this mix on monitor outputs)")}
             aria-pressed={node.solo}
             onClick={() => void act(engine.call('node.update', { id: node.id, solo: !node.solo }))}
           >

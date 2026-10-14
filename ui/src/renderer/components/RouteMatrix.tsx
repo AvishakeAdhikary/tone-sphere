@@ -1,6 +1,7 @@
 import type { NodeInfo, RouteInfo } from '@shared/protocol';
 import { act, engine } from '../store';
 import { formatDb } from './Fader';
+import { t } from '../i18n';
 
 /** Channel-level crosspoint grid for one connection (ASIO Link Pro's "mapping window"). */
 export function RouteMatrix({ route, from, to }: { route: RouteInfo; from: NodeInfo; to: NodeInfo }) {
@@ -17,16 +18,16 @@ export function RouteMatrix({ route, from, to }: { route: RouteInfo; from: NodeI
   return (
     <div className="route-matrix">
       <div className="preset-row">
-        <button className="btn small" onClick={() => preset('one-to-one')} title="Channel 1 → 1, 2 → 2, …">1 → 1</button>
-        <button className="btn small" onClick={() => preset('mono-sum')} title="Every input channel into every output channel">Mix to all</button>
-        <button className="btn small" onClick={() => preset('spread')} title="Mono to both sides / wrap extra channels">Spread</button>
-        <button className="btn small" onClick={() => preset('clear')}>Clear</button>
+        <button className="btn small" onClick={() => preset('one-to-one')} title={t("Channel 1 → 1, 2 → 2, …")}>1 → 1</button>
+        <button className="btn small" onClick={() => preset('mono-sum')} title={t("Every input channel into every output channel")}>{t("Mix to all")}</button>
+        <button className="btn small" onClick={() => preset('spread')} title={t("Mono to both sides / wrap extra channels")}>{t("Spread")}</button>
+        <button className="btn small" onClick={() => preset('clear')}>{t("Clear")}</button>
       </div>
       <div className="xp-scroll">
         <table className="xp-grid">
           <thead>
             <tr>
-              <th className="xp-corner">in ↓ out →</th>
+              <th className="xp-corner">{t("in ↓ out →")}</th>
               {toNames.map((n, t) => (
                 <th key={t} title={n}>
                   {n}

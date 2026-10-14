@@ -220,7 +220,7 @@ json Engine::state() {
                      {"startWithSystem", settings_.startWithSystem}, {"startMinimized", settings_.startMinimized},
                      {"hotkeys", settings_.hotkeys},           {"replayBufferSeconds", settings_.replayBufferSeconds},
                      {"recordFolder", settings_.recordFolder}, {"theme", settings_.theme}, {"pluginFolders", settings_.pluginFolders}, {"oscPort", settings_.oscPort}, {"midiMappings", settings_.midiMappings}, {"skin", settings_.skin}, {"customSkins", settings_.customSkins},
-                     {"advancedMode", settings_.advancedMode}, {"dspThreads", settings_.dspThreads}, {"midiInstrument", settings_.midiInstrument}};
+                     {"advancedMode", settings_.advancedMode}, {"dspThreads", settings_.dspThreads}, {"midiInstrument", settings_.midiInstrument}, {"language", settings_.language}};
     json j = {{"version", version()},
               {"protocol", 1},
               {"layoutVersion", layoutVersion_},

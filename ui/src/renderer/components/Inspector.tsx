@@ -7,6 +7,7 @@ import { Fader, formatDb } from './Fader';
 import { Meter } from './Meter';
 import { FxChain } from './FxChain';
 import { RouteMatrix } from './RouteMatrix';
+import { t } from '../i18n';
 
 export function Inspector() {
   const selection = useStore((s) => s.selection);
@@ -26,7 +27,7 @@ export function Inspector() {
     const r = state.routes.find((x) => x.id === selection.id);
     if (!r) return null;
     return (
-      <aside className="inspector" aria-label="Connection details">
+      <aside className="inspector" aria-label={t("Connection details")}>
         <RouteInspector route={r} onClose={close} />
       </aside>
     );
@@ -47,7 +48,7 @@ function NameField({ node }: { node: NodeInfo }) {
     <input
       className="insp-name editable"
       value={v}
-      aria-label="Name"
+      aria-label={t("Name")}
       onChange={(e) => setV(e.target.value)}
       onBlur={commit}
       onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
@@ -129,10 +130,10 @@ function RouteRow({ route, other, direction }: { route: RouteInfo; other: NodeIn
         onChange={(db) => void act(engine.call('route.update', { id: route.id, gainDb: db }))}
       />
       <span className="route-db">{formatDb(route.gainDb)}</span>
-      <button className="icon-btn subtle" title="Edit channels" onClick={() => useStore.getState().select({ type: 'route', id: route.id })}>
+      <button className="icon-btn subtle" title={t("Edit channels")} onClick={() => useStore.getState().select({ type: 'route', id: route.id })}>
         <ExternalLink size={13} />
       </button>
-      <button className="icon-btn subtle danger" title="Disconnect" onClick={() => void act(engine.call('route.disconnect', { id: route.id }))}>
+      <button className="icon-btn subtle danger" title={t("Disconnect")} onClick={() => void act(engine.call('route.disconnect', { id: route.id }))}>
         <X size={13} />
       </button>
     </div>
@@ -159,7 +160,7 @@ function NodeInspector({ node, onClose }: { node: NodeInfo; onClose: () => void 
             {meta.title} · {node.subtitle ?? kindLabel(node)}
           </div>
         </div>
-        <button className="icon-btn" onClick={onClose} aria-label="Close details">
+        <button className="icon-btn" onClick={onClose} aria-label={t("Close details")}>
           <X size={16} />
         </button>
       </div>
@@ -189,8 +190,8 @@ function NodeInspector({ node, onClose }: { node: NodeInfo; onClose: () => void 
 
       {node.bin === 'app-out' && node.app && (
         <div className="insp-section">
-          <h3>Capture mode</h3>
-          <div className="choice-group" role="radiogroup" aria-label="Capture mode">
+          <h3>{t("Capture mode")}</h3>
+          <div className="choice-group" role="radiogroup" aria-label={t("Capture mode")}>
             {(
               [
                 ['copy', 'Copy', 'Hear the app normally and also route a copy of its sound.'],
@@ -221,10 +222,10 @@ function NodeInspector({ node, onClose }: { node: NodeInfo; onClose: () => void 
 
       {node.bin === 'app-in' && node.app && (
         <div className="insp-section">
-          <h3>Microphone for this app</h3>
+          <h3>{t("Microphone for this app")}</h3>
           <p className="muted small">
-            Anything you connect here becomes this app’s microphone. ToneSphere points the app at a private virtual
-            microphone automatically.
+            {t("Anything you connect here becomes this app’s microphone. ToneSphere points the app at a private virtual")}
+            {t("microphone automatically.")}
           </p>
           <Toggle
             label="Remember this app"
@@ -237,7 +238,7 @@ function NodeInspector({ node, onClose }: { node: NodeInfo; onClose: () => void 
 
       {sends.length > 0 && (
         <div className="insp-section">
-          <h3>Sends to</h3>
+          <h3>{t("Sends to")}</h3>
           {sends.map((r) => (
             <RouteRow key={r.id} route={r} other={nodeById(state, r.to)} direction="to" />
           ))}
@@ -245,7 +246,7 @@ function NodeInspector({ node, onClose }: { node: NodeInfo; onClose: () => void 
       )}
       {receives.length > 0 && (
         <div className="insp-section">
-          <h3>Receives from</h3>
+          <h3>{t("Receives from")}</h3>
           {receives.map((r) => (
             <RouteRow key={r.id} route={r} other={nodeById(state, r.from)} direction="from" />
           ))}
@@ -253,13 +254,13 @@ function NodeInspector({ node, onClose }: { node: NodeInfo; onClose: () => void 
       )}
 
       <div className="insp-section">
-        <h3>Effects</h3>
+        <h3>{t("Effects")}</h3>
         <FxChain node={node} />
       </div>
 
       <details className="insp-section advanced" open={state.settings.advancedMode}>
         <summary>
-          <h3>Advanced</h3>
+          <h3>{t("Advanced")}</h3>
         </summary>
         {node.caps.canDisable && (
           <Toggle
@@ -300,55 +301,55 @@ function NodeInspector({ node, onClose }: { node: NodeInfo; onClose: () => void 
         {node.kind === 'vban' && (
           <>
             <label className="num-row">
-              <span className="grow">Host</span>
+              <span className="grow">{t("Host")}</span>
               <input defaultValue={node.settings.host} onBlur={(e) => set({ host: e.target.value })} />
             </label>
             <NumberRow label="Port" unit="" min={1} max={65535} step={1} value={node.settings.port ?? 6980} onChange={(v) => set({ port: v })} />
             <label className="num-row">
-              <span className="grow">Stream name</span>
+              <span className="grow">{t("Stream name")}</span>
               <input defaultValue={node.settings.streamName} maxLength={16} onBlur={(e) => set({ streamName: e.target.value })} />
             </label>
           </>
         )}
         {node.caps.hasControlPanel && (
           <button className="btn small" onClick={() => void act(engine.call('node.openControlPanel', { id: node.id }))}>
-            Open driver control panel
+            {t("Open driver control panel")}
           </button>
         )}
         <dl className="stats">
           {node.sampleRate ? (
             <>
-              <dt>Sample rate</dt>
+              <dt>{t("Sample rate")}</dt>
               <dd>{(node.sampleRate / 1000).toFixed(1)} kHz</dd>
             </>
           ) : null}
           {node.latencyMs != null && (
             <>
-              <dt>Latency</dt>
+              <dt>{t("Latency")}</dt>
               <dd>{node.latencyMs.toFixed(1)} ms</dd>
             </>
           )}
           {node.driftPpm != null && (
             <>
-              <dt>Clock drift</dt>
+              <dt>{t("Clock drift")}</dt>
               <dd>{node.driftPpm.toFixed(0)} ppm</dd>
             </>
           )}
           {node.xruns != null && (
             <>
-              <dt>Dropouts</dt>
+              <dt>{t("Dropouts")}</dt>
               <dd>{node.xruns}</dd>
             </>
           )}
           {node.cpuUs != null && (
             <>
-              <dt>Processing</dt>
+              <dt>{t("Processing")}</dt>
               <dd>{node.cpuUs.toFixed(0)} µs</dd>
             </>
           )}
-          <dt>Channels</dt>
+          <dt>{t("Channels")}</dt>
           <dd>{node.channelNames.join(', ') || node.channels}</dd>
-          <dt>ID</dt>
+          <dt>{t("ID")}</dt>
           <dd className="mono small">{node.id}</dd>
         </dl>
       </details>
@@ -369,7 +370,7 @@ function NodeInspector({ node, onClose }: { node: NodeInfo; onClose: () => void 
       {node.state === 'unavailable' && node.kind !== 'bus' && node.kind !== 'vban' && (
         <div className="insp-section">
           <p className="hint">
-            This device isn’t connected. ToneSphere keeps its connections and restores them when it comes back.
+            {t("This device isn’t connected. ToneSphere keeps its connections and restores them when it comes back.")}
           </p>
           <button className="btn danger small" onClick={() => void act(engine.call('node.forget', { id: node.id })).then(onClose)}>
             <Trash2 size={13} /> Forget this device
@@ -400,9 +401,9 @@ function RouteInspector({ route, onClose }: { route: RouteInfo; onClose: () => v
               <ToIcon size={15} /> {to.name}
             </button>
           </h2>
-          <div className="muted small">Connection</div>
+          <div className="muted small">{t("Connection")}</div>
         </div>
-        <button className="icon-btn" onClick={onClose} aria-label="Close details">
+        <button className="icon-btn" onClick={onClose} aria-label={t("Close details")}>
           <X size={16} />
         </button>
       </div>
@@ -419,8 +420,8 @@ function RouteInspector({ route, onClose }: { route: RouteInfo; onClose: () => v
         </div>
       </div>
       <div className="insp-section">
-        <h3>Channels</h3>
-        <p className="muted small">Choose which input channel feeds which output channel. Scroll on a dot to change its level.</p>
+        <h3>{t("Channels")}</h3>
+        <p className="muted small">{t("Choose which input channel feeds which output channel. Scroll on a dot to change its level.")}</p>
         <RouteMatrix route={route} from={from} to={to} />
       </div>
       <div className="insp-section">

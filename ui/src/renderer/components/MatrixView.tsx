@@ -3,6 +3,7 @@ import { isDestination, isSource, type Bin, type NodeInfo } from '@shared/protoc
 import { BIN_META, DEST_ORDER, SOURCE_ORDER, nodeIcon } from '../bins';
 import { act, engine, useStore } from '../store';
 import { formatDb } from './Fader';
+import { t } from '../i18n';
 
 const ROW_BINS: Bin[] = [...SOURCE_ORDER, 'bus'];
 const COL_BINS: Bin[] = ['bus', ...DEST_ORDER];
@@ -49,15 +50,14 @@ export function MatrixView() {
   return (
     <div className="matrix-view">
       <div className="matrix-help muted small">
-        Rows send sound to columns. <strong>Click</strong> a cell to connect or disconnect, <strong>scroll</strong> on a
-        connected cell to change its volume, <strong>double-click</strong> to edit individual channels.
+        {t('Rows send sound to columns. Click a cell to connect or disconnect, scroll on a connected cell to change its volume, double-click to edit individual channels.')}
       </div>
       <div className="matrix-scroll">
-        <table className="matrix" role="grid" aria-label="Routing matrix">
+        <table className="matrix" role="grid" aria-label={t("Routing matrix")}>
           <thead>
             <tr>
               <th className="corner">
-                <span>From ↓ / To →</span>
+                <span>{t("From ↓ / To →")}</span>
               </th>
               {cols.map((c, i) => {
                 const Icon = nodeIcon(c);

@@ -59,6 +59,7 @@ const state = {
   midiMappings: [],
   dspThreads: 0,
   midiInstrument: null,
+  language: 'system',
   },
   status: {
     running: true,

@@ -6,6 +6,7 @@ import { act, engine, useStore } from '../store';
 import { NodeCard } from './NodeCard';
 import { ConnectionLines } from './ConnectionLines';
 import { VbanDialog } from './VbanDialog';
+import { t } from '../i18n';
 
 function useCollapsed(key: string): [boolean, () => void] {
   const [c, setC] = useState(() => {
@@ -102,22 +103,22 @@ export function SimpleView() {
         <ConnectionLines container={gridRef} />
         <div className="column sources">
           <div className="column-title">
-            <span>Sources</span>
-            <span className="column-sub">where sound comes from</span>
+            <span>{t("Sources")}</span>
+            <span className="column-sub">{t("where sound comes from")}</span>
           </div>
           {SOURCE_ORDER.map((bin) => (
             <Section key={bin} id={bin} {...BIN_META[bin]} nodes={byBin(bin)} />
           ))}
           <Section
             id="net-in"
-            title="Network inputs"
+            title={t("Network inputs")}
             hint="Audio received from other computers on your network (VBAN, compatible with VoiceMeeter)."
             empty="No network streams. Add one to receive audio from another computer."
             icon={Globe}
             hue="violet"
             nodes={network('in')}
             actions={
-              <button className="icon-btn subtle" title="Receive a network stream" onClick={() => setVban('in')}>
+              <button className="icon-btn subtle" title={t("Receive a network stream")} onClick={() => setVban('in')}>
                 <Plus size={14} />
               </button>
             }
@@ -126,15 +127,15 @@ export function SimpleView() {
 
         <div className="column mixes">
           <div className="column-title">
-            <span>Mixes</span>
-            <span className="column-sub">optional blending</span>
+            <span>{t("Mixes")}</span>
+            <span className="column-sub">{t("optional blending")}</span>
           </div>
           <Section
             id="bus"
             {...BIN_META.bus}
             nodes={buses}
             actions={
-              <button className="icon-btn subtle" title="New mix" onClick={() => setNewMix('')}>
+              <button className="icon-btn subtle" title={t("New mix")} onClick={() => setNewMix('')}>
                 <Plus size={14} />
               </button>
             }
@@ -144,8 +145,8 @@ export function SimpleView() {
               <input
                 autoFocus
                 value={newMix}
-                placeholder="Mix name (e.g. Stream mix)"
-                aria-label="New mix name"
+                placeholder={t("Mix name (e.g. Stream mix)")}
+                aria-label={t("New mix name")}
                 onChange={(e) => setNewMix(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') void createMix();
@@ -158,29 +159,29 @@ export function SimpleView() {
             </div>
           )}
           <div className="drag-help">
-            <strong>Tip:</strong> drag any source card onto a destination (or a mix) to connect it. Click a card to
+            <strong>{t("Tip:")}</strong> drag any source card onto a destination (or a mix) to connect it. Click a card to
             fine-tune volume, effects and channels.
           </div>
         </div>
 
         <div className="column destinations">
           <div className="column-title">
-            <span>Destinations</span>
-            <span className="column-sub">where sound goes</span>
+            <span>{t("Destinations")}</span>
+            <span className="column-sub">{t("where sound goes")}</span>
           </div>
           {DEST_ORDER.map((bin) => (
             <Section key={bin} id={bin} {...BIN_META[bin]} nodes={byBin(bin)} />
           ))}
           <Section
             id="net-out"
-            title="Network outputs"
+            title={t("Network outputs")}
             hint="Send audio to other computers on your network (VBAN, compatible with VoiceMeeter)."
             empty="No network streams. Add one to send audio to another computer."
             icon={Globe}
             hue="violet"
             nodes={network('out')}
             actions={
-              <button className="icon-btn subtle" title="Send a network stream" onClick={() => setVban('out')}>
+              <button className="icon-btn subtle" title={t("Send a network stream")} onClick={() => setVban('out')}>
                 <Plus size={14} />
               </button>
             }

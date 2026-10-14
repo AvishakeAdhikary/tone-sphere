@@ -290,3 +290,23 @@ test('window shortcuts switch views and open dialogs, but not while typing', asy
   await page.keyboard.press('Escape');
   await expect(page.locator('.modal.wizard')).toHaveCount(0);
 });
+
+test('the interface switches to Hindi and back', async () => {
+  await page.locator('button[aria-label="Settings"]').click();
+  await page.locator('.settings-nav button', { hasText: 'Appearance' }).click();
+  const lang = page.locator('label.field', { hasText: 'Language' }).locator('select');
+  await lang.selectOption('hi');
+  // Everything re-renders in Hindi: the column titles and the settings sections.
+  await expect(page.locator('.column-title').first()).toContainText('स्रोत');
+  await expect(page.locator('.segmented button').first()).toContainText('रूटिंग');
+  await expect(page.locator('html')).toHaveAttribute('lang', 'hi');
+  // The dialog stays open and re-renders in Hindi.
+  await expect(page.locator('.settings-nav')).toContainText('रूप');
+  await page.locator('.settings-nav button', { hasText: 'रूप' }).click();
+  await expect(page.locator('.modal.settings')).toContainText('मशीनी अनुवाद');
+  await page.screenshot({ path: path.join(shots, '12-hindi.png') });
+  await page.locator('.settings-nav button', { hasText: 'रूप' }).click();
+  await page.locator('label.field', { hasText: 'भाषा' }).locator('select').selectOption('en');
+  await expect(page.locator('.column-title').first()).toContainText('Sources');
+  await page.keyboard.press('Escape');
+});

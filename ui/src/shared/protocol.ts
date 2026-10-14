@@ -242,6 +242,8 @@ export interface EngineSettings {
   dspThreads?: number;
   /** The instrument that connected MIDI devices play, or null. */
   midiInstrument?: { nodeId: string; fxId: string } | null;
+  /** Interface language (UI only): 'system' follows Windows. */
+  language?: 'system' | 'en' | 'hi';
 }
 
 export interface EngineStatus {

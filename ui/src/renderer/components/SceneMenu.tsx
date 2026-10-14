@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Bookmark, Check, ChevronDown, Download, Plus, Trash2, Upload } from 'lucide-react';
 import { act, engine, useStore } from '../store';
 import { exportPresetFile, importPresetFile } from '../presetFiles';
+import { t } from '../i18n';
 
 /** Scenes = saved routing snapshots (ASIO Link Pro's "Profiles", but unlimited). */
 export function SceneMenu() {
@@ -33,16 +34,16 @@ export function SceneMenu() {
 
   return (
     <div className="menu-anchor no-drag" ref={ref}>
-      <button className="icon-btn" onClick={() => setOpen(!open)} aria-expanded={open} title="Scenes">
+      <button className="icon-btn" onClick={() => setOpen(!open)} aria-expanded={open} title={t("Scenes")}>
         <Bookmark size={15} />
         <span className="scene-name">{active?.name ?? 'Scenes'}</span>
         <ChevronDown size={14} />
       </button>
       {open && (
         <div className="popover scene-popover" role="menu">
-          <div className="popover-title">Scenes</div>
-          <p className="muted small">A scene remembers every connection, volume and effect so you can switch setups instantly.</p>
-          {state.scenes.length === 0 && <div className="muted small pad">No scenes saved yet.</div>}
+          <div className="popover-title">{t("Scenes")}</div>
+          <p className="muted small">{t("A scene remembers every connection, volume and effect so you can switch setups instantly.")}</p>
+          {state.scenes.length === 0 && <div className="muted small pad">{t("No scenes saved yet.")}</div>}
           {state.scenes.map((s) => (
             <div key={s.id} className="menu-row">
               <button
@@ -59,14 +60,14 @@ export function SceneMenu() {
               </button>
               <button
                 className="icon-btn subtle"
-                title="Overwrite with current setup"
+                title={t("Overwrite with current setup")}
                 onClick={() => void act(engine.call('scene.save', { id: s.id, name: s.name }))}
               >
                 <Bookmark size={13} />
               </button>
               <button
                 className="icon-btn subtle"
-                title="Delete scene"
+                title={t("Delete scene")}
                 onClick={() => void act(engine.call('scene.delete', { id: s.id }))}
               >
                 <Trash2 size={13} />
@@ -77,16 +78,16 @@ export function SceneMenu() {
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="New scene name"
-              aria-label="New scene name"
+              placeholder={t("New scene name")}
+              aria-label={t("New scene name")}
               onKeyDown={(e) => e.key === 'Enter' && void save()}
             />
             <button className="btn primary small" onClick={() => void save()}>
               <Plus size={13} /> Save
             </button>
           </div>
-          <div className="popover-title">Presets</div>
-          <p className="muted small">Presets are routing maps you can share. They find devices by name, so they work on any PC.</p>
+          <div className="popover-title">{t("Presets")}</div>
+          <p className="muted small">{t("Presets are routing maps you can share. They find devices by name, so they work on any PC.")}</p>
           <div className="menu-row">
             <button className="btn small" onClick={() => void importPreset()}>
               <Upload size={13} /> Import preset…

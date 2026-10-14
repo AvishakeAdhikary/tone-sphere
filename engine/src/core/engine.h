@@ -42,7 +42,8 @@ struct EngineSettings {
     std::string skin = "fluent";           // UI skin id
     json customSkins = json::array();        // imported UI skins (validated by the UI)
     int dspThreads = 0;                      // 0 = auto (multi-core when it helps), 1 = one core, N = N cores
-    json midiInstrument = nullptr;           // {nodeId, fxId}: the instrument MIDI devices play (or null)
+    json midiInstrument = nullptr;
+    std::string language = "system";         // UI language: system | en | hi           // {nodeId, fxId}: the instrument MIDI devices play (or null)
 };
 
 struct NodeSettingsData {

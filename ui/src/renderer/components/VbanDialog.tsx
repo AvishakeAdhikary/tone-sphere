@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { X } from 'lucide-react';
 import { act, engine } from '../store';
+import { t } from '../i18n';
 
 export function VbanDialog({ direction, onClose }: { direction: 'in' | 'out'; onClose: () => void }) {
   const [name, setName] = useState(direction === 'in' ? 'Network in' : 'Network out');
@@ -28,35 +29,35 @@ export function VbanDialog({ direction, onClose }: { direction: 'in' | 'out'; on
       >
         <div className="modal-head">
           <h2>{direction === 'in' ? 'Receive audio from the network' : 'Send audio to the network'}</h2>
-          <button type="button" className="icon-btn" onClick={onClose} aria-label="Close">
+          <button type="button" className="icon-btn" onClick={onClose} aria-label={t("Close")}>
             <X size={16} />
           </button>
         </div>
         <p className="muted small">
-          Uses the VBAN protocol, compatible with VoiceMeeter, VBAN apps and other ToneSphere computers on your network.
+          {t("Uses the VBAN protocol, compatible with VoiceMeeter, VBAN apps and other ToneSphere computers on your network.")}
         </p>
         <label className="field">
-          <span>Name in ToneSphere</span>
+          <span>{t("Name in ToneSphere")}</span>
           <input value={name} onChange={(e) => setName(e.target.value)} required />
         </label>
         <label className="field">
-          <span>VBAN stream name</span>
+          <span>{t("VBAN stream name")}</span>
           <input value={streamName} maxLength={16} onChange={(e) => setStreamName(e.target.value)} required />
-          <span className="hint">Must match on both computers (up to 16 characters).</span>
+          <span className="hint">{t("Must match on both computers (up to 16 characters).")}</span>
         </label>
         <div className="field-row">
           <label className="field grow">
             <span>{direction === 'in' ? 'Accept from IP' : 'Destination IP'}</span>
             <input value={host} onChange={(e) => setHost(e.target.value)} required />
-            {direction === 'in' && <span className="hint">0.0.0.0 accepts the stream from any computer.</span>}
+            {direction === 'in' && <span className="hint">{t("0.0.0.0 accepts the stream from any computer.")}</span>}
           </label>
           <label className="field">
-            <span>Port</span>
+            <span>{t("Port")}</span>
             <input type="number" min={1} max={65535} value={port} onChange={(e) => setPort(Number(e.target.value))} />
           </label>
         </div>
         <label className="field">
-          <span>Channels</span>
+          <span>{t("Channels")}</span>
           <select value={channels} onChange={(e) => setChannels(Number(e.target.value))}>
             {[1, 2, 4, 6, 8, 16].map((c) => (
               <option key={c} value={c}>
@@ -70,7 +71,7 @@ export function VbanDialog({ direction, onClose }: { direction: 'in' | 'out'; on
             Cancel
           </button>
           <button type="submit" className="btn primary">
-            Add stream
+            {t("Add stream")}
           </button>
         </div>
       </form>

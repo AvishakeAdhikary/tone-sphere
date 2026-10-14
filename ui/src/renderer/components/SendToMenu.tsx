@@ -4,6 +4,7 @@ import { isDestination, type Bin, type NodeInfo } from '@shared/protocol';
 import { BIN_META, DEST_ORDER, nodeIcon } from '../bins';
 import { act, engine, findRoute, useStore } from '../store';
 import { Popover } from './Popover';
+import { t } from '../i18n';
 
 /** Keyboard-friendly alternative to drag & drop: tick the destinations a source should feed. */
 export function SendToMenu({ node }: { node: NodeInfo }) {
@@ -27,7 +28,7 @@ export function SendToMenu({ node }: { node: NodeInfo }) {
         onClick={() => setOpen(!open)}
         aria-expanded={open}
         aria-haspopup="dialog"
-        title="Choose where this sound goes"
+        title={t("Choose where this sound goes")}
       >
         <ArrowRight size={13} />
         <span>{count || 'Send'}</span>

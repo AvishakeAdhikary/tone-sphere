@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Headphones, X } from 'lucide-react';
 import type { NodeInfo } from '@shared/protocol';
 import { act, engine, useStore } from '../store';
+import { t } from '../i18n';
 
 const START_DB = -12; // start quietly: the ears come first
 
@@ -66,13 +67,13 @@ export function MonitorWizard() {
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && close()}>
       <div className="modal wizard" role="dialog" aria-modal="true" aria-labelledby="wizard-title" tabIndex={-1} ref={dlg}>
-        <button className="icon-btn close" onClick={close} aria-label="Close">
+        <button className="icon-btn close" onClick={close} aria-label={t("Close")}>
           <X size={16} />
         </button>
         <h2 id="wizard-title">
           <Headphones size={18} aria-hidden /> Hear my instrument or microphone
         </h2>
-        <p className="muted small">Plug it in, pick it here, and listen in your headphones. You can change everything later.</p>
+        <p className="muted small">{t("Plug it in, pick it here, and listen in your headphones. You can change everything later.")}</p>
         {inputs.length === 0 || outputs.length === 0 ? (
           <p className="hint" role="status">
             {inputs.length === 0 ? 'No input is connected. Plug in your audio interface or microphone.' : 'No output is connected. Plug in headphones or speakers.'}
@@ -80,7 +81,7 @@ export function MonitorWizard() {
         ) : (
           <>
             <label className="field">
-              <span>Plugged into</span>
+              <span>{t("Plugged into")}</span>
               <select value={inputId} onChange={(e) => (setInputId(e.target.value), setChannel(0))}>
                 {inputs.map((n) => (
                   <option key={n.id} value={n.id}>
@@ -92,7 +93,7 @@ export function MonitorWizard() {
             </label>
             {input && input.channels > 1 && (
               <label className="field">
-                <span>Input</span>
+                <span>{t("Input")}</span>
                 <select value={channel} onChange={(e) => setChannel(Number(e.target.value))}>
                   {Array.from({ length: input.channels }, (_, i) => (
                     <option key={i} value={i}>
@@ -100,13 +101,13 @@ export function MonitorWizard() {
                       {i === 0 ? ' (guitar, usually)' : ''}
                     </option>
                   ))}
-                  <option value={-1}>All inputs (stereo)</option>
+                  <option value={-1}>{t("All inputs (stereo)")}</option>
                 </select>
-                <span className="hint">One input plays in both ears.</span>
+                <span className="hint">{t("One input plays in both ears.")}</span>
               </label>
             )}
             <label className="field">
-              <span>Listen on</span>
+              <span>{t("Listen on")}</span>
               <select value={outputId} onChange={(e) => setOutputId(e.target.value)}>
                 {outputs.map((n) => (
                   <option key={n.id} value={n.id}>

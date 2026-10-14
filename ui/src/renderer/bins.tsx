@@ -13,6 +13,7 @@ import {
   Waves,
   type LucideIcon,
 } from 'lucide-react';
+import { t } from './i18n';
 
 export interface BinMeta {
   bin: Bin;
@@ -27,57 +28,99 @@ export interface BinMeta {
 export const BIN_META: Record<Bin, BinMeta> = {
   'physical-in': {
     bin: 'physical-in',
-    title: 'Physical inputs',
-    hint: 'Microphones, line-ins and audio interface inputs.',
-    empty: 'No microphones or inputs found.',
+    get title() {
+      return t('Physical inputs');
+    },
+    get hint() {
+      return t('Microphones, line-ins and audio interface inputs.');
+    },
+    get empty() {
+      return t('No microphones or inputs found.');
+    },
     icon: Mic,
     hue: 'blue',
   },
   'virtual-out': {
     bin: 'virtual-out',
-    title: 'Virtual outputs',
-    hint: 'Virtual speakers. Apps play into these, and the sound comes here.',
-    empty: 'No virtual speakers yet. Install the ToneSphere Driver Pack or enable Compatibility mode.',
+    get title() {
+      return t('Virtual outputs');
+    },
+    get hint() {
+      return t('Virtual speakers. Apps play into these, and the sound comes here.');
+    },
+    get empty() {
+      return t('No virtual speakers yet. Install VB-CABLE in Settings › Devices (Compatibility mode).');
+    },
     icon: Cable,
     hue: 'violet',
   },
   'app-out': {
     bin: 'app-out',
-    title: 'Application outputs',
-    hint: 'Sound coming from individual apps.',
-    empty: 'Apps that play sound show up here automatically.',
+    get title() {
+      return t('Application outputs');
+    },
+    get hint() {
+      return t('Sound coming from individual apps.');
+    },
+    get empty() {
+      return t('Apps that play sound show up here automatically.');
+    },
     icon: AppWindow,
     hue: 'amber',
   },
   'physical-out': {
     bin: 'physical-out',
-    title: 'Physical outputs',
-    hint: 'Speakers, headphones and audio interface outputs.',
-    empty: 'No speakers or headphones found.',
+    get title() {
+      return t('Physical outputs');
+    },
+    get hint() {
+      return t('Speakers, headphones and audio interface outputs.');
+    },
+    get empty() {
+      return t('No speakers or headphones found.');
+    },
     icon: Speaker,
     hue: 'blue',
   },
   'virtual-in': {
     bin: 'virtual-in',
-    title: 'Virtual inputs',
-    hint: 'Virtual microphones. Anything sent here can be recorded by any app.',
-    empty: 'No virtual microphones yet. Install the ToneSphere Driver Pack or enable Compatibility mode.',
+    get title() {
+      return t('Virtual inputs');
+    },
+    get hint() {
+      return t('Virtual microphones. Anything sent here can be recorded by any app.');
+    },
+    get empty() {
+      return t('No virtual microphones yet. Install VB-CABLE in Settings › Devices (Compatibility mode).');
+    },
     icon: Cable,
     hue: 'violet',
   },
   'app-in': {
     bin: 'app-in',
-    title: 'Application inputs',
-    hint: 'Send sound straight into an app’s microphone (Discord, Zoom, OBS, DAWs…).',
-    empty: 'Apps that use a microphone show up here automatically.',
+    get title() {
+      return t('Application inputs');
+    },
+    get hint() {
+      return t('Send sound straight into an app’s microphone (Discord, Zoom, OBS, DAWs…).');
+    },
+    get empty() {
+      return t('Apps that use a microphone show up here automatically.');
+    },
     icon: AppWindow,
     hue: 'amber',
   },
   bus: {
     bin: 'bus',
-    title: 'Mixes',
-    hint: 'Combine several sources into one mix, then send it anywhere.',
-    empty: 'Create a mix to blend several sources together.',
+    get title() {
+      return t('Mixes');
+    },
+    get hint() {
+      return t('Combine several sources into one mix, then send it anywhere.');
+    },
+    get empty() {
+      return t('Create a mix to blend several sources together.');
+    },
     icon: Waves,
     hue: 'green',
   },
@@ -110,26 +153,26 @@ export function nodeIcon(n: NodeInfo): LucideIcon {
 export function kindLabel(n: NodeInfo): string {
   switch (n.kind) {
     case 'asio':
-      return 'ASIO';
+      return t('ASIO');
     case 'wasapi':
-      return n.settings.exclusive ? 'WASAPI exclusive' : 'Windows audio';
+      return n.settings.exclusive ? t('WASAPI exclusive') : t('Windows audio');
     case 'vad':
-      return 'ToneSphere virtual device';
+      return t('ToneSphere virtual device');
     case 'compat':
-      return 'Virtual cable (compatibility)';
+      return t('Virtual cable (compatibility)');
     case 'app':
-      return 'Application';
+      return t('Application');
     case 'asioclient':
-      return 'ToneSphere ASIO client';
+      return t('ToneSphere ASIO client');
     case 'bus':
-      return 'Mix';
+      return t('Mix');
     case 'vban':
-      return 'Network (VBAN)';
+      return t('Network (VBAN)');
     case 'tone':
-      return 'Test tone';
+      return t('Test tone');
     case 'pipewire':
-      return 'PipeWire';
+      return t('PipeWire');
     case 'coreaudio':
-      return 'Core Audio';
+      return t('Core Audio');
   }
 }

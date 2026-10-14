@@ -13,6 +13,7 @@ import { act, engine, useStore } from './store';
 import { bridge } from './engine/bridge';
 import { setMeterLayout } from './engine/meterLoop';
 import { applySkin, findSkin } from './skins';
+import { resolveLanguage, setLanguage } from './i18n';
 
 export function App() {
   const status = useStore((s) => s.status);
@@ -92,9 +93,11 @@ export function App() {
   }, []);
 
   const ready = status === 'connected' && state;
+  const lang = resolveLanguage(state?.settings.language);
+  setLanguage(lang);
 
   return (
-    <div className="app">
+    <div className="app" key={lang}>
       <TitleBar />
       <div className="workspace">
         {ready ? (

@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { AlertTriangle, X } from 'lucide-react';
 import { bridge } from '../engine/bridge';
+import { t } from '../i18n';
 
 const SEEN_KEY = 'tonesphere.crashSeen';
 const WEEK = 7 * 24 * 3600 * 1000;
@@ -42,9 +43,9 @@ export function CrashNotice() {
         was saved.
       </span>
       <button className="btn small" onClick={() => void bridge.openCrashFolder()}>
-        Show crash report
+        {t("Show crash report")}
       </button>
-      <button className="icon-btn subtle" onClick={dismiss} aria-label="Dismiss">
+      <button className="icon-btn subtle" onClick={dismiss} aria-label={t("Dismiss")}>
         <X size={14} />
       </button>
     </div>
