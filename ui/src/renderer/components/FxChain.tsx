@@ -1,7 +1,8 @@
 import { useRef, useState } from 'react';
-import { ChevronDown, ChevronUp, ExternalLink, Plus, Power, RefreshCw, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronUp, ExternalLink, Piano, Plus, Power, RefreshCw, Trash2 } from 'lucide-react';
 import { isSource, type FxInfo, type FxParamInfo, type FxType, type NodeInfo } from '@shared/protocol';
 import { act, engine, useStore } from '../store';
+import { Keyboard } from './Keyboard';
 import { Popover } from './Popover';
 
 const BUILTINS: { type: FxType; name: string; hint: string }[] = [
@@ -32,7 +33,9 @@ function fromSlider(p: FxParamInfo, x: number): number {
 function FxItem({ node, fx, index, count }: { node: NodeInfo; fx: FxInfo; index: number; count: number }) {
   const state = useStore((s) => s.state)!;
   const [open, setOpen] = useState(false);
-  const update = (p: Partial<{ bypass: boolean; params: Record<string, number>; sidechain: string | null }>) =>
+  const [keys, setKeys] = useState(false);
+  const midiHere = state.settings.midiInstrument?.fxId === fx.id && state.settings.midiInstrument?.nodeId === node.id;
+  const update =(p: Partial<{ bypass: boolean; params: Record<string, number>; sidechain: string | null }>) =>
     void act(engine.call('fx.update', { nodeId: node.id, fxId: fx.id, ...p }));
 
   return (
@@ -50,6 +53,11 @@ function FxItem({ node, fx, index, count }: { node: NodeInfo; fx: FxInfo; index:
           {fx.name}
           {fx.reductionDb != null && fx.reductionDb < -0.5 && <span className="gr">{fx.reductionDb.toFixed(1)} dB</span>}
         </button>
+        {fx.instrument && (
+          <button className={`icon-btn subtle ${keys ? 'on' : ''}`} title="On-screen keyboard" aria-pressed={keys} onClick={() => setKeys(!keys)}>
+            <Piano size={13} />
+          </button>
+        )}
         {fx.hasEditor && (
           <button className="icon-btn subtle" title="Open plugin window" onClick={() => void act(engine.call('fx.openEditor', { nodeId: node.id, fxId: fx.id }))}>
             <ExternalLink size={13} />
@@ -70,6 +78,22 @@ function FxItem({ node, fx, index, count }: { node: NodeInfo; fx: FxInfo; index:
           {fx.error}
         </div>
       )}
+      {fx.instrument && (
+        <label className="toggle-row compact">
+          <span className="grow">
+            <span>My MIDI keyboard plays this</span>
+            <span className="hint">Notes from connected MIDI devices go to this instrument.</span>
+          </span>
+          <input
+            type="checkbox"
+            role="switch"
+            className="switch"
+            checked={midiHere}
+            onChange={(e) => void act(engine.call('engine.setSettings', { midiInstrument: e.target.checked ? { nodeId: node.id, fxId: fx.id } : null }))}
+          />
+        </label>
+      )}
+      {fx.instrument && keys && <Keyboard nodeId={node.id} fxId={fx.id} />}
       {open && (
         <div className="fx-params">
           {fx.type === 'ducker' && (

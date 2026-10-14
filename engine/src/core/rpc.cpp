@@ -82,6 +82,10 @@ json Engine::call(const std::string& method, const json& params) {
         }
         if (p.contains("theme")) settings_.theme = p["theme"].get<std::string>();
         if (p.contains("advancedMode")) settings_.advancedMode = p["advancedMode"].get<bool>();
+        if (p.contains("midiInstrument")) {
+            settings_.midiInstrument = p["midiInstrument"].is_object() ? p["midiInstrument"] : json(nullptr);
+            resolveMidiTargetLocked();
+        }
         if (p.contains("dspThreads")) {
             settings_.dspThreads = std::clamp(p["dspThreads"].get<int>(), 0, 64);
             dsp_.mode.store(settings_.dspThreads, std::memory_order_relaxed);  // live: the next block follows it
@@ -293,6 +297,20 @@ json Engine::call(const std::string& method, const json& params) {
         compileAndPublishLocked();
         markDirty();
         return json{{"id", fx->id}, {"type", fx->type()}, {"name", fx->name()}};
+    }
+    if (method == "fx.midi") {
+        // Notes for an instrument: {nodeId, fxId, events: [[status, data1, data2], ...]}.
+        NodeModel* n = findNode(str(p, "nodeId"));
+        if (!n) fail("Not found");
+        const std::string fxId = str(p, "fxId");
+        auto it = std::find_if(n->fx.begin(), n->fx.end(), [&](auto& f) { return f->id == fxId; });
+        if (it == n->fx.end()) fail("Effect not found");
+        if (!(*it)->isInstrument()) fail("This effect isn't an instrument, so it can't play notes");
+        if (!p.contains("events") || !p["events"].is_array()) fail("No notes to play");
+        for (const json& e : p["events"])
+            if (e.is_array() && e.size() == 3)
+                (*it)->sendMidi(static_cast<uint8_t>(e[0].get<int>()), static_cast<uint8_t>(e[1].get<int>()), static_cast<uint8_t>(e[2].get<int>()));
+        return nullptr;
     }
     if (method == "fx.remove" || method == "fx.update" || method == "fx.move" || method == "fx.openEditor") {
         NodeModel* n = findNode(str(p, "nodeId"));

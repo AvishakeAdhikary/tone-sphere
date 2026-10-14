@@ -23,6 +23,7 @@ namespace ts {
 struct PluginEntry {
     std::string id;  // VST3 class id (32 hex digits)
     std::string name, vendor, category, version, path;
+    bool instrument = false;  // has a MIDI input and no audio input role (synths, samplers)
 };
 
 class PluginManager {

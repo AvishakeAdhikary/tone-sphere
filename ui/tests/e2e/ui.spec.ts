@@ -103,7 +103,7 @@ test('settings dialog opens', async () => {
   await expect(page.locator('.modal.settings h2', { hasText: 'Measure latency' })).toBeVisible();
   await page.locator('.settings-nav button', { hasText: 'Plugins' }).click();
   await expect(page.locator('.modal.settings', { hasText: 'Extra plugin folders' })).toBeVisible();
-  await expect(page.locator('.modal.settings', { hasText: '1 plugin found' })).toBeVisible();
+  await expect(page.locator('.modal.settings', { hasText: '2 plugins found' })).toBeVisible();
   await page.locator('.settings-nav button', { hasText: 'Control' }).click();
   await page.locator('.modal.settings input[role=switch]').first().click(); // state comes back from the engine
   await expect(page.locator('.modal.settings', { hasText: '/tonesphere/volume' })).toBeVisible();
@@ -181,5 +181,53 @@ test('processor cores: automatic by default, and the choice reaches the engine',
   await expect(select).toHaveValue('4');
   await select.selectOption('0');
   await expect(page.locator('.settings-body [role=status]').first()).toContainText('of 8 cores');
+  await page.keyboard.press('Escape');
+});
+
+// Asks the mock engine directly (a second client) for its state.
+async function mockState(): Promise<Record<string, unknown>> {
+  const sock = new WebSocket(`ws://127.0.0.1:${PORT}/?token=mock`);
+  await new Promise((r) => (sock.onopen = r));
+  const result = await new Promise<Record<string, unknown>>((resolve) => {
+    sock.onmessage = (ev) => {
+      if (typeof ev.data !== 'string') return; // binary meter frames
+      const m = JSON.parse(String(ev.data));
+      if (m.id === 1) resolve(m.result);
+    };
+    sock.send(JSON.stringify({ id: 1, method: 'engine.getState', params: {} }));
+  });
+  sock.close();
+  return result;
+}
+
+test('an instrument plugin gets an on-screen keyboard that plays notes', async () => {
+  await page.locator('[data-node-id="bus:stream"] .node-name').click();
+  await page.locator('.inspector button', { hasText: 'Add effect' }).click();
+  await page.locator('.menu-item', { hasText: 'Demo Synth' }).click();
+  const item = page.locator('.fx-item', { hasText: 'Demo Synth' });
+  await expect(item).toBeVisible();
+  await expect(item.locator('.toggle-row', { hasText: 'My MIDI keyboard plays this' })).toBeVisible();
+  await item.locator('button[title="On-screen keyboard"]').click();
+  const kb = item.locator('.keyboard');
+  await expect(kb).toBeVisible();
+  // Computer keyboard: "a" is C4 (MIDI note 60) while the keyboard has focus.
+  await kb.focus();
+  await page.keyboard.down('a');
+  await expect.poll(async () => JSON.stringify((await mockState()).lastMidi)).toBe('[[144,60,100]]');
+  await page.screenshot({ path: path.join(shots, '10-keyboard.png') });
+  await page.keyboard.up('a');
+  await expect.poll(async () => JSON.stringify((await mockState()).lastMidi)).toBe('[[128,60,0]]');
+  // Z/X change the octave: "a" is now C3.
+  await page.keyboard.press('z');
+  await page.keyboard.down('a');
+  await expect.poll(async () => JSON.stringify((await mockState()).lastMidi)).toBe('[[144,48,100]]');
+  await page.keyboard.up('a');
+  // Clicking a key plays it too.
+  await kb.locator('.key[aria-label="E3"]').dispatchEvent('pointerdown', { pointerId: 1 });
+  await expect.poll(async () => JSON.stringify((await mockState()).lastMidi)).toBe('[[144,52,100]]');
+  await kb.locator('.key[aria-label="E3"]').dispatchEvent('pointerup', { pointerId: 1 });
+  // A MIDI keyboard can play it.
+  await item.locator('.toggle-row input[role=switch]').click();
+  await expect.poll(async () => JSON.stringify((await mockState()).settings && (((await mockState()).settings as Record<string, unknown>).midiInstrument as { nodeId: string })?.nodeId)).toBe('"bus:stream"');
   await page.keyboard.press('Escape');
 });

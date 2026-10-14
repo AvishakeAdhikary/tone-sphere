@@ -3,6 +3,7 @@
 // can change them while the audio thread runs; structural changes (add/remove)
 // happen by publishing a new graph program.
 #include <atomic>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -50,6 +51,10 @@ public:
     virtual void loadState(const std::string&) {}
     /// A user-facing problem with this effect (e.g. plugin missing or failed), or empty.
     virtual std::string status() const { return {}; }
+    /// Instruments (VST3 plugins with a MIDI input) play notes sent here. Any thread except the
+    /// audio thread; it never waits for audio. Status, data1, data2 as in a MIDI short message.
+    virtual bool isInstrument() const { return false; }
+    virtual void sendMidi(uint8_t status, uint8_t data1, uint8_t data2) {}
     std::string pluginId;
 
 protected:

@@ -22,6 +22,7 @@ $suites = @(
   @('recorder', 'tests\integration\recorder.mjs'),
   @('meters-hotkeys', 'tests\integration\meters-hotkeys.mjs'),
   @('plugins', 'tests\integration\plugins.mjs'),
+  @('instruments', 'tests\integration\instruments.mjs'),
   @('latency', 'tests\integration\latency.mjs'),
   @('osc', 'tests\integration\osc.mjs'),
   @('presets', 'tests\integration\presets.mjs'),

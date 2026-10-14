@@ -58,6 +58,7 @@ See `ui/src/shared/protocol.ts` (the source of truth for types) and `engine/src/
 | `fx.remove` | `{nodeId, fxId}` | – |
 | `fx.update` | `{nodeId, fxId, bypass?, params?: {[k]: number}}` | – |
 | `fx.move` | `{nodeId, fxId, index}` | – |
+| `fx.midi` | `{nodeId, fxId, events: [[status, data1, data2], ...]}`: notes, CCs and pitch bend for an instrument (`FxInfo.instrument`) | – |
 | `fx.openEditor` | `{nodeId, fxId}`: opens (or raises) the plugin's own window, owned by the engine | – |
 | `plugins.scan` | – (starts a background scan; `EngineState.pluginsScanning` is true until it ends) | – |
 | `app.setMode` | `{exe, mode: "off" \| "copy" \| "isolate"}` | – |
@@ -121,3 +122,11 @@ See `ui/src/shared/protocol.ts` (the source of truth for types) and `engine/src/
   **`status.dspThreadsInUse`**: how many the last block used.
 - The result is identical either way: nodes of one dependency level run in parallel, and levels
   respect routes, solo mixes, ducker sidechains and feedback loops (`engine/src/core/graph.cpp`).
+
+## Instruments
+
+- VST3 plugins with a MIDI input are listed with `PluginInfo.instrument` (category `Instrument`) and their
+  effects carry `FxInfo.instrument`. Put one on a mix: its output replaces the mix's audio.
+- `fx.midi` plays them (the on-screen keyboard). **`settings.midiInstrument`** `{nodeId, fxId} | null` picks the
+  instrument that connected MIDI devices play; messages a MIDI mapping uses still go to their action.
+- Controllers reach the parameters the plugin maps them to (VST3 `IMidiMapping`).

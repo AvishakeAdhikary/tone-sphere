@@ -571,6 +571,7 @@ void Engine::compileAndPublishLocked() {
         }
     }
     computeLevels(*p);
+    resolveMidiTargetLocked();
 
     // Publish (RCU): the previous program stays alive until the audio thread has moved on.
     program_.store(p.get(), std::memory_order_release);
@@ -578,6 +579,23 @@ void Engine::compileAndPublishLocked() {
     programOwner_ = std::move(p);
     reclaimLocked();
     updateTapsLocked();
+}
+
+void Engine::resolveMidiTargetLocked() {
+    std::shared_ptr<Fx> target;
+    const json& mi = settings_.midiInstrument;
+    if (mi.is_object())
+        if (NodeModel* n = findNode(mi.value("nodeId", "")))
+            for (auto& fx : n->fx)
+                if (fx->id == mi.value("fxId", "") && fx->isInstrument()) target = fx;
+    midiTarget_.store(std::move(target));
+}
+
+bool Engine::playMidi(uint8_t status, uint8_t data1, uint8_t data2) {
+    std::shared_ptr<Fx> fx = midiTarget_.load();
+    if (!fx) return false;
+    fx->sendMidi(status, data1, data2);
+    return true;
 }
 
 // Recording taps: nodes being recorded, plus every mix (or the outputs when there are no mixes)

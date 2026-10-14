@@ -16,7 +16,10 @@
 #include "public.sdk/source/vst/hosting/module.h"
 #include "public.sdk/source/vst/hosting/parameterchanges.h"
 #include "public.sdk/source/vst/hosting/plugprovider.h"
+#include "public.sdk/source/vst/hosting/eventlist.h"
 #include "public.sdk/source/vst/hosting/processdata.h"
+#include "pluginterfaces/vst/ivstevents.h"
+#include "pluginterfaces/vst/ivstmidicontrollers.h"
 #include "util/encoding.h"
 #include "util/log.h"
 #include "util/platform.h"
@@ -174,6 +177,35 @@ private:
 };
 #endif
 
+// ---------------------------------------------------------------- MIDI for instruments
+// Single-consumer ring of packed MIDI short messages (status | data1 << 8 | data2 << 16). Producers
+// (RPC, the on-screen keyboard, MIDI devices) take a mutex among themselves; the audio thread only
+// pops, so it never waits.
+class MidiRing {
+public:
+    bool push(uint32_t m) {
+        std::lock_guard lk(producers_);
+        const uint32_t h = head_.load(std::memory_order_relaxed);
+        if (h - tail_.load(std::memory_order_acquire) >= kSize) return false;  // full: drop
+        buf_[h % kSize] = m;
+        head_.store(h + 1, std::memory_order_release);
+        return true;
+    }
+    bool pop(uint32_t& m) {
+        const uint32_t t = tail_.load(std::memory_order_relaxed);
+        if (t == head_.load(std::memory_order_acquire)) return false;
+        m = buf_[t % kSize];
+        tail_.store(t + 1, std::memory_order_release);
+        return true;
+    }
+
+private:
+    static constexpr uint32_t kSize = 1024;
+    std::mutex producers_;
+    uint32_t buf_[kSize] = {};
+    std::atomic<uint32_t> head_{0}, tail_{0};
+};
+
 // ---------------------------------------------------------------- the effect
 class Vst3Fx final : public Fx {
 public:
@@ -219,6 +251,7 @@ public:
             data_.unprepare();
             data_.prepare(*component_, maxBlock, kSample32);
             data_.processMode = kRealtime;
+            buildMidiMap();
             if (component_->setActive(true) != kResultOk) {
                 TS_WARN("Plugin %s could not be activated", name().c_str());
                 return;
@@ -241,6 +274,8 @@ public:
         }
         data_.numSamples = frames;
         toAudio_.transferChangesTo(inChanges_);
+        data_.inputEvents = instrument_ ? &events_ : nullptr;
+        if (instrument_) drainMidi();
         data_.inputParameterChanges = &inChanges_;
         data_.outputParameterChanges = &outChanges_;
         ctx_.state = ProcessContext::kPlaying | ProcessContext::kTempoValid | ProcessContext::kTimeSigValid |
@@ -273,6 +308,10 @@ public:
     }
 
     bool hasEditor() const override { return controller_ != nullptr; }
+    bool isInstrument() const override { return instrument_; }
+    void sendMidi(uint8_t status, uint8_t d1, uint8_t d2) override {
+        if (instrument_) midi_.push(static_cast<uint32_t>(status) | static_cast<uint32_t>(d1 & 0x7F) << 8 | static_cast<uint32_t>(d2 & 0x7F) << 16);
+    }
 
     void openEditor() override {
 #ifdef _WIN32
@@ -342,6 +381,52 @@ public:
 #endif
 
 private:
+    // Audio thread: queued MIDI -> note events, and controllers -> the parameters the plugin maps
+    // them to (IMidiMapping, looked up in advance on the UI thread).
+    void drainMidi() {
+        events_.clear();
+        uint32_t m;
+        while (midi_.pop(m)) {
+            const uint8_t status = m & 0xFF, d1 = (m >> 8) & 0x7F, d2 = (m >> 16) & 0x7F;
+            const int16 ch = status & 0x0F;
+            const int kind = status & 0xF0;
+            Event e{};
+            e.busIndex = 0;
+            e.sampleOffset = 0;
+            if (kind == 0x90 && d2 > 0) {
+                e.type = Event::kNoteOnEvent;
+                e.noteOn = {ch, d1, 0.0f, d2 / 127.0f, 0, -1};
+                events_.addEvent(e);
+            } else if (kind == 0x80 || kind == 0x90) {
+                e.type = Event::kNoteOffEvent;
+                e.noteOff = {ch, d1, d2 / 127.0f, -1, 0.0f};
+                events_.addEvent(e);
+            } else if (kind == 0xB0 || kind == 0xD0 || kind == 0xE0) {
+                const int ctrl = kind == 0xB0 ? d1 : kind == 0xD0 ? kAfterTouch : kPitchBend;
+                const ParamValue v = kind == 0xE0 ? ((d2 << 7) | d1) / 16383.0 : (kind == 0xD0 ? d1 : d2) / 127.0;
+                const ParamID id = midiMap_[static_cast<size_t>(ch) * kCtrls + static_cast<size_t>(ctrl)];
+                if (id != kNoParamId) {
+                    int32 qi = 0, pi = 0;
+                    if (IParamValueQueue* q = inChanges_.addParameterData(id, qi)) q->addPoint(0, v, pi);
+                }
+            }
+        }
+    }
+
+    // UI thread: which parameter each MIDI controller drives, per channel.
+    void buildMidiMap() {
+        midiMap_.assign(16 * kCtrls, kNoParamId);
+        if (!instrument_ || !controller_) return;
+        FUnknownPtr<IMidiMapping> mapping(controller_);
+        if (!mapping) return;
+        for (int16 ch = 0; ch < 16; ++ch)
+            for (int c = 0; c < kCtrls; ++c) {
+                ParamID id = kNoParamId;
+                if (mapping->getMidiControllerAssignment(0, ch, static_cast<CtrlNumber>(c), id) == kResultTrue)
+                    midiMap_[static_cast<size_t>(ch) * kCtrls + static_cast<size_t>(c)] = id;
+            }
+    }
+
     void deactivate() {
         if (!active_) return;
         processor_->setProcessing(false);
@@ -365,6 +450,9 @@ private:
         if (!(channels == 1 && tryArr(SpeakerArr::kMono))) tryArr(SpeakerArr::kStereo);
         if (nIn > 0) component_->activateBus(kAudio, kInput, 0, true);
         if (nOut > 0) component_->activateBus(kAudio, kOutput, 0, true);
+        // A MIDI input makes it an instrument: notes come from the keyboard or a MIDI device.
+        instrument_ = component_->getBusCount(kEvent, kInput) > 0;
+        if (instrument_) component_->activateBus(kEvent, kInput, 0, true);
         SpeakerArrangement a = 0;
         pin_ = (nIn > 0 && processor_->getBusArrangement(kInput, 0, a) == kResultOk) ? SpeakerArr::getChannelCount(a) : 0;
         a = 0;
@@ -383,6 +471,11 @@ private:
     int64_t samplePos_ = 0;
     int pin_ = 0, pout_ = 0;
     bool active_ = false;
+    bool instrument_ = false;
+    static constexpr int kCtrls = 130;  // 128 CCs, aftertouch, pitch bend
+    std::vector<ParamID> midiMap_;
+    MidiRing midi_;
+    EventList events_{512};
     std::atomic<bool> failed_{false};
 #ifdef _WIN32
     std::unique_ptr<EditorWindow> editor_;
@@ -767,15 +860,16 @@ void PluginManager::rebuildListLocked() {
         if (!m.value("ok", false)) continue;
         for (auto& c : m.value("classes", json::array())) {
             const std::string sub = c.value("subCategories", "");
-            // ToneSphere inserts process audio: skip instruments/generators without an Fx role.
-            if (sub.find("Instrument") != std::string::npos && sub.find("Fx") == std::string::npos) continue;
+            // Instruments are listed too: they go on a mix and are played by MIDI.
+            const bool instrument = sub.find("Instrument") != std::string::npos && sub.find("Fx") == std::string::npos;
             const std::string id = c.value("id", "");
             if (id.empty() || seen[id]) continue;
             seen[id] = true;
             std::string cat = sub;
             if (cat.rfind("Fx|", 0) == 0) cat = cat.substr(3);
             if (cat == "Fx") cat = "Effect";
-            list_.push_back({id, c.value("name", "Plugin"), c.value("vendor", ""), cat, c.value("version", ""), path});
+            if (instrument) cat = "Instrument";
+            list_.push_back({id, c.value("name", "Plugin"), c.value("vendor", ""), cat, c.value("version", ""), path, instrument});
         }
     }
     std::sort(list_.begin(), list_.end(), [](auto& a, auto& b) { return a.name < b.name; });
@@ -789,7 +883,7 @@ std::vector<PluginEntry> PluginManager::list() const {
 json PluginManager::listJson() const {
     json a = json::array();
     for (auto& p : list())
-        a.push_back({{"id", p.id}, {"name", p.name}, {"vendor", p.vendor}, {"category", p.category}, {"path", p.path}});
+        a.push_back({{"id", p.id}, {"name", p.name}, {"vendor", p.vendor}, {"category", p.category}, {"path", p.path}, {"instrument", p.instrument}});
     return a;
 }
 

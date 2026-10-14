@@ -57,6 +57,7 @@ json fxInfo(const Fx& fx) {
     }
     json j = {{"id", fx.id}, {"type", fx.type()}, {"name", fx.name()}, {"bypass", fx.bypass.load()}, {"params", params},
               {"hasEditor", fx.hasEditor()}, {"reductionDb", fx.reductionDb.load()}};
+    if (fx.isInstrument()) j["instrument"] = true;
     if (fx.type() == "ducker") j["sidechain"] = fx.sidechainId.empty() ? json(nullptr) : json(fx.sidechainId);
     if (!fx.pluginId.empty()) j["pluginId"] = fx.pluginId;
     if (const std::string s = fx.status(); !s.empty()) j["error"] = s;
@@ -219,7 +220,7 @@ json Engine::state() {
                      {"startWithSystem", settings_.startWithSystem}, {"startMinimized", settings_.startMinimized},
                      {"hotkeys", settings_.hotkeys},           {"replayBufferSeconds", settings_.replayBufferSeconds},
                      {"recordFolder", settings_.recordFolder}, {"theme", settings_.theme}, {"pluginFolders", settings_.pluginFolders}, {"oscPort", settings_.oscPort}, {"midiMappings", settings_.midiMappings}, {"skin", settings_.skin}, {"customSkins", settings_.customSkins},
-                     {"advancedMode", settings_.advancedMode}, {"dspThreads", settings_.dspThreads}};
+                     {"advancedMode", settings_.advancedMode}, {"dspThreads", settings_.dspThreads}, {"midiInstrument", settings_.midiInstrument}};
     json j = {{"version", version()},
               {"protocol", 1},
               {"layoutVersion", layoutVersion_},

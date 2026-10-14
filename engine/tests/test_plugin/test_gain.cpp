@@ -11,6 +11,8 @@
 #include "base/source/fstreamer.h"
 #include "pluginterfaces/base/ibstream.h"
 #include "pluginterfaces/gui/iplugview.h"
+#include "pluginterfaces/vst/ivstevents.h"
+#include "pluginterfaces/vst/ivstmidicontrollers.h"
 #include "pluginterfaces/vst/ivstparameterchanges.h"
 #include "public.sdk/source/common/pluginview.h"
 #include "public.sdk/source/main/pluginfactory.h"
@@ -127,6 +129,81 @@ private:
     GainView* view_ = nullptr;
 };
 
+// "ToneSphere Test Synth": a one-voice sine instrument for the instrument/MIDI tests. A note plays
+// its pitch at velocity x Volume; note off silences it. MIDI CC 7 drives Volume (IMidiMapping).
+const FUID kTestSynthUID(0x54535465, 0x73745379, 0x6E746831, 0x00000001);
+constexpr ParamID kVolumeId = 0;
+
+class TestSynth : public SingleComponentEffect, public IMidiMapping {
+public:
+    static FUnknown* create(void*) { return static_cast<IAudioProcessor*>(new TestSynth()); }
+
+    tresult PLUGIN_API initialize(FUnknown* ctx) override {
+        const tresult r = SingleComponentEffect::initialize(ctx);
+        if (r != kResultOk) return r;
+        addAudioOutput(STR16("Output"), SpeakerArr::kStereo);
+        addEventInput(STR16("MIDI In"), 16);
+        parameters.addParameter(STR16("Volume"), nullptr, 0, 1.0, ParameterInfo::kCanAutomate, kVolumeId);
+        return kResultOk;
+    }
+    tresult PLUGIN_API setBusArrangements(SpeakerArrangement*, int32 nIns, SpeakerArrangement* outs, int32 nOuts) override {
+        if (nIns == 0 && nOuts == 1 && (outs[0] == SpeakerArr::kStereo || outs[0] == SpeakerArr::kMono)) return SingleComponentEffect::setBusArrangements(nullptr, 0, outs, nOuts);
+        return kResultFalse;
+    }
+    tresult PLUGIN_API canProcessSampleSize(int32 size) override { return size == kSample32 ? kResultTrue : kResultFalse; }
+    tresult PLUGIN_API setupProcessing(ProcessSetup& s) override {
+        sr_ = s.sampleRate;
+        return SingleComponentEffect::setupProcessing(s);
+    }
+    tresult PLUGIN_API getMidiControllerAssignment(int32 bus, int16, CtrlNumber cc, ParamID& id) override {
+        if (bus != 0 || cc != 7) return kResultFalse;
+        id = kVolumeId;
+        return kResultTrue;
+    }
+
+    tresult PLUGIN_API process(ProcessData& data) override {
+        if (IParameterChanges* pc = data.inputParameterChanges)
+            for (int32 i = 0; i < pc->getParameterCount(); ++i) {
+                IParamValueQueue* q = pc->getParameterData(i);
+                int32 off;
+                ParamValue v;
+                if (q && q->getParameterId() == kVolumeId && q->getPoint(q->getPointCount() - 1, off, v) == kResultOk) volume_ = v;
+            }
+        if (IEventList* ev = data.inputEvents)
+            for (int32 i = 0; i < ev->getEventCount(); ++i) {
+                Event e{};
+                if (ev->getEvent(i, e) != kResultOk) continue;
+                if (e.type == Event::kNoteOnEvent) {
+                    note_ = e.noteOn.pitch;
+                    freq_ = 440.0 * std::pow(2.0, (e.noteOn.pitch - 69) / 12.0);
+                    amp_ = e.noteOn.velocity;
+                } else if (e.type == Event::kNoteOffEvent && e.noteOff.pitch == note_) {
+                    amp_ = 0.0;
+                }
+            }
+        if (data.numOutputs == 0 || data.numSamples <= 0) return kResultOk;
+        const double inc = 2.0 * 3.14159265358979323846 * freq_ / sr_;
+        const float a = static_cast<float>(amp_ * volume_ * 0.5);
+        for (int32 i = 0; i < data.numSamples; ++i) {
+            const float v = a * static_cast<float>(std::sin(phase_));
+            phase_ += inc;
+            if (phase_ > 6.283185307179586) phase_ -= 6.283185307179586;
+            for (int32 c = 0; c < data.outputs[0].numChannels; ++c) data.outputs[0].channelBuffers32[c][i] = v;
+        }
+        return kResultOk;
+    }
+
+    OBJ_METHODS(TestSynth, SingleComponentEffect)
+    DEFINE_INTERFACES
+        DEF_INTERFACE(IMidiMapping)
+    END_DEFINE_INTERFACES(SingleComponentEffect)
+    REFCOUNT_METHODS(SingleComponentEffect)
+
+private:
+    double sr_ = 48000.0, freq_ = 440.0, phase_ = 0.0, amp_ = 0.0, volume_ = 1.0;
+    int16 note_ = -1;
+};
+
 tresult PLUGIN_API GainView::attached(void* parent, FIDString type) {
     static bool reg = [] {
         INITCOMMONCONTROLSEX icc{sizeof(icc), ICC_BAR_CLASSES};
@@ -166,4 +243,6 @@ LRESULT CALLBACK GainView::proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
 BEGIN_FACTORY_DEF("ToneSphere", "https://github.com/AvishakeAdhikary/tone-sphere", "mailto:tonesphere@example.invalid")
 DEF_CLASS2(INLINE_UID_FROM_FUID(kTestGainUID), PClassInfo::kManyInstances, kVstAudioEffectClass, "ToneSphere Test Gain", 0, "Fx",
            "1.0.0", kVstVersionString, TestGain::create)
+DEF_CLASS2(INLINE_UID_FROM_FUID(kTestSynthUID), PClassInfo::kManyInstances, kVstAudioEffectClass, "ToneSphere Test Synth", 0, "Instrument|Synth",
+           "1.0.0", kVstVersionString, TestSynth::create)
 END_FACTORY

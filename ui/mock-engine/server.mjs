@@ -58,6 +58,7 @@ const state = {
   customSkins: [],
   midiMappings: [],
   dspThreads: 0,
+  midiInstrument: null,
   },
   status: {
     running: true,
@@ -101,7 +102,10 @@ const state = {
   routes: [],
   scenes: [{ id: 'sc1', name: 'Streaming', hotkey: 'Ctrl+1' }],
   activeScene: 'sc1',
-  plugins: [{ id: 'vst3:demo', name: 'Demo EQ', vendor: 'Example', category: 'Fx|EQ', path: 'C:\\Program Files\\Common Files\\VST3\\Demo.vst3' }],
+  plugins: [
+    { id: 'vst3:demo', name: 'Demo EQ', vendor: 'Example', category: 'Fx|EQ', path: 'C:\\Program Files\\Common Files\\VST3\\Demo.vst3' },
+    { id: 'vst3:synth', name: 'Demo Synth', vendor: 'Example', category: 'Instrument', path: 'C:\\Program Files\\Common Files\\VST3\\Synth.vst3', instrument: true },
+  ],
   recorder: { recording: false, files: [], folder: 'C:\\Users\\you\\Music\\ToneSphere', replaySeconds: 60 },
 };
 
@@ -157,7 +161,7 @@ const FX_DEFS = {
 function makeFx(type, pluginId) {
   if (type === 'vst3') {
     const p = state.plugins.find((x) => x.id === pluginId);
-    return { id: `fx_${uid()}`, type, name: p?.name ?? 'Plugin', bypass: false, params: [], pluginId, hasEditor: true };
+    return { id: `fx_${uid()}`, type, name: p?.name ?? 'Plugin', bypass: false, params: [], pluginId, hasEditor: true, ...(p?.instrument ? { instrument: true } : {}) };
   }
   const [name, params] = FX_DEFS[type];
   return {
@@ -254,6 +258,10 @@ const handlers = {
     n.fx.splice(Math.max(0, Math.min(n.fx.length, p.index)), 0, fx);
   },
   'fx.openEditor': () => {},
+  // Notes for an instrument: remembered so tests can see what the keyboard sent.
+  'fx.midi': ({ events }) => {
+    state.lastMidi = events;
+  },
   'plugins.scan': () => {},
   'app.setMode': (p) => {
     for (const n of state.nodes) if (n.app?.exe === p.exe && n.bin === 'app-out') n.app.mode = p.mode;

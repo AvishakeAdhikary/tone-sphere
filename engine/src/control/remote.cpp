@@ -336,6 +336,8 @@ struct RemoteControl::Impl {
             maps = mappings;
         }
         if (auto a = midiToAction(maps, status, d1, d2)) push(*a);
+        // Everything a mapping doesn't use plays the chosen instrument (notes, sustain, pitch bend).
+        else if (kind == 0x80 || kind == 0x90 || kind == 0xB0 || kind == 0xD0 || kind == 0xE0) engine.playMidi(status, d1, d2);
     }
 
     // ---- settings + actions
@@ -363,7 +365,7 @@ struct RemoteControl::Impl {
             std::lock_guard lk(learnMu);
             learningNow = learning;
         }
-        const bool want = (maps.is_array() && !maps.empty()) || learningNow;
+        const bool want = (maps.is_array() && !maps.empty()) || learningNow || s.value("midiInstrument", json()).is_object();
         if (want) openMidi();
         else if (!want && !midiIns.empty()) closeMidi();
 #endif

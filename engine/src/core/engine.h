@@ -42,6 +42,7 @@ struct EngineSettings {
     std::string skin = "fluent";           // UI skin id
     json customSkins = json::array();        // imported UI skins (validated by the UI)
     int dspThreads = 0;                      // 0 = auto (multi-core when it helps), 1 = one core, N = N cores
+    json midiInstrument = nullptr;           // {nodeId, fxId}: the instrument MIDI devices play (or null)
 };
 
 struct NodeSettingsData {
@@ -143,6 +144,9 @@ public:
     /// MIDI learn / device list (set by the host process; see control/remote.h).
     std::function<json(double)> onMidiLearn;
     std::function<json()> onMidiDevices;
+    /// Plays a MIDI short message on the instrument chosen in settings (MIDI devices). Lock-free
+    /// for the caller: safe from MIDI driver callbacks. Returns false when no instrument is set.
+    bool playMidi(uint8_t status, uint8_t data1, uint8_t data2);
     /// Called to request process exit.
     std::function<void()> onShutdownRequested;
 
@@ -228,6 +232,9 @@ private:
     // Multi-core DSP: created with the clock, destroyed after it stops (core/dsp_pool.h).
     std::unique_ptr<DspPool> dspPool_;
     DspScheduler dsp_;
+    // The instrument MIDI devices play (settings.midiInstrument), resolved on every publish.
+    std::atomic<std::shared_ptr<Fx>> midiTarget_;
+    void resolveMidiTargetLocked();
     double runningRate_ = 48000.0;
     std::atomic<float> cpuPercent_{0};
     std::atomic<uint64_t> lateCycles_{0};

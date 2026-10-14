@@ -1785,3 +1785,57 @@ details[open].insp-section summary h3::after {
 .check-row input {
   margin-top: 3px;
 }
+/* On-screen keyboard (instrument plugins) */
+.keyboard {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 8px;
+  background: var(--surface-2, rgba(127, 127, 127, 0.08));
+  outline: none;
+}
+.keyboard:focus-visible {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+.keyboard-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.keys {
+  display: flex;
+  height: 72px;
+  user-select: none;
+  touch-action: none;
+}
+.key {
+  position: relative;
+  padding: 0;
+  border: 1px solid rgba(0, 0, 0, 0.35);
+  border-radius: 0 0 4px 4px;
+  cursor: pointer;
+}
+.key.white {
+  flex: 1 1 0;
+  min-width: 14px;
+  height: 100%;
+  background: #fafafa;
+}
+.key.black {
+  flex: 0 0 auto;
+  width: 11px;
+  height: 60%;
+  margin: 0 -6px;
+  z-index: 1;
+  background: #1d1d1f;
+}
+.key.down.white {
+  background: var(--accent);
+}
+.key.down.black {
+  background: var(--accent);
+  filter: brightness(0.8);
+}
+.toggle-row.compact {
+  padding: 4px 2px;
+}

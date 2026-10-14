@@ -82,6 +82,8 @@ export interface FxInfo {
   reductionDb?: number;
   /** A problem with this effect (plugin missing or stopped), shown to the user. */
   error?: string;
+  /** A VST3 instrument (has a MIDI input): played with fx.midi or a MIDI device. */
+  instrument?: boolean;
 }
 
 export interface NodeCaps {
@@ -198,6 +200,8 @@ export interface PluginInfo {
   vendor: string;
   category: string;
   path: string;
+  /** Instruments (synths, samplers) go on a mix and are played by MIDI. */
+  instrument?: boolean;
 }
 
 export interface RecorderState {
@@ -236,6 +240,8 @@ export interface EngineSettings {
   customSkins?: Array<Record<string, unknown>>;
   /** DSP cores: 0 = auto (several cores only when the graph is heavy), 1 = one core, N = N cores. */
   dspThreads?: number;
+  /** The instrument that connected MIDI devices play, or null. */
+  midiInstrument?: { nodeId: string; fxId: string } | null;
 }
 
 export interface EngineStatus {
@@ -336,6 +342,8 @@ export interface RpcMethods {
   };
   'fx.move': { params: { nodeId: string; fxId: string; index: number }; result: void };
   'fx.openEditor': { params: { nodeId: string; fxId: string }; result: void };
+  /** MIDI short messages [status, data1, data2] for an instrument (notes, CCs, pitch bend). */
+  'fx.midi': { params: { nodeId: string; fxId: string; events: number[][] }; result: void };
   'plugins.scan': { params: void; result: void };
   'app.setMode': { params: { exe: string; mode: 'off' | 'copy' | 'isolate' }; result: void };
   'app.setRule': { params: { exe: string; pinned?: boolean }; result: void };
