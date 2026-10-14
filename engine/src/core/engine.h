@@ -238,6 +238,13 @@ private:
     // The instrument MIDI devices play (settings.midiInstrument), resolved on every publish.
     std::atomic<std::shared_ptr<Fx>> midiTarget_;
     std::atomic<bool> metersActive_{true};
+    // Clock master: the device whose own position paces the engine (see clockThread). Engine-owned,
+    // so the clock thread can read it without caring when the device's bridge goes away.
+    DevicePosition masterPos_;
+    std::atomic<double> masterRate_{0.0};    // device rate of the master, 0 = none (internal timer)
+    std::atomic<uint32_t> masterGen_{0};     // changes whenever the master changes
+    std::string masterNode_;                 // under mu_
+    bool wantsClockMasterLocked(const NodeModel& n) const;
     void resolveMidiTargetLocked();
     double runningRate_ = 48000.0;
     std::atomic<float> cpuPercent_{0};

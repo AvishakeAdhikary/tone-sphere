@@ -18,6 +18,7 @@ $suites = @(
   @('host-audio', 'tests\integration\host-audio.mjs', '--soak', '10'),
   @('asio-clients', 'tests\integration\asio-clients.mjs', '8'),
   @('asio-host', 'tests\integration\asio-host.mjs', 'FlexASIO', '8'),
+  @('clock-master', 'tests\integration\clock-master.mjs', '8'),
   @('vban', 'tests\integration\vban.mjs', '8'),
   @('recorder', 'tests\integration\recorder.mjs'),
   @('meters-hotkeys', 'tests\integration\meters-hotkeys.mjs'),

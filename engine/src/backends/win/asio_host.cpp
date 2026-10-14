@@ -370,6 +370,7 @@ public:
         if (ren_) ren_->markStopped();
     }
     std::string error() const override { return AsioDevice::get().reset_.load() ? "restart: ASIO driver reset" : std::string(); }
+    bool deviceClocked() const override { return true; }
 
 private:
     bool input_;

@@ -59,6 +59,9 @@ public:
     virtual std::string error() const { return {}; }
     /// Times the device itself ran dry (audible glitch the bridges cannot see), e.g. a late render wake-up.
     virtual uint64_t deviceGlitches() const { return 0; }
+    /// True when the hardware clock paces this stream directly (ASIO, WASAPI exclusive): a good
+    /// engine clock master, picked automatically in "auto" mode.
+    virtual bool deviceClocked() const { return false; }
 };
 
 class Backend {

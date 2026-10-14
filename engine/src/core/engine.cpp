@@ -378,6 +378,10 @@ bool Engine::openStreamLocked(NodeModel& n) {
     cfg.engineMaxBlock = static_cast<size_t>(settings_.blockSize);
     cfg.extraSafetyMs = n.settings.safetyMs;
     cfg.jittery = n.kind == DeviceKind::App || n.kind == DeviceKind::Vban;
+    // Clock master: the engine follows this device, so its bridge needs no drift correction and
+    // only a minimal cushion.
+    const bool master = masterNode_.empty() && wantsClockMasterLocked(n);
+    cfg.master = master;
     n.streamRate = n.stream->sampleRate();
     if (n.streamInput) {
         n.cap = std::make_shared<CaptureBridge>();
@@ -387,6 +391,14 @@ bool Engine::openStreamLocked(NodeModel& n) {
         n.ren = std::make_shared<RenderBridge>();
         n.ren->init(cfg);
         n.rt->render.store(n.ren.get(), std::memory_order_release);
+    }
+    if (master) {
+        masterNode_ = n.id;
+        masterRate_.store(cfg.deviceRate, std::memory_order_release);
+        masterGen_.fetch_add(1, std::memory_order_acq_rel);
+        if (n.ren) n.ren->setClockMirror(&masterPos_);
+        else n.cap->setClockMirror(&masterPos_);
+        TS_INFO("Clock master: %s", n.name.c_str());
     }
     if (!n.stream->start(n.cap, n.ren)) {
         n.streamError = "Device failed to start";
@@ -399,6 +411,15 @@ bool Engine::openStreamLocked(NodeModel& n) {
 }
 
 void Engine::closeStreamLocked(NodeModel& n) {
+    if (n.id == masterNode_) {
+        // Back to the internal timer: the clock thread hands over without a jump.
+        masterRate_.store(0.0, std::memory_order_release);
+        masterGen_.fetch_add(1, std::memory_order_acq_rel);
+        masterNode_.clear();
+        if (n.ren) n.ren->setClockMirror(nullptr);
+        if (n.cap) n.cap->setClockMirror(nullptr);
+        TS_INFO("Clock master released: %s", n.name.c_str());
+    }
     if (n.stream) {
         n.stream->stop();
         n.stream.reset();
@@ -437,7 +458,20 @@ void Engine::rebuildLocked() {
     markDirty();
 }
 
-std::string Engine::chooseClockMasterLocked() const { return "internal"; }
+std::string Engine::chooseClockMasterLocked() const { return masterNode_.empty() ? "internal" : masterNode_; }
+
+// Only a stream paced by the hardware clock itself (ASIO, WASAPI exclusive) can lead the engine:
+// a shared-mode stream reports when data is handed to Windows, a few periods ahead and in
+// uneven steps, which makes a poor clock (measured: clicks through VB-CABLE).
+// "auto" picks an interface output in WASAPI exclusive mode (measured on the AI-04 with two DAWs
+// on ToneSphere ASIO: clean). Hosted ASIO drivers only lead when picked: a driver such as FlexASIO
+// on its default shared backend delivers in Windows-mixer bursts, and DAWs sharing the engine
+// then clicked. "internal" keeps the engine's timer.
+bool Engine::wantsClockMasterLocked(const NodeModel& n) const {
+    if (!n.stream || !n.stream->deviceClocked() || settings_.clockMaster == "internal") return false;
+    if (settings_.clockMaster != "auto") return settings_.clockMaster == n.id;
+    return !n.streamInput && n.bin == Bin::PhysicalOut && n.kind == DeviceKind::Wasapi;
+}
 
 // ============================================================ compile & publish
 void Engine::compileAndPublishLocked() {
@@ -658,12 +692,54 @@ void Engine::clockThread() {
 #endif
     const double rate = runningRate_;
     const int block = std::clamp(settings_.blockSize, 16, kMaxBlock);
-    const double t0 = nowSeconds();
+    // The engine always runs on its own steady timer. With a clock master, a delay-locked loop
+    // steers the timer's speed (within ±0.5 %) so the engine's position tracks the master device's
+    // own position: the cadence stays even for every other device (no catch-up bursts when a device
+    // report is late), and in the long run the engine runs exactly at the master's clock.
+    double tBase = nowSeconds(), dueBase = 0, speed = 1.0, errAvg = 0;
     uint64_t processed = 0;
-    double busy = 0, window = 0, winStart = t0;
+    double busy = 0, window = 0, winStart = tBase;
+    uint32_t followGen = ~0u;
+    bool following = false;
+    double anchorDev = 0, anchorEng = 0, lastReport = 0;
     while (clockRun_.load(std::memory_order_relaxed)) {
         const double now = nowSeconds();
-        const uint64_t due = static_cast<uint64_t>((now - t0) * rate);
+        const double dueNow = dueBase + (now - tBase) * rate * speed;
+        const double mRate = masterRate_.load(std::memory_order_acquire);
+        const uint32_t gen = masterGen_.load(std::memory_order_acquire);
+        double mt = 0;
+        uint64_t mf = 0;
+        // Follow while the master is moving; a stalled or missing master hands back to the timer.
+        if (mRate > 0 && masterPos_.read(mt, mf) && now - mt < 0.1) {
+            const double devNow = static_cast<double>(mf) + (now - mt) * mRate;  // device position now
+            if (!following || gen != followGen) {
+                anchorDev = devNow;  // lock: engine and device positions line up from here
+                anchorEng = dueNow;
+                following = true;
+                followGen = gen;
+                errAvg = 0;
+                lastReport = mt;
+            } else if (mt != lastReport) {
+                lastReport = mt;
+                const double err = anchorEng + (devNow - anchorDev) * rate / mRate - dueNow;  // > 0: device is ahead
+                if (std::fabs(err) > rate * 0.05) {
+                    anchorDev = devNow;  // lost lock (a stall or a jump): line up again
+                    anchorEng = dueNow;
+                    errAvg = 0;
+                } else {
+                    errAvg += 0.1 * (err - errAvg);  // report times jitter: smooth before steering
+                    dueBase = dueNow;
+                    tBase = now;
+                    speed = 1.0 + std::clamp(errAvg / (rate * 0.5), -0.005, 0.005);  // ~0.5 s time constant
+                }
+            }
+        } else if (following) {
+            following = false;  // plain timer from here, no jump
+            dueBase = dueNow;
+            tBase = now;
+            speed = 1.0;
+        }
+        const uint64_t due = static_cast<uint64_t>(std::max(0.0, dueNow));
         if (due > processed + static_cast<uint64_t>(rate * 0.25)) {
             // We fell far behind (system sleep / debugger): resynchronise instead of bursting.
             processed = due - static_cast<uint64_t>(block);
@@ -681,7 +757,7 @@ void Engine::clockThread() {
             busy = 0;
             winStart = now;
         }
-        const double next = t0 + static_cast<double>(processed + static_cast<uint64_t>(block)) / rate;
+        const double next = tBase + (static_cast<double>(processed + static_cast<uint64_t>(block)) - dueBase) / (rate * speed);
         const double wait = next - nowSeconds();
         if (wait > 0) {
 #ifdef _WIN32

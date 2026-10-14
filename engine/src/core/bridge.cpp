@@ -97,12 +97,14 @@ void CaptureBridge::deviceWrite(const float* interleaved, size_t frames, double 
     if (w < frames) stats_.overruns.fetch_add(1, std::memory_order_relaxed);
     devTotal_ += w;
     devPos_.publish(nowSec, devTotal_);
+    if (DevicePosition* m = mirror_.load(std::memory_order_acquire)) m->publish(nowSec, devTotal_);
 }
 
 void CaptureBridge::deviceWriteSilence(size_t frames, double nowSec) {
     bursts_.observe(frames, nowSec);
     devTotal_ += ring_.writeSilence(frames);
     devPos_.publish(nowSec, devTotal_);
+    if (DevicePosition* m = mirror_.load(std::memory_order_acquire)) m->publish(nowSec, devTotal_);
 }
 
 void CaptureBridge::engineRead(float* const* out, size_t frames, double nowSec) {
@@ -192,7 +194,11 @@ void RenderBridge::init(const BridgeConfig& cfg) {
     cfg_ = cfg;
     nominal_ = cfg.engineRate / cfg.deviceRate;  // engine frames per device frame
     if (cfg.master) {
-        target_.init(cfg.deviceRate, static_cast<double>(cfg.devicePeriod), 0.0, true);
+        // The engine is locked to this device (no drift to absorb) and produces in whole engine
+        // blocks: the cushion is one device period plus a block plus the lock's phase error and the
+        // clock thread's wake-up (2 ms).
+        const double margin = static_cast<double>(cfg.engineMaxBlock) / nominal_ + (2.0 + cfg.extraSafetyMs) * cfg.deviceRate / 1000.0;
+        target_.init(cfg.deviceRate, static_cast<double>(cfg.devicePeriod), margin, true);
     } else {
         const double margin = static_cast<double>(cfg.engineMaxBlock) / nominal_ + (jitterMs(cfg) + cfg.extraSafetyMs) * cfg.deviceRate / 1000.0;
         // Start with a generous cushion (an extra device period); it shrinks once headroom is proven.
@@ -207,6 +213,7 @@ void RenderBridge::init(const BridgeConfig& cfg) {
     primeLevel_.store(target_.target());
     devicePrimed_.store(false);
     deviceUnderruns_.store(0);
+    masterSlack_ = 0;
     seenUnderruns_ = 0;
     devTotal_ = 0;
     engTotal_ = 0;
@@ -295,6 +302,10 @@ void RenderBridge::deviceRead(float* interleaved, size_t frames, double nowSec) 
     const size_t got = ring_.read(interleaved, frames);
     devTotal_ += got;
     devPos_.publish(nowSec, devTotal_);
+    // As clock master, report every frame the device played (silence on a dropout too), so the
+    // engine keeps pace with the hardware rather than with what it managed to deliver.
+    if (DevicePosition* m = mirror_.load(std::memory_order_acquire)) m->publish(nowSec, devTotal_ + (frames - got) + masterSlack_);
+    if (got < frames) masterSlack_ += frames - got;
     if (got < frames) {
         std::memset(interleaved + got * cfg_.channels, 0, (frames - got) * cfg_.channels * sizeof(float));
         // Counted by the engine thread (which knows whether we are still settling).

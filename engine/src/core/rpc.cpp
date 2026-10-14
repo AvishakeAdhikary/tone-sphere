@@ -57,7 +57,10 @@ json Engine::call(const std::string& method, const json& params) {
             settings_.blockSize = std::clamp(p["blockSize"].get<int>(), 16, kMaxBlock);
             restartAudio = true;
         }
-        if (p.contains("clockMaster")) settings_.clockMaster = p["clockMaster"].get<std::string>();
+        if (p.contains("clockMaster") && p["clockMaster"].get<std::string>() != settings_.clockMaster) {
+            settings_.clockMaster = p["clockMaster"].get<std::string>();
+            restartAudio = true;
+        }
         if (p.contains("compatMode") && p["compatMode"].get<bool>() != settings_.compatMode) {
             settings_.compatMode = p["compatMode"].get<bool>();
             refresh = true;

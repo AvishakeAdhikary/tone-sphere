@@ -156,6 +156,8 @@ public:
     /// Signals that the device stopped (engine outputs silence, state resets on next start).
     void markStopped() { stopped_.store(true, std::memory_order_release); }
     void markStarted() { stopped_.store(false, std::memory_order_release); restart_.store(true, std::memory_order_release); }
+    /// Clock master: the device thread also publishes its position here (null = not the master).
+    void setClockMirror(DevicePosition* p) { mirror_.store(p, std::memory_order_release); }
 
 private:
     BridgeConfig cfg_;
@@ -166,6 +168,7 @@ private:
     AdaptiveTarget target_;
     BurstMeter bursts_;
     std::vector<float> scratch_;
+    std::atomic<DevicePosition*> mirror_{nullptr};
     double nominal_ = 1.0;
     bool primed_ = false;
     double startedAt_ = -1;  // engine thread: first read after (re)start
@@ -192,8 +195,11 @@ public:
     size_t deviceAvailable() const { return ring_.available(); }
     void markStopped() { stopped_.store(true, std::memory_order_release); }
     void markStarted() { stopped_.store(false, std::memory_order_release); restart_.store(true, std::memory_order_release); }
+    /// Clock master: the device thread also publishes its position here (null = not the master).
+    void setClockMirror(DevicePosition* p) { mirror_.store(p, std::memory_order_release); }
 
 private:
+    std::atomic<DevicePosition*> mirror_{nullptr};
     BridgeConfig cfg_;
     BridgeStats stats_;
     FrameRing ring_;
@@ -207,6 +213,7 @@ private:
     std::atomic<bool> devicePrimed_{false};
     std::atomic<uint32_t> deviceUnderruns_{0};  // device -> engine: grow the cushion
     uint32_t seenUnderruns_ = 0;
+    uint64_t masterSlack_ = 0;  // device thread: frames the device played as silence (clock master)
     double startedAt_ = -1;  // engine thread
     DevicePosition devPos_;
     RateEstimator rate_;  // engine thread

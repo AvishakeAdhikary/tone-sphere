@@ -61,6 +61,7 @@ public:
     void stop() override;
     std::string error() const override;
     uint64_t deviceGlitches() const override { return glitches_.load(); }
+    bool deviceClocked() const override { return exclusive_; }
 
 private:
     void run();

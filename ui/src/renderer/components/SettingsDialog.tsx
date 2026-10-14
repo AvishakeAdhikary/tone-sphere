@@ -384,7 +384,7 @@ export function SettingsDialog() {
                     </option>
                   ))}
                 </select>
-                <span className="hint">{t("Every other device is kept in sync automatically (drift compensation).")}</span>
+                <span className="hint">{t('Automatic follows your audio interface when it runs in exclusive mode, for the lowest delay. Every other device is kept in sync automatically (drift compensation).')}</span>
               </label>
               <label className="field">
                 <span>{t("Processor cores")}</span>
