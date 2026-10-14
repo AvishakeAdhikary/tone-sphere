@@ -16,6 +16,7 @@
 #include <nlohmann/json.hpp>
 
 #include "backends/device.h"
+#include "core/dsp_pool.h"
 #include "core/graph.h"
 #include "core/recorder.h"
 
@@ -40,6 +41,7 @@ struct EngineSettings {
     json midiMappings = json::array();       // MIDI controller mappings (see control/remote.h)
     std::string skin = "fluent";           // UI skin id
     json customSkins = json::array();        // imported UI skins (validated by the UI)
+    int dspThreads = 0;                      // 0 = auto (multi-core when it helps), 1 = one core, N = N cores
 };
 
 struct NodeSettingsData {
@@ -223,6 +225,9 @@ private:
     // clock
     std::thread clock_;
     std::atomic<bool> clockRun_{false};
+    // Multi-core DSP: created with the clock, destroyed after it stops (core/dsp_pool.h).
+    std::unique_ptr<DspPool> dspPool_;
+    DspScheduler dsp_;
     double runningRate_ = 48000.0;
     std::atomic<float> cpuPercent_{0};
     std::atomic<uint64_t> lateCycles_{0};

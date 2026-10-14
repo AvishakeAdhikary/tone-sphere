@@ -234,6 +234,8 @@ export interface EngineSettings {
   skin?: string;
   /** Imported skins (see ui/src/renderer/skins.ts). */
   customSkins?: Array<Record<string, unknown>>;
+  /** DSP cores: 0 = auto (several cores only when the graph is heavy), 1 = one core, N = N cores. */
+  dspThreads?: number;
 }
 
 export interface EngineStatus {
@@ -241,6 +243,9 @@ export interface EngineStatus {
   sampleRate: number;
   blockSize: number;
   cpuPercent: number;
+  /** Cores the audio graph can use, and how many the last block used. */
+  dspCores?: number;
+  dspThreadsInUse?: number;
   xruns: number;
   latencyMs: number;
   clockMaster: string;

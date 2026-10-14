@@ -37,7 +37,7 @@
             <Name>tonesphere</Name>
             <Group>Administrators</Group>
             <Password>
-              <Value>ToneSphere-Test-2026!</Value>
+              <Value>@PASSWORD@</Value>
               <PlainText>true</PlainText>
             </Password>
           </LocalAccount>
@@ -47,7 +47,7 @@
         <Enabled>true</Enabled>
         <Username>tonesphere</Username>
         <Password>
-          <Value>ToneSphere-Test-2026!</Value>
+          <Value>@PASSWORD@</Value>
           <PlainText>true</PlainText>
         </Password>
         <LogonCount>9999</LogonCount>

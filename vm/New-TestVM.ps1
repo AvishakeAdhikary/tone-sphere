@@ -17,6 +17,14 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'vmcommon.ps1')
 
 if (Get-VM -Name $VmName -ErrorAction SilentlyContinue) { Write-Host "VM $VmName already exists"; return }
+if (-not (Test-Path $Iso)) {
+  # Windows 11 Enterprise evaluation (90 days, en-US x64) from Microsoft's Evaluation Center.
+  Write-Host '[0/5] Downloading the Windows 11 Enterprise evaluation ISO (about 7 GB)...'
+  New-Item -ItemType Directory -Force (Split-Path $Iso) | Out-Null
+  & curl.exe -L --fail --retry 5 -C - -o "$Iso.part" 'https://go.microsoft.com/fwlink/?LinkId=2382600&clcid=0x409&culture=en-us&country=us'
+  if ($LASTEXITCODE) { throw 'ISO download failed' }
+  Move-Item "$Iso.part" $Iso
+}
 $vhd = Join-Path $Dir "$VmName.vhdx"
 if (Test-Path $vhd) { Remove-Item $vhd -Force }
 
@@ -53,7 +61,9 @@ try {
 
   Write-Host '[3/5] Injecting unattend.xml and first-boot script...'
   New-Item -ItemType Directory -Force "${winL}:\Windows\Panther" | Out-Null
-  Copy-Item (Join-Path $PSScriptRoot 'unattend.xml') "${winL}:\Windows\Panther\unattend.xml" -Force
+  # git holds only a placeholder; the password comes from the machine-local secret (vmcommon.ps1).
+  $unattend = (Get-Content (Join-Path $PSScriptRoot 'unattend.xml') -Raw).Replace('@PASSWORD@', [Security.SecurityElement]::Escape((Get-TestVMPassword)))
+  Set-Content -Path "${winL}:\Windows\Panther\unattend.xml" -Value $unattend -Encoding utf8 -NoNewline
   New-Item -ItemType Directory -Force "${winL}:\Windows\Setup\Scripts" | Out-Null
   Copy-Item (Join-Path $PSScriptRoot 'SetupComplete.cmd') "${winL}:\Windows\Setup\Scripts\SetupComplete.cmd" -Force
 } finally {

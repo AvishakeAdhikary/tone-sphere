@@ -111,3 +111,13 @@ See `ui/src/shared/protocol.ts` (the source of truth for types) and `engine/src/
 - **Devices that aren't connected yet** become placeholders. They bind to the device when it appears.
 - **A device that returns under a new id** (another USB port, for example) takes over the routing of its old entry. This works by label or by preset rule.
 - **Skins** are UI-only (`settings.skin`, `settings.customSkins`). The format is in `ui/src/renderer/skins.ts`.
+
+## Multi-core DSP
+
+- **`settings.dspThreads`**: `0` = auto (default), `1` = one core, `N` = always `N` cores.
+  In auto mode the graph is spread over cores only while its measured DSP time is above about a
+  quarter of a block (it drops back below an eighth), so light graphs keep single-core latency.
+- **`status.dspCores`**: cores the graph can use (the clock thread plus helper threads), and
+  **`status.dspThreadsInUse`**: how many the last block used.
+- The result is identical either way: nodes of one dependency level run in parallel, and levels
+  respect routes, solo mixes, ducker sidechains and feedback loops (`engine/src/core/graph.cpp`).

@@ -82,6 +82,10 @@ json Engine::call(const std::string& method, const json& params) {
         }
         if (p.contains("theme")) settings_.theme = p["theme"].get<std::string>();
         if (p.contains("advancedMode")) settings_.advancedMode = p["advancedMode"].get<bool>();
+        if (p.contains("dspThreads")) {
+            settings_.dspThreads = std::clamp(p["dspThreads"].get<int>(), 0, 64);
+            dsp_.mode.store(settings_.dspThreads, std::memory_order_relaxed);  // live: the next block follows it
+        }
         if (restartAudio) {
             TS_INFO("Restarting audio engine");
             stopClock();

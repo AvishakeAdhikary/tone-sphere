@@ -561,11 +561,16 @@ void Engine::compileAndPublishLocked() {
             if (sc && sc->rt) {
                 fx->sidechainChannels.store(sc->rt->channels);
                 fx->sidechain.store(sc->rt->buf);
+                // The parallel schedule must know this node reads the sidechain's buffer.
+                auto self = index.find(id), from = index.find(sc->id);
+                if (self != index.end() && from != index.end())
+                    p->nodes[self->second].sidechainFrom.push_back(static_cast<int>(from->second));
             } else {
                 fx->sidechain.store(nullptr);
             }
         }
     }
+    computeLevels(*p);
 
     // Publish (RCU): the previous program stays alive until the audio thread has moved on.
     program_.store(p.get(), std::memory_order_release);
@@ -604,6 +609,10 @@ void Engine::updateTapsLocked() {
 
 // ============================================================ clock
 void Engine::startClock() {
+    if (!dspPool_) dspPool_ = std::make_unique<DspPool>(DspPool::defaultWorkers());
+    dsp_.pool = dspPool_.get();
+    dsp_.mode.store(std::max(0, settings_.dspThreads), std::memory_order_relaxed);
+    dsp_.engaged = false;
     clockRun_ = true;
     clock_ = std::thread([this] { clockThread(); });
 }
@@ -616,12 +625,13 @@ void Engine::stopClock() {
 void Engine::cycle(int frames, double now) {
     const uint64_t k = cyclesStarted_.fetch_add(1, std::memory_order_acq_rel) + 1;
     Program* p = program_.load(std::memory_order_acquire);
-    if (p) processProgram(*p, frames, now);
+    if (p) processProgram(*p, frames, now, &dsp_);
     cyclesDone_.store(k, std::memory_order_release);
 }
 
 void Engine::clockThread() {
     setAudioThreadPriority("ts-engine");
+    enableFlushToZero();
 #ifdef _WIN32
     HANDLE timer = CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
     if (!timer) timer = CreateWaitableTimerW(nullptr, FALSE, nullptr);

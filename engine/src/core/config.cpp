@@ -1,4 +1,5 @@
 // Engine configuration persistence (config.json) and scene snapshots.
+#include <algorithm>
 #include <cmath>
 
 #include "core/engine.h"
@@ -106,7 +107,7 @@ void Engine::saveConfigLocked() {
                      {"startWithSystem", settings_.startWithSystem}, {"startMinimized", settings_.startMinimized},
                      {"hotkeys", settings_.hotkeys},         {"replayBufferSeconds", settings_.replayBufferSeconds},
                      {"recordFolder", settings_.recordFolder}, {"theme", settings_.theme}, {"pluginFolders", settings_.pluginFolders}, {"oscPort", settings_.oscPort}, {"midiMappings", settings_.midiMappings}, {"skin", settings_.skin}, {"customSkins", settings_.customSkins},
-                     {"advancedMode", settings_.advancedMode}};
+                     {"advancedMode", settings_.advancedMode}, {"dspThreads", settings_.dspThreads}};
     json nodes = json::array();
     for (const std::string& id : nodeOrder_) {
         const NodeModel& n = nodes_.at(id);
@@ -181,6 +182,7 @@ void Engine::loadConfig() {
     if (s.contains("customSkins") && s["customSkins"].is_array()) settings_.customSkins = s["customSkins"];
         settings_.theme = s.value("theme", settings_.theme);
         settings_.advancedMode = s.value("advancedMode", settings_.advancedMode);
+        settings_.dspThreads = std::clamp(s.value("dspThreads", settings_.dspThreads), 0, 64);
     }
     for (const json& nj : j.value("nodes", json::array())) {
         const std::string id = nj.value("id", "");

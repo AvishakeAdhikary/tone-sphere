@@ -3,7 +3,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <unordered_map>
 
+#include "core/dsp_pool.h"
 #include "util/platform.h"
 
 namespace ts {
@@ -148,12 +150,10 @@ void tone(NodeRuntime& n, int frames, double sr) {
     }
 }
 
-}  // namespace
-
-void processProgram(Program& p, int frames, double nowSec) {
+void processNode(Program& p, ProgramNode& pn, int frames, double nowSec) {
     const double sr = p.sampleRate;
     MeterBank* bank = p.meters.get();
-    for (ProgramNode& pn : p.nodes) {
+    {
         const double t0 = nowSeconds();
         NodeRuntime& n = *pn.rt;
         if (pn.isSource && !pn.isBus) {
@@ -218,6 +218,110 @@ void processProgram(Program& p, int frames, double nowSec) {
         const float prev = n.cpuUs.load(std::memory_order_relaxed);
         n.cpuUs.store(prev + (us - prev) * 0.05f, std::memory_order_relaxed);
     }
+}
+
+struct LevelJob {
+    Program* p;
+    const int* nodes;
+    int frames;
+    double nowSec;
+};
+
+void runLevelItem(void* ctx, int i) {
+    auto& job = *static_cast<LevelJob*>(ctx);
+    processNode(*job.p, job.p->nodes[static_cast<size_t>(job.nodes[i])], job.frames, job.nowSec);
+}
+
+// Auto mode: spread the graph only when it is heavy enough for the wake-up cost to pay off,
+// judged from each node's measured DSP time. Light graphs keep the single-thread latency.
+bool worthParallel(const Program& p, int frames, bool engaged) {
+    const double period = frames / p.sampleRate * 1e6;  // microseconds per block
+    double total = 0, saved = 0;
+    for (size_t k = 0; k + 1 < p.levelStart.size(); ++k) {
+        double sum = 0, peak = 0;
+        for (int i = p.levelStart[k]; i < p.levelStart[k + 1]; ++i) {
+            const double us = p.nodes[static_cast<size_t>(p.levelNodes[static_cast<size_t>(i)])].rt->cpuUs.load(std::memory_order_relaxed);
+            sum += us;
+            peak = std::max(peak, us);
+        }
+        total += sum;
+        saved += sum - peak;  // the best a level can gain: everything but its slowest node
+    }
+    // Hysteresis: on above a quarter of the block, off again below an eighth.
+    if (!engaged) return total > 0.25 * period && saved > 0.08 * period;
+    return total > 0.12 * period && saved > 0.04 * period;
+}
+
+}  // namespace
+
+void computeLevels(Program& p) {
+    const size_t n = p.nodes.size();
+    std::unordered_map<const NodeRuntime*, int> index;
+    for (size_t i = 0; i < n; ++i) index[p.nodes[i].rt] = static_cast<int>(i);
+    // reads[i]: the nodes whose buffers node i reads during its turn.
+    std::vector<std::vector<int>> reads(n);
+    for (size_t i = 0; i < n; ++i) {
+        const ProgramNode& pn = p.nodes[i];
+        for (const Incoming& inc : pn.in)
+            if (auto it = index.find(inc.from); it != index.end()) reads[i].push_back(it->second);
+        if (pn.physicalOut)
+            for (const NodeRuntime* b : p.soloBuses)
+                if (auto it = index.find(b); it != index.end()) reads[i].push_back(it->second);
+        for (int s : pn.sidechainFrom)
+            if (s >= 0 && static_cast<size_t>(s) < n) reads[i].push_back(s);
+    }
+    // Serial order is the meaning. For node j, every earlier node it reads (or that reads it, a
+    // feedback edge seeing j's previous block) must sit in a lower level.
+    std::vector<std::vector<int>> readBy(n);
+    for (size_t i = 0; i < n; ++i)
+        for (int r : reads[i]) readBy[static_cast<size_t>(r)].push_back(static_cast<int>(i));
+    std::vector<int> level(n, 0);
+    int maxSourceLevel = -1;
+    for (size_t j = 0; j < n; ++j) {
+        int lv = 0;
+        for (int r : reads[j])
+            if (static_cast<size_t>(r) < j) lv = std::max(lv, level[static_cast<size_t>(r)] + 1);
+        for (int w : readBy[j])
+            if (static_cast<size_t>(w) < j) lv = std::max(lv, level[static_cast<size_t>(w)] + 1);
+        const ProgramNode& pn = p.nodes[j];
+        const bool pureSource = pn.isSource && !pn.isBus;
+        if (pn.isDest) lv = std::max(lv, maxSourceLevel + 1);
+        level[j] = lv;
+        if (pureSource) maxSourceLevel = std::max(maxSourceLevel, lv);
+    }
+    const int levels = n ? *std::max_element(level.begin(), level.end()) + 1 : 0;
+    p.levelNodes.clear();
+    p.levelStart.assign(1, 0);
+    p.parallelizable = false;
+    for (int k = 0; k < levels; ++k) {
+        for (size_t j = 0; j < n; ++j)
+            if (level[j] == k) p.levelNodes.push_back(static_cast<int>(j));
+        if (static_cast<int>(p.levelNodes.size()) - p.levelStart.back() >= 2) p.parallelizable = true;
+        p.levelStart.push_back(static_cast<int>(p.levelNodes.size()));
+    }
+}
+
+void processProgram(Program& p, int frames, double nowSec, DspScheduler* sched) {
+    int threads = 1;
+    if (sched && sched->pool && sched->pool->workers() > 0 && p.parallelizable && p.levelStart.size() > 1) {
+        const int mode = sched->mode.load(std::memory_order_relaxed);
+        if (mode == 0) {
+            sched->engaged = worthParallel(p, frames, sched->engaged);
+            if (sched->engaged) threads = sched->pool->workers() + 1;
+        } else if (mode >= 2) {
+            threads = std::min(mode, sched->pool->workers() + 1);
+        }
+    }
+    if (threads > 1) {
+        for (size_t k = 0; k + 1 < p.levelStart.size(); ++k) {
+            const int begin = p.levelStart[k], count = p.levelStart[k + 1] - begin;
+            LevelJob job{&p, p.levelNodes.data() + begin, frames, nowSec};
+            sched->pool->parallelFor(count, &runLevelItem, &job, threads - 1);
+        }
+    } else {
+        for (ProgramNode& pn : p.nodes) processNode(p, pn, frames, nowSec);
+    }
+    if (sched) sched->threadsInUse.store(threads, std::memory_order_relaxed);
 }
 
 }  // namespace ts

@@ -122,6 +122,7 @@ struct ProgramNode {
     std::vector<Incoming> in;
     std::vector<std::shared_ptr<Fx>> fx;
     int meterOffset = 0;
+    std::vector<int> sidechainFrom;  // nodes whose buffers this node's effects read (ducker sidechains)
 };
 
 struct Program {
@@ -131,9 +132,31 @@ struct Program {
     std::shared_ptr<MeterBank> meters;
     std::vector<NodeRuntime*> soloBuses;
     double sampleRate = 48000.0;
+
+    // Parallel schedule (computeLevels): node indices grouped by dependency level. Nodes of one
+    // level never read each other's buffers, so a level can run on several cores at once and
+    // still produce exactly what the serial order produces.
+    std::vector<int> levelNodes;  // node indices, level by level
+    std::vector<int> levelStart;  // level k is levelNodes[levelStart[k] .. levelStart[k+1])
+    bool parallelizable = false;  // some level holds two or more nodes
+};
+
+/// Fills Program::levelNodes/levelStart from the nodes' reads (routes, solo mixes, sidechains),
+/// keeping the serial order's meaning: a node that reads one processed later (a feedback loop's
+/// previous block) is scheduled before it. Destinations come after every pure source (the
+/// latency probe spans one of each). Control thread, before publishing.
+void computeLevels(Program& p);
+
+class DspPool;
+/// How the clock thread spreads the graph over cores.
+struct DspScheduler {
+    DspPool* pool = nullptr;
+    std::atomic<int> mode{0};          // 0 = auto, 1 = one thread, N >= 2 = always N threads
+    std::atomic<int> threadsInUse{1};  // what the last block used (for the UI)
+    bool engaged = false;              // audio thread: auto mode's current decision
 };
 
 /// Runs one block (frames <= kMaxBlock) of the program. Audio thread only.
-void processProgram(Program& p, int frames, double nowSec);
+void processProgram(Program& p, int frames, double nowSec, DspScheduler* sched = nullptr);
 
 }  // namespace ts

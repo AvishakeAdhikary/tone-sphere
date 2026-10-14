@@ -187,6 +187,9 @@ json Engine::state() {
                {"sampleRate", runningRate_},
                {"blockSize", settings_.blockSize},
                {"cpuPercent", cpuPercent_.load()},
+               // Cores the graph can use (the clock thread plus the DSP pool) and used in the last block.
+               {"dspCores", dspPool_ ? dspPool_->workers() + 1 : 1},
+               {"dspThreadsInUse", dsp_.threadsInUse.load(std::memory_order_relaxed)},
                {"xruns", xruns + lateCycles_.load()},
                {"latencyMs", anyOpen ? capLat + renLat + blockMs : blockMs},
                {"clockMaster", chooseClockMasterLocked()},
@@ -204,7 +207,7 @@ json Engine::state() {
                      {"startWithSystem", settings_.startWithSystem}, {"startMinimized", settings_.startMinimized},
                      {"hotkeys", settings_.hotkeys},           {"replayBufferSeconds", settings_.replayBufferSeconds},
                      {"recordFolder", settings_.recordFolder}, {"theme", settings_.theme}, {"pluginFolders", settings_.pluginFolders}, {"oscPort", settings_.oscPort}, {"midiMappings", settings_.midiMappings}, {"skin", settings_.skin}, {"customSkins", settings_.customSkins},
-                     {"advancedMode", settings_.advancedMode}};
+                     {"advancedMode", settings_.advancedMode}, {"dspThreads", settings_.dspThreads}};
     json j = {{"version", version()},
               {"protocol", 1},
               {"layoutVersion", layoutVersion_},

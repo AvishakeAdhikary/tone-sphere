@@ -1,9 +1,24 @@
 # Shared helpers for the ToneSphere test VM.
 $script:TestVmUser = 'tonesphere'
-$script:TestVmPassword = 'ToneSphere-Test-2026!'  # local test VM only, never used elsewhere
+# The VM's local admin password is generated on this machine and kept outside the repository.
+$script:TestVmSecretDir = Join-Path $env:LOCALAPPDATA 'ToneSphereVM'
+
+function Get-TestVMPassword {
+  $file = Join-Path $script:TestVmSecretDir 'vm-password.txt'
+  if (-not (Test-Path $file)) {
+    New-Item -ItemType Directory -Force $script:TestVmSecretDir | Out-Null
+    $chars = [char[]]'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789'
+    $bytes = [byte[]]::new(20)
+    [Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+    # A fixed upper/lower/digit/symbol prefix keeps Windows' complexity rules satisfied.
+    $pw = 'Ts-9a' + (-join ($bytes | ForEach-Object { $chars[$_ % $chars.Length] }))
+    Set-Content -Path $file -Value $pw -NoNewline -Encoding ascii
+  }
+  (Get-Content $file -Raw).Trim()
+}
 
 function Get-TestVMCredential {
-  $sec = ConvertTo-SecureString $script:TestVmPassword -AsPlainText -Force
+  $sec = ConvertTo-SecureString (Get-TestVMPassword) -AsPlainText -Force
   New-Object System.Management.Automation.PSCredential(".\$script:TestVmUser", $sec)
 }
 

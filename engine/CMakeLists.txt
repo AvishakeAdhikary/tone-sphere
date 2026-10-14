@@ -100,6 +100,7 @@ target_include_directories(tonesphere_core PUBLIC src)
 # ---- engine library
 set(ENGINE_SOURCES
   src/core/graph.cpp
+  src/core/dsp_pool.cpp
   src/core/engine.cpp
   src/core/config.cpp
   src/core/state.cpp
@@ -190,4 +191,12 @@ if(TONESPHERE_BUILD_TESTS)
   add_executable(tonesphere_engine_tests tests/engine_tests.cpp)
   target_link_libraries(tonesphere_engine_tests PRIVATE tonesphere_engine_lib Catch2::Catch2WithMain)
   add_test(NAME engine COMMAND tonesphere_engine_tests)
+
+  add_executable(tonesphere_parallel_tests tests/parallel_tests.cpp)
+  target_link_libraries(tonesphere_parallel_tests PRIVATE tonesphere_engine_lib Catch2::Catch2WithMain)
+  add_test(NAME parallel COMMAND tonesphere_parallel_tests)
+
+  # Multi-core speed-up on a heavy graph (not a test: prints timings).
+  add_executable(tonesphere-dsp-bench tests/dsp_bench.cpp)
+  target_link_libraries(tonesphere-dsp-bench PRIVATE tonesphere_engine_lib)
 endif()
