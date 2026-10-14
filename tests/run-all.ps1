@@ -24,7 +24,8 @@ $suites = @(
   @('plugins', 'tests\integration\plugins.mjs'),
   @('latency', 'tests\integration\latency.mjs'),
   @('osc', 'tests\integration\osc.mjs'),
-  @('presets', 'tests\integration\presets.mjs')
+  @('presets', 'tests\integration\presets.mjs'),
+  @('vbcable-signature', 'tests\integration\vbcable-signature.mjs')
 )
 $summary = @()
 foreach ($s in $suites) {

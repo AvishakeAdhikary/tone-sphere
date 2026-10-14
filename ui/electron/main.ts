@@ -17,6 +17,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import { downloadVbCable } from './vbcable';
 
 const DEV_URL = process.env.TONESPHERE_DEV_URL;
 const isMac = process.platform === 'darwin';
@@ -283,24 +284,48 @@ ipcMain.handle('tonesphere:open-sound-settings', async () => {
 ipcMain.handle('tonesphere:open-startup-settings', async () => {
   if (isWin) await shell.openExternal('ms-settings:startupapps');
 });
-// Desktop build: installs the ASIO driver + virtual audio driver shipped in resources/drivers
-// (one UAC prompt). The Store build doesn't contain drivers (MSIX can't install them).
-ipcMain.handle('tonesphere:install-drivers', async (): Promise<{ ok: boolean; message: string }> => {
-  if (!isWin || process.windowsStore) return { ok: false, message: 'Drivers come with the ToneSphere desktop installer (Driver Pack).' };
+// Desktop build: installs the ToneSphere ASIO driver (and the virtual audio driver when the build
+// carries it) from resources/drivers, plus VB-CABLE when asked, after one UAC prompt. The Store
+// build doesn't contain drivers (MSIX can't install them).
+ipcMain.handle('tonesphere:install-drivers', async (_e, opts?: { vbcable?: boolean }): Promise<{ ok: boolean; message: string }> => {
+  if (!isWin || process.windowsStore) return { ok: false, message: 'Drivers come with the ToneSphere desktop installer.' };
   const dir = path.join(process.resourcesPath, 'drivers');
   const setup = path.join(dir, 'tonesphere-setup.exe');
   if (!fs.existsSync(setup)) return { ok: false, message: 'This build does not include the drivers.' };
+  const progress = (text: string) => win?.webContents.send('tonesphere:install-progress', text);
+  let vbDir = '';
+  if (opts?.vbcable) {
+    progress('Downloading VB-CABLE from vb-audio.com…');
+    try {
+      vbDir = await downloadVbCable();
+    } catch (err) {
+      return { ok: false, message: (err as Error).message };
+    }
+  }
   const engineExe = path.join(process.resourcesPath, 'engine', 'tonesphere-engine.exe');
+  const resultFile = path.join(os.tmpdir(), `tonesphere-setup-${process.pid}-${Date.now()}.jsonl`);
   const q = (s: string) => `"${s}"`.replace(/'/g, "''");
-  const argList = ['install-all', q(dir), '--engine', q(engineExe), '--ui', q(process.execPath)].join(' ');
-  const ps = `try { $p = Start-Process -FilePath '${setup.replace(/'/g, "''")}' -ArgumentList '${argList}' -Verb RunAs -Wait -PassThru -WindowStyle Hidden; exit $p.ExitCode } catch { exit 1223 }`;
+  const args = ['install-all', q(dir), '--engine', q(engineExe), '--ui', q(process.execPath), '--result', q(resultFile)];
+  if (vbDir) args.push('--vbcable', q(vbDir));
+  const ps = `try { $p = Start-Process -FilePath '${setup.replace(/'/g, "''")}' -ArgumentList '${args.join(' ')}' -Verb RunAs -Wait -PassThru -WindowStyle Hidden; exit $p.ExitCode } catch { exit 1223 }`;
+  progress(vbDir ? 'Windows asks for permission, then VB-Audio’s setup opens: choose “Install Driver”.' : 'Windows asks for permission…');
   const code = await new Promise<number>((resolve) => {
     const child = execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], { windowsHide: true }, () => {});
     child.on('exit', (c) => resolve(c ?? 1));
   });
+  // Each step wrote one JSON line: report them in plain words.
+  let steps: Array<{ ok: boolean; message: string; reboot?: boolean }> = [];
+  try {
+    steps = fs.readFileSync(resultFile, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+    fs.rmSync(resultFile, { force: true });
+  } catch {
+    /* nothing ran (cancelled) */
+  }
+  if (vbDir) fs.rmSync(path.dirname(vbDir), { recursive: true, force: true });
   if (code === 1223) return { ok: false, message: 'Installation was cancelled.' };
-  if (code !== 0) return { ok: false, message: `Driver installation failed (code ${code}).` };
-  return { ok: true, message: 'Drivers installed.' };
+  const failed = steps.filter((s) => !s.ok);
+  if (code !== 0 || failed.length) return { ok: false, message: failed.map((s) => s.message).join(' ') || `Driver installation failed (code ${code}).` };
+  return { ok: true, message: steps.map((s) => s.message).join('. ') || 'Drivers installed.' };
 });// Presets and skins: the user picks the file; only that file is read or written.
 const fileFilters = (extensions: string[]) => [
   { name: 'ToneSphere files', extensions: extensions.filter((e) => /^[a-z0-9]+$/i.test(e)) },

@@ -70,7 +70,7 @@ const state = {
     latencyMs: 5.3,
     clockMaster: 'wasapi:out:speakers',
     platform: 'windows',
-    driverPack: { vad: false, asio: false },
+    driverPack: { vad: false, asio: false, vbcable: false },
   },
   nodes: [
     node('wasapi:in:mic', 'physical-in', 'wasapi', 'Microphone Array', 2, { subtitle: 'Intel Smart Sound', isDefault: true }),

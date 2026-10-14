@@ -251,7 +251,8 @@ export interface EngineStatus {
   clockMaster: string;
   message?: string;
   platform: 'windows' | 'linux' | 'macos';
-  driverPack: { vad: boolean; asio: boolean };
+  /** Installed drivers: ToneSphere virtual audio, ToneSphere ASIO, VB-CABLE (VB-Audio's virtual cable). */
+  driverPack: { vad: boolean; asio: boolean; vbcable?: boolean };
   testMode?: boolean;
 }
 

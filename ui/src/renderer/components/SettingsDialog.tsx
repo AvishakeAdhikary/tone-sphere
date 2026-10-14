@@ -296,13 +296,19 @@ export function SettingsDialog() {
   const [storeBuild, setStoreBuild] = useState(false);
   const [platform, setPlatform] = useState('');
   const [installing, setInstalling] = useState(false);
+  const [installNote, setInstallNote] = useState('');
+  const [withVbCable, setWithVbCable] = useState(true);
   const installDrivers = async () => {
     setInstalling(true);
+    setInstallNote('');
+    const stop = bridge.onInstallProgress(setInstallNote);
     try {
-      const r = await bridge.installDrivers();
+      const wantCable = withVbCable && !state.status.driverPack.vbcable && !state.status.driverPack.vad;
+      const r = await bridge.installDrivers({ vbcable: wantCable });
       useStore.getState().toast(r.ok ? 'info' : 'error', r.message);
       if (r.ok) await act(engine.call('devices.refresh'));
     } finally {
+      stop();
       setInstalling(false);
     }
   };
@@ -379,10 +385,26 @@ export function SettingsDialog() {
                 </select>
                 <span className="hint">Every other device is kept in sync automatically (drift compensation).</span>
               </label>
+              <label className="field">
+                <span>Processor cores</span>
+                <select value={s.dspThreads ?? 0} onChange={(e) => set({ dspThreads: Number(e.target.value) })}>
+                  <option value={0}>Automatic (recommended)</option>
+                  <option value={1}>One core</option>
+                  {Array.from({ length: Math.max(0, (st.dspCores ?? 1) - 1) }, (_, i) => i + 2).map((n) => (
+                    <option key={n} value={n}>
+                      {n} cores
+                    </option>
+                  ))}
+                </select>
+                <span className="hint">
+                  Automatic uses more cores only when effects and plugins need it, so light setups keep the lowest delay.
+                </span>
+              </label>
               <div className="field-row">
-                <div className="muted small">
+                <div className="muted small" role="status">
                   Currently running at {(st.sampleRate / 1000).toFixed(1)} kHz, {st.blockSize} samples, total latency{' '}
-                  {st.latencyMs.toFixed(1)} ms.
+                  {st.latencyMs.toFixed(1)} ms
+                  {st.dspCores && st.dspCores > 1 ? `, on ${st.dspThreadsInUse ?? 1} of ${st.dspCores} cores` : ''}.
                 </div>
                 <button className="btn small" onClick={() => void act(engine.call('engine.restart'))}>
                   Restart audio
@@ -395,48 +417,79 @@ export function SettingsDialog() {
             <>
               <h2>Devices &amp; drivers</h2>
               <div className="status-list">
-                <div className="status-item">
-                  {st.driverPack.vad ? <CheckCircle2 className="ok" size={18} /> : <XCircle className="bad" size={18} />}
-                  <div>
-                    <div>ToneSphere virtual devices</div>
-                    <div className="hint">
-                      {st.driverPack.vad
-                        ? 'Installed: virtual inputs/outputs are provided by the ToneSphere driver.'
-                        : 'Not installed: install the ToneSphere Driver Pack for native virtual devices.'}
-                    </div>
-                  </div>
-                </div>
-                <div className="status-item">
+                <div className="status-item" data-driver="asio">
                   {st.driverPack.asio ? <CheckCircle2 className="ok" size={18} /> : <XCircle className="bad" size={18} />}
                   <div>
                     <div>ToneSphere ASIO driver</div>
                     <div className="hint">
                       {st.driverPack.asio
-                        ? 'Installed: DAWs can select “ToneSphere ASIO” and several can run at once.'
-                        : 'Not installed: part of the ToneSphere Driver Pack.'}
+                        ? 'Installed: DAWs and Guitar Rig can select “ToneSphere ASIO”, several at once.'
+                        : 'Not installed: lets DAWs and Guitar Rig play into and record from ToneSphere.'}
                     </div>
                   </div>
                 </div>
+                <div className="status-item" data-driver="vbcable">
+                  {st.driverPack.vbcable || st.driverPack.vad ? <CheckCircle2 className="ok" size={18} /> : <XCircle className="bad" size={18} />}
+                  <div>
+                    <div>VB-CABLE virtual cable</div>
+                    <div className="hint">
+                      {st.driverPack.vbcable
+                        ? 'Installed: gives you a virtual speaker and microphone for apps (Compatibility mode).'
+                        : st.driverPack.vad
+                          ? 'Not needed: the ToneSphere virtual audio driver is installed.'
+                          : 'Not installed: needed for virtual speakers and microphones (Discord, OBS, games).'}{' '}
+                      <a href="https://vb-audio.com/Cable/" target="_blank" rel="noreferrer">
+                        About VB-CABLE
+                      </a>
+                    </div>
+                  </div>
+                </div>
+                {st.driverPack.vad && (
+                  <div className="status-item" data-driver="vad">
+                    <CheckCircle2 className="ok" size={18} />
+                    <div>
+                      <div>ToneSphere virtual audio driver</div>
+                      <div className="hint">Installed: virtual inputs and outputs come from the ToneSphere driver.</div>
+                    </div>
+                  </div>
+                )}
               </div>
-              {platform === 'win32' && (!st.driverPack.vad || !st.driverPack.asio) && (
-                <div className="field-row">
+              {platform === 'win32' && (!st.driverPack.asio || (!st.driverPack.vbcable && !st.driverPack.vad)) && (
+                <div className="install-drivers">
                   {storeBuild ? (
-                    <span className="hint">The drivers come with the ToneSphere desktop installer (Driver Pack). Apps from the Microsoft Store can’t install drivers.</span>
+                    <span className="hint">
+                      Apps from the Microsoft Store can’t install drivers. Install VB-CABLE from{' '}
+                      <a href="https://vb-audio.com/Cable/" target="_blank" rel="noreferrer">
+                        vb-audio.com
+                      </a>{' '}
+                      for virtual devices.
+                    </span>
                   ) : (
                     <>
-                      <button className="btn small" disabled={installing} onClick={() => void installDrivers()}>
-                        {installing ? 'Installing…' : 'Install drivers…'}
-                      </button>
-                      <span className="hint">Windows will ask for permission.</span>
+                      {!st.driverPack.vbcable && !st.driverPack.vad && (
+                        <label className="check-row">
+                          <input type="checkbox" checked={withVbCable} onChange={(e) => setWithVbCable(e.target.checked)} />
+                          <span>
+                            Also download and install VB-CABLE
+                            <span className="hint">
+                              {' '}
+                              Free donationware by VB-Audio Software, downloaded from vb-audio.com. Its own installer opens: choose
+                              “Install Driver”.
+                            </span>
+                          </span>
+                        </label>
+                      )}
+                      <div className="field-row">
+                        <button className="btn small" disabled={installing} onClick={() => void installDrivers()}>
+                          {installing ? 'Installing…' : 'Install drivers…'}
+                        </button>
+                        <span className="hint" role="status" aria-live="polite">
+                          {installing ? installNote || 'Working…' : 'Windows will ask for permission once.'}
+                        </span>
+                      </div>
                     </>
                   )}
                 </div>
-              )}
-              {platform === 'win32' && st.driverPack.asio && !st.driverPack.vad && (
-                <p className="hint">
-                  The virtual audio driver is test-signed for now, so Windows only loads it with test signing turned on. Until it is
-                  signed, Compatibility mode provides virtual devices.
-                </p>
               )}
               <label className="toggle-row">
                 <span className="grow">

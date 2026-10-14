@@ -158,3 +158,28 @@ test('a second launch focuses the running window instead of starting another Ton
   );
   expect(windows.filter((w) => w.visible)).toHaveLength(1);
 });
+
+test('devices tab offers the ASIO driver and VB-CABLE in one install', async () => {
+  await page.locator('button[aria-label="Settings"]').click();
+  await page.locator('.settings-nav button', { hasText: 'Devices' }).click();
+  await expect(page.locator('[data-driver="asio"]')).toContainText('ToneSphere ASIO driver');
+  await expect(page.locator('[data-driver="vbcable"]')).toContainText('VB-CABLE');
+  const cable = page.locator('.check-row input[type=checkbox]');
+  await expect(cable).toBeChecked(); // on by default while no virtual cable is installed
+  await expect(page.locator('.install-drivers')).toContainText('vb-audio.com');
+  await expect(page.locator('button', { hasText: 'Install drivers…' })).toBeEnabled();
+  await page.screenshot({ path: path.join(shots, '09-devices.png') });
+  await page.keyboard.press('Escape');
+});
+
+test('processor cores: automatic by default, and the choice reaches the engine', async () => {
+  await page.locator('button[aria-label="Settings"]').click();
+  const select = page.locator('label.field', { hasText: 'Processor cores' }).locator('select');
+  await expect(select).toHaveValue('0');
+  await expect(select.locator('option')).toHaveCount(9); // auto, one core, 2..8 cores (mock: 8 cores)
+  await select.selectOption('4');
+  await expect(select).toHaveValue('4');
+  await select.selectOption('0');
+  await expect(page.locator('.settings-body [role=status]').first()).toContainText('of 8 cores');
+  await page.keyboard.press('Escape');
+});

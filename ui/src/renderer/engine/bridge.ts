@@ -6,7 +6,9 @@ export interface ToneSphereBridge {
   discover(): Promise<EngineDiscovery | null>;
   platform(): Promise<{ platform: string; version: string; arch: string; store?: boolean }>;
   openStartupSettings(): Promise<void>;
-  installDrivers(): Promise<{ ok: boolean; message: string }>;
+  /** Installs the ToneSphere drivers, plus VB-CABLE (downloaded from vb-audio.com) when asked. */
+  installDrivers(opts?: { vbcable?: boolean }): Promise<{ ok: boolean; message: string }>;
+  onInstallProgress(cb: (text: string) => void): () => void;
   /** Native open dialog; returns the file's name and text, or null when cancelled. */
   openFile(title: string, extensions: string[]): Promise<{ name: string; text: string } | null>;
   /** Native save dialog; returns the saved path, or null when cancelled. */
@@ -46,6 +48,9 @@ const browserFallback: ToneSphereBridge = {
   async openStartupSettings() {},
   async installDrivers() {
     return { ok: false, message: 'Not available in the browser preview.' };
+  },
+  onInstallProgress() {
+    return () => {};
   },
   async openFile() {
     return null;

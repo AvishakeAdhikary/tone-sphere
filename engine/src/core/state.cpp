@@ -27,6 +27,18 @@ bool asioDriverInstalled() {
 #endif
 }
 
+// VB-CABLE (VB-Audio's free virtual cable) registers this driver service when it is installed.
+bool vbCableInstalled() {
+#ifdef _WIN32
+    HKEY k;
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Services\\VBAudioVACMME", 0, KEY_READ, &k) != ERROR_SUCCESS) return false;
+    RegCloseKey(k);
+    return true;
+#else
+    return false;
+#endif
+}
+
 const char* protocolKind(const NodeModel& n) {
     if (n.id == "tone") return "tone";
     if (n.bin == Bin::Bus) return "bus";
@@ -200,7 +212,7 @@ json Engine::state() {
 #else
                {"platform", "linux"},
 #endif
-               {"driverPack", {{"vad", vadPresent_}, {"asio", asioDriverInstalled()}}}};
+               {"driverPack", {{"vad", vadPresent_}, {"asio", asioDriverInstalled()}, {"vbcable", vbCableInstalled()}}}};
 
     json settings = {{"sampleRate", settings_.sampleRate},     {"blockSize", settings_.blockSize},
                      {"clockMaster", settings_.clockMaster},   {"compatMode", settings_.compatMode},

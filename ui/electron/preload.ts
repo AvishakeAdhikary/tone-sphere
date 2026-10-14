@@ -9,7 +9,12 @@ const api = {
   openPath: (p: string) => ipcRenderer.invoke('tonesphere:open-path', p),
   openSoundSettings: () => ipcRenderer.invoke('tonesphere:open-sound-settings'),
   openStartupSettings: () => ipcRenderer.invoke('tonesphere:open-startup-settings'),
-  installDrivers: () => ipcRenderer.invoke('tonesphere:install-drivers'),
+  installDrivers: (opts?: { vbcable?: boolean }) => ipcRenderer.invoke('tonesphere:install-drivers', opts),
+  onInstallProgress: (cb: (text: string) => void) => {
+    const listener = (_e: unknown, text: string) => cb(text);
+    ipcRenderer.on('tonesphere:install-progress', listener);
+    return () => ipcRenderer.removeListener('tonesphere:install-progress', listener);
+  },
   openFile: (title: string, extensions: string[]) => ipcRenderer.invoke('tonesphere:open-file', title, extensions),
   saveFile: (title: string, defaultName: string, text: string, extensions: string[]) =>
     ipcRenderer.invoke('tonesphere:save-file', title, defaultName, text, extensions),

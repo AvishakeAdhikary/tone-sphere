@@ -1771,3 +1771,17 @@ details[open].insp-section summary h3::after {
   align-items: center;
   gap: 6px;
 }
+.install-drivers {
+  display: grid;
+  gap: 8px;
+  margin: 4px 0 12px;
+}
+.check-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  cursor: pointer;
+}
+.check-row input {
+  margin-top: 3px;
+}
