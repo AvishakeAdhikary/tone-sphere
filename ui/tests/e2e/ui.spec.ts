@@ -310,3 +310,25 @@ test('the interface switches to Hindi and back', async () => {
   await expect(page.locator('.column-title').first()).toContainText('Sources');
   await page.keyboard.press('Escape');
 });
+
+test('"hear my instrument" can put a WASAPI interface in exclusive mode for the lowest delay', async () => {
+  await page.locator('button[aria-label="Hear my instrument or microphone"]').click();
+  const dlg = page.locator('.modal.wizard');
+  await dlg.locator('label.field', { hasText: 'Plugged into' }).locator('select').selectOption('wasapi:in:line');
+  await dlg.locator('label.field', { hasText: 'Listen on' }).locator('select').selectOption('wasapi:out:speakers');
+  const low = dlg.locator('.check-row', { hasText: 'Lowest delay' });
+  await expect(low).toContainText('interface in exclusive mode'); // same device: input and output
+  await expect(low.locator('input')).toBeChecked();
+  await dlg.locator('button', { hasText: 'Start listening' }).click();
+  await expect(dlg).toHaveCount(0);
+  const st = (await mockState()) as { nodes: Array<{ id: string; settings: { exclusive?: boolean; bufferMs?: number } }> };
+  for (const id of ['wasapi:in:line', 'wasapi:out:speakers']) {
+    const n = st.nodes.find((x) => x.id === id)!;
+    expect([n.settings.exclusive, n.settings.bufferMs]).toEqual([true, 3]);
+  }
+  // An ASIO input has no such option (its own driver decides).
+  await page.locator('button[aria-label="Hear my instrument or microphone"]').click();
+  await dlg.locator('label.field', { hasText: 'Plugged into' }).locator('select').selectOption('asio:in:FlexASIO');
+  await expect(dlg.locator('.check-row', { hasText: 'Lowest delay' })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+});

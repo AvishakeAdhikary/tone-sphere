@@ -177,7 +177,8 @@ export const hi: Record<string, string> = {
   'Master clock': 'मास्टर क्लॉक',
   'Automatic (recommended)': 'स्वचालित (सुझाया गया)',
   'Internal timer': 'आंतरिक टाइमर',
-  'Every other device is kept in sync automatically (drift compensation).': 'बाकी हर डिवाइस अपने-आप तालमेल में रखा जाता है (ड्रिफ़्ट सुधार)।',
+  'Automatic follows your audio interface when it runs in exclusive mode, for the lowest delay. Every other device is kept in sync automatically (drift compensation).':
+    'स्वचालित मोड आपके ऑडियो इंटरफ़ेस की घड़ी पर चलता है जब वह एक्सक्लूसिव मोड में हो, ताकि देरी सबसे कम रहे। बाकी हर डिवाइस अपने-आप तालमेल में रखा जाता है (ड्रिफ़्ट सुधार)।',
   'Processor cores': 'प्रोसेसर कोर',
   '{n} cores': '{n} कोर',
   '{n} samples ({ms} ms)': '{n} सैंपल ({ms} ms)',
@@ -275,5 +276,20 @@ export const hi: Record<string, string> = {
   'One input plays in both ears.': 'एक इनपुट दोनों कानों में बजता है।',
   'Listen on': 'कहाँ सुनें',
   'Show crash report': 'क्रैश रिपोर्ट दिखाएँ',
+  'No input is connected. Plug in your audio interface or microphone.': 'कोई इनपुट जुड़ा नहीं है। अपना ऑडियो इंटरफ़ेस या माइक्रोफ़ोन लगाएँ।',
+  'No output is connected. Plug in headphones or speakers.': 'कोई आउटपुट जुड़ा नहीं है। हेडफ़ोन या स्पीकर लगाएँ।',
+  'Input {n} (guitar, usually)': 'इनपुट {n} (आमतौर पर गिटार)',
+  'Input {n}': 'इनपुट {n}',
+  'Lowest delay': 'सबसे कम देरी',
+  'Uses the interface in exclusive mode with a 3 ms buffer. Other apps can’t play through it meanwhile.':
+    'इंटरफ़ेस को 3 ms बफ़र के साथ एक्सक्लूसिव मोड में चलाता है। तब तक दूसरे ऐप उससे आवाज़ नहीं बजा सकते।',
+  'Uses the input in exclusive mode with a 3 ms buffer. Other apps can’t record from it meanwhile.':
+    'इनपुट को 3 ms बफ़र के साथ एक्सक्लूसिव मोड में चलाता है। तब तक दूसरे ऐप उससे रिकॉर्ड नहीं कर सकते।',
+  "It starts at {db} dB, so it won't be loud.": 'यह {db} dB से शुरू होता है, इसलिए तेज़ नहीं होगा।',
+  Cancel: 'रद्द करें',
+  'Connecting…': 'जोड़ रहा है…',
+  'Start listening': 'सुनना शुरू करें',
+  "You should hear {what} in {where} now. Turn it up on the connection when you're ready.": 'अब आपको {where} में {what} सुनाई देना चाहिए। तैयार हों तो कनेक्शन पर आवाज़ बढ़ाएँ।',
+  'input {n} of {device}': '{device} का इनपुट {n}',
   Dismiss: 'हटाएँ',
 };
