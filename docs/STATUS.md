@@ -22,7 +22,7 @@ otherwise.
 | Windows audio devices: WASAPI shared/exclusive, IAudioClient3, hot-plug | ✅ | `tests/integration/host-audio.mjs` 10/10 |
 | Per-app capture and redirection | ✅ capture verified | host-audio: a playing app appears automatically and its audio reaches a mix |
 | **ToneSphere ASIO driver** (x64 + x86, multi-client, new CLSID) | ✅ | `tests/integration/asio-clients.mjs` 11/11, 64- and 32-bit hosts |
-| Engine hosting an ASIO interface driver | ✅ FlexASIO; ⏳ ASIO4ALL | `tests/integration/asio-host.mjs` 8/8 with FlexASIO looped through VB-CABLE |
+| Engine hosting an ASIO interface driver | ✅ FlexASIO; ⚠️ ASIO4ALL | `tests/integration/asio-host.mjs` 8/8 with FlexASIO looped through VB-CABLE, on the host and in the VM. **ASIO4ALL 2.22** (VM, `vm/Test-Asio4All.ps1`): listed (32 in / 16 out), exact loopback level (−12.000 dB), continuous, two DAWs share it on time, but its output bridge overruns (~100 per 10 s, fill 80 ms against a 26.5 ms target) and the shared path clicked (36 and 5 clicks in two runs). Not diagnosed yet; FlexASIO in the same VM is clean, so it is specific to ASIO4ALL there. ASIO4ALL with a real interface is untested |
 | Network audio (VBAN) | ✅ | `tests/integration/vban.mjs` 4/4 |
 | Recording and instant replay | ✅ | `tests/integration/recorder.mjs` 6/6 |
 | Idle meters and global hotkeys | ✅ | `tests/integration/meters-hotkeys.mjs` 2/2 |
@@ -38,12 +38,13 @@ otherwise.
 | "Hear my instrument" wizard | ✅ | e2e: picks the ASIO interface and the headphones, input 1 into both ears at −12 dB |
 | Window shortcuts (Ctrl+S/O/,/M/1/2, F5, Ctrl+Shift+M) | ✅ | e2e, including "not while typing" |
 | **Hindi** interface (233 strings, machine translation, unreviewed) | ✅ | `npm run check:locales` 233/233; e2e switches to Hindi and back |
-| **VB-CABLE through Settings › Devices › Install drivers** | ✅ signature check; see the VM row | `tests/integration/vbcable-signature.mjs` 6/6: the official download is accepted (signer *BUREL VINCENT*), one changed byte, a Microsoft-signed file and a missing file are refused |
-| ToneSphere virtual audio driver (renamed, new endpoint GUIDs) | ✅ builds, catalogs and test-signs; ⏳ VM re-run | `drivers/win/vad/build.ps1` with `DriverVer` stamped from `VERSION` |
-| Desktop installer (public: ASIO driver, no virtual audio driver) | ✅ builds; ⏳ VM / CI smoke | `npm run dist:win` without the VAD package: drivers folder holds the ASIO DLLs and `tonesphere-setup.exe` only |
+| **VB-CABLE through Settings › Devices › Install drivers** | ✅ in a pristine VM | `tests/integration/vbcable-signature.mjs` 6/6 (the official download is accepted, signer *BUREL VINCENT*; one changed byte, a Microsoft-signed file and a missing file are refused). `vm/Test-VbCable.ps1`: public installer installed silently and launched like a user; install-all registered ASIO, verified VB-Audio's signature and opened VB-Audio's installer (clicked by `vm/vbcable-click.ps1`); the running engine found the cable by itself. After the restart VB-Audio asks for: host-audio 10/10 through the cable; a second run had one start-up gap on the render path (0 engine dropouts). Before that restart the render path clicks, as VB-Audio's readme warns |
+| ToneSphere virtual audio driver (renamed, new endpoint GUIDs) | ✅ in the Hyper-V VM | `vm/Test-DriverInstall.ps1`: install-all installs ASIO + the driver in 3 s and the running engine finds all 8 devices (ToneSphere Output/Mic 1–4) by itself; `vm/Test-InVM.ps1` vad-audio 14/14 (mic, output and cable paths: exact frequency and level, 0 clicks, 0 gaps, 0 dropouts) |
+| Desktop installer (public: ASIO driver, no virtual audio driver) | ✅ in a pristine VM; ⏳ CI smoke on GitHub | `vm/Test-VbCable.ps1`: silent install, ASIO registered, no driver package inside, the app starts its engine on a clean Windows with no developer tools |
 | Microsoft Store package | ✅ builds unsigned | `electron-builder --win appx`: "AppX is not signed (Windows Store only build)" |
 | **Linux** engine (PipeWire) | ✅ in WSL Ubuntu 24.04 | build + unit tests 3/3; runs and answers without a PipeWire server; `linux-pipewire.mjs` 11/11 before the rename |
 | **Linux AppImage** | ✅ | `scripts/package-linux.sh` + `.github/scripts/smoke-linux.sh`: the AppImage's engine starts and answers (1.0.0) |
+| Test VM | ✅ | `vm/New-TestVM.ps1` rebuilt from the Windows 11 Enterprise evaluation (26H2); the `clean` checkpoint is now taken after first sign-in's pending restart (it used to reboot the VM a minute into every test) |
 | Single version source, release script | ✅ | `node --test scripts/` 6/6: first release v1.0.0 after the Python v0.2.1, then patch bumps |
 | CI workflow | ✅ lints (actionlint); ⏳ first run on GitHub | `.github/workflows/ci.yml`, `pages.yml` |
 | Secrets | ✅ | gitleaks over the whole merged history (120 commits): no findings. The VM password is generated per machine outside the repository |
@@ -71,7 +72,7 @@ build\x64-release\bin\tonesphere-dsp-bench.exe     # multi-core speed-up
 - **MIDI from hardware ports** (controllers and instrument keyboards): the logic is unit-tested and
   instruments are verified through `fx.midi`, but no MIDI device was connected to test the winmm
   input path itself.
-- **ASIO4ALL** as the engine's interface driver: not yet run here (FlexASIO is verified).
+- **ASIO4ALL** as the engine's interface driver: works, but overruns on its output in the VM loopback (see above); to investigate, ideally with a real interface.
 - **VST3:** plugins run inside the engine (a fault switches the plugin off, a hang can still stall
   the engine); no generic parameter sliders; plugin latency isn't compensated; plugin windows are
   Windows-only.
