@@ -1,99 +1,84 @@
 # ToneSphere build status
 
-_Last updated: 2026-10-10._
+_Last updated: 2026-10-15 (version 1.0.0)._
+
+ToneSphere 1.0 is the engine and interface first developed under the working name NexTone,
+renamed and merged into this repository, which until 0.2.1 held the Python implementation
+(tagged `legacy-python`). Every row below was re-verified after the rename unless it says
+otherwise.
 
 ## What works (verified)
 
 | Area | Status | Evidence |
 |---|---|---|
-| Real-time core: lock-free rings, varispeed resampler, drift-compensated adaptive bridges (with measured device-rate feed-forward up to ±3 %) | ✅ | real AI-04 USB interface running −10,300 ppm (1 % slow) at 44.1 kHz: before, the input underran every ~15 s and grew to 148 ms latency; now locked at −10,195 ppm with 15 ms latency. Unit tests for 1 %-slow capture and render devices; `engine/tests/core_tests.cpp`: SPSC ring stress; 44.1→48 kHz resampling better than −60 dB; ±300 ppm clocks stay locked within ±15 ppm over 10 simulated minutes with 0 dropouts |
-| Engine graph: mixes/buses, crosspoint routing, gain/mute/solo/pan/delay/polarity, meters | ✅ | `engine/tests/engine_tests.cpp` (11 cases) |
-| Built-in effects: noise suppression (RNNoise), gate, EQ, compressor, limiter, auto-duck, delay | ✅ | unit tests: limiter ceiling, gate, 4:1 compression = −15 dB |
-| **VST3 plugins**: out-of-process scan, inserts on any node, plugin windows, state in config and scenes, custom folders, crash containment | ✅ | `tests/integration/plugins.mjs` 7/7 with the bundled *ToneSphere Test Gain* plugin (see below). Real plugin: Guitar Rig 7 scans in 2 s and inserts in 0.35 s; its window opens; CPU 1.6 %, 0 xruns |
-| Windows audio devices: WASAPI shared/exclusive, IAudioClient3 low latency, hot-plug | ✅ | `tests/integration/host-audio.mjs` 10/10; render starts with 3 periods queued and grows if the device runs dry (counted as xruns) |
-| Per-app capture ("copy") and per-app redirection ("isolate", app microphones) | ✅ capture verified; redirection implemented | host-audio: a playing app appears automatically and its audio reaches a mix |
-| **ToneSphere virtual audio driver** (4 outputs + 4 mics, test-signed) | ✅ in the Hyper-V VM | `tests/integration/vad-audio.mjs` 14/14 in the VM: app → Output → ToneSphere → Mic → app, with 0 clicks, gaps or dropouts |
-| **ToneSphere ASIO driver** (x64 + x86, multi-client) | ✅ | `tests/integration/asio-clients.mjs` 11/11 for 64- and 32-bit hosts: two DAWs at once, exact timing, float32 |
-| Engine hosting a real ASIO interface (shared between DAWs) | ✅ | `tests/integration/asio-host.mjs` 8/8 with FlexASIO looped through VB-CABLE |
-| Network audio (VBAN, VoiceMeeter-compatible) | ✅ | codec unit tests + `tests/integration/vban.mjs` 4/4 |
-| Recording (multitrack WAV, 32-bit float, RF64-safe) and the instant-replay buffer | ✅ | `tests/integration/recorder.mjs` 6/6 |
-| Idle meters (OS peak meters for devices and apps that aren't routed) and global hotkeys | ✅ | `tests/integration/meters-hotkeys.mjs` 2/2 |
-| UI (Electron + React): six bins, mixes, drag-to-route, send-to menus, matrix, inspector, effects, plugins, scenes, settings, dark mode | ✅ | `ui/tests/e2e/ui.spec.ts` 7/7 |
-| **Desktop installer** (`ToneSphere-Setup-<ver>.exe`): app + engine + ASIO driver + virtual driver | ✅ in a pristine VM | `vm/Test-Installer.ps1`: silent install, drivers present, ASIO registered, the app starts the engine, vad-audio 14/14 against the installed build |
-| **Microsoft Store package** (MSIX) | ✅ sideload-tested in a pristine VM | `vm/Test-Msix.ps1`: installs, launches, finds the engine; sign-in startup task starts the engine plus the app in the tray; `tonesphere-engine.exe` alias and `tonesphere:` link are registered |
-| Windows App Certification Kit | ⚠️ 15 tests pass; no real failures found | `vm/Test-Wack.ps1` (see below) |
-| **Linux (PipeWire)**: physical devices + hot-plug, persistent ToneSphere virtual outputs/mics usable by any app, app capture | ✅ in WSL Ubuntu 24.04, PipeWire 1.0.5 | `tests/integration/linux-pipewire.mjs` 11/11 (×4 runs; one click seen once at stream start in an earlier run). Engine unit tests pass on GCC 13 |
-| **Linux desktop app** (AppImage) | ✅ launches under WSLg | `scripts/package-linux.sh`: the app starts its bundled engine and connects |
-| Round-trip latency measurement (chirp + cross-correlation, Settings › Audio) | ✅ | unit test: delay found within 0.5 sample, sub-sample refinement, no-signal rejected; `tests/integration/latency.mjs` 6/6 through VB-CABLE (~150 ms, VB-CABLE's own buffer; varies by up to ~20 ms between device restarts) |
-| "Install drivers" button (Settings › Devices, desktop build; one UAC prompt via `tonesphere-setup install-all`) | ✅ in a pristine VM | `vm/Test-DriverInstall.ps1`: with the engine already running, `install-all` installs both drivers in 4 s and the engine picks up the ASIO driver and all 8 virtual devices by itself |
-| **Driver soak under Driver Verifier** (1 h, 54 cycles of the full audio test + hot-unplug while streaming) | ✅ no crash | `vm/Test-Soak.ps1`: 0 bugchecks, no dumps; device and engine survived every disable/enable. Audio clean in 45 of 54 iterations. Iteration 1: the engine started before the driver (now fixed: the VAD backend polls for its rings). Iterations 2–4 overlapped host builds. 2–6 clicks in 5 later iterations; iterations 28–54 all clean |
-| OSC remote control | ✅ | unit tests (messages, bundles, junk); `tests/integration/osc.mjs` 5/5 with real UDP packets |
-| MIDI controllers (mappings + learn, Windows) | ⚠️ logic tested only | unit tests for the mapping logic; no MIDI input on this PC, so the winmm input path is untested with hardware |
-| UI fonts | ✅ | Segoe UI Variable for text; JetBrains Mono (bundled, OFL) for numbers, ports and paths |
-| **Portable presets** (import/export routing maps that find devices by name; placeholders for devices not plugged in yet; re-binding when a device returns under a new id) | ✅ | unit tests (matching rules); `tests/integration/presets.mjs` 9/9: import with a missing device, placeholder keeps its connection, portable export, idempotent re-import, `node.forget` |
-| **Guitar Rig live scenario** (`presets/guitar-rig-obs-ai04.tonesphere.json`) | ✅ core flow in the VM; ⏳ your check with the AI-04 | `vm/Test-GuitarRig.ps1`: the real Guitar Rig 7 (this PC's copy) on ToneSphere ASIO joins the preset in ~25 s; OBS and speaker stand-ins get its sound; virtual devices unplugged → shown disconnected, connections kept; Guitar Rig closed/reopened → sound returns clean; 0 engine xruns. On this PC the preset matched Line (AI-04), Speakers (Realtek(R) Audio) and CABLE Output at import |
-| **Skins** (Fluent, Midnight, Studio, Neon, Paper; import/export as JSON) | ✅ | UI e2e: picking Studio applies its tokens and forces dark mode; Fluent restores |
-| Virtual devices notice the driver going away while streaming (driver marks rings as gone) | ✅ in the VM | Guitar Rig scenario unplug step |
-| CLI | ✅ | `tools/tonesphere-ctl.mjs` (also finds a Store-installed engine) |
+| Real-time core: lock-free rings, varispeed resampler, drift-compensated adaptive bridges (with measured device-rate feed-forward up to ±3 %) | ✅ | `engine/tests/core_tests.cpp` (10 cases, 1,435 assertions): SPSC ring stress; 44.1→48 kHz resampling better than −60 dB; ±300 ppm and 1 %-slow devices stay locked. Real AI-04 USB interface running −10,300 ppm: locked at 15 ms latency (verified before the rename) |
+| **Multi-core DSP** (auto, one core, or N cores; `dspThreads`) | ✅ | `engine/tests/parallel_tests.cpp` (1.28 M assertions): parallel output bit-identical to the serial order over 400 blocks while switching modes, block sizes and a solo mix, with feedback loops and sidechains both ways; auto engages for a heavy graph and not a light one; 20,000 pool rounds run every item exactly once. **ThreadSanitizer**: no races (Linux, GCC 13, `setarch -R`) |
+| Multi-core speed-up | ✅ measured | `tonesphere-dsp-bench`, 8 inputs with RNNoise + EQ + compressor into 8 outputs, 128-frame blocks, i7-1165G7 (4 cores / 8 threads): one core 740–1,450 µs per block (the laptop's power state varies through the day), auto mode 290–330 µs, about 4.5× faster. LTO: one core within noise, auto ~10 % faster |
+| Denormals flushed on every audio thread (FTZ/DAZ) | ✅ | `enableFlushToZero()` on the clock thread and every DSP worker |
+| Engine graph: mixes, crosspoints, gain/mute/solo/pan/delay/polarity, meters | ✅ | `engine/tests/engine_tests.cpp` (17 cases) |
+| Built-in effects: RNNoise, gate, EQ, compressor, limiter, auto-duck, delay | ✅ | unit tests: limiter ceiling, gate, 4:1 compression = −15 dB |
+| **VST3 effects**: out-of-process scan, inserts, windows, state in config and scenes | ✅ | `tests/integration/plugins.mjs` 7/7 (ToneSphere Test Gain). Guitar Rig 7 scans in 2 s, inserts in 0.35 s (before the rename) |
+| **VST3 instruments played by MIDI** + on-screen keyboard | ✅ | `tests/integration/instruments.mjs` 7/7 with the bundled *ToneSphere Test Synth*: listed as an instrument, A4 at full velocity −6.02 dBFS, CC 7 = 64 lowers it by the expected 5.9 dB (IMidiMapping), note off silences it; e2e: the keyboard sends C4/C3/E3 on and off |
+| Windows audio devices: WASAPI shared/exclusive, IAudioClient3, hot-plug | ✅ | `tests/integration/host-audio.mjs` 10/10 |
+| Per-app capture and redirection | ✅ capture verified | host-audio: a playing app appears automatically and its audio reaches a mix |
+| **ToneSphere ASIO driver** (x64 + x86, multi-client, new CLSID) | ✅ | `tests/integration/asio-clients.mjs` 11/11, 64- and 32-bit hosts |
+| Engine hosting an ASIO interface driver | ✅ FlexASIO; ⏳ ASIO4ALL | `tests/integration/asio-host.mjs` 8/8 with FlexASIO looped through VB-CABLE |
+| Network audio (VBAN) | ✅ | `tests/integration/vban.mjs` 4/4 |
+| Recording and instant replay | ✅ | `tests/integration/recorder.mjs` 6/6 |
+| Idle meters and global hotkeys | ✅ | `tests/integration/meters-hotkeys.mjs` 2/2 |
+| Meters only while someone watches (`meters.subscribe`; the hidden window unsubscribes; no subscriber = no meter work on the audio thread) | ✅ | `tests/integration/meters-subscribe.mjs` 4/4 |
+| Round-trip latency measurement | ✅ | `tests/integration/latency.mjs` 6/6 through VB-CABLE |
+| OSC remote control (and the old `/nextone/` prefix) | ✅ | `tests/integration/osc.mjs` 5/5; unit test for the alias |
+| HTTP JSON-RPC for scripts (`POST /rpc`, token, refuses web pages) | ✅ | `tests/integration/http-rpc.mjs` 6/6 |
+| Crash reports (engine handler + notice in the app) | ✅ | `tests/integration/crash-report.mjs`: Windows 4/4 (report + MDMP minidump), Linux 3/3 (SIGSEGV); e2e: the notice shows once |
+| Portable presets (and old `nextone-preset` files) | ✅ | `tests/integration/presets.mjs` 9/9 |
+| Moving from NexTone: settings, presets, plugin cache, window profile copied once; old preset/skin formats accepted | ✅ | unit test (copy once, never over an existing config, skips runtime files) |
+| **UI** (Electron + React): bins, matrix, inspector, effects, instruments, scenes, settings, skins | ✅ | `ui/tests/e2e/ui.spec.ts` 17/17 |
+| **Splash** (the README banner, re-encoded to 610 KB WebM) and **single instance** | ✅ | e2e: the splash hands over to the main window; a second launch exits and leaves one window |
+| "Hear my instrument" wizard | ✅ | e2e: picks the ASIO interface and the headphones, input 1 into both ears at −12 dB |
+| Window shortcuts (Ctrl+S/O/,/M/1/2, F5, Ctrl+Shift+M) | ✅ | e2e, including "not while typing" |
+| **Hindi** interface (233 strings, machine translation, unreviewed) | ✅ | `npm run check:locales` 233/233; e2e switches to Hindi and back |
+| **VB-CABLE through Settings › Devices › Install drivers** | ✅ signature check; see the VM row | `tests/integration/vbcable-signature.mjs` 6/6: the official download is accepted (signer *BUREL VINCENT*), one changed byte, a Microsoft-signed file and a missing file are refused |
+| ToneSphere virtual audio driver (renamed, new endpoint GUIDs) | ✅ builds, catalogs and test-signs; ⏳ VM re-run | `drivers/win/vad/build.ps1` with `DriverVer` stamped from `VERSION` |
+| Desktop installer (public: ASIO driver, no virtual audio driver) | ✅ builds; ⏳ VM / CI smoke | `npm run dist:win` without the VAD package: drivers folder holds the ASIO DLLs and `tonesphere-setup.exe` only |
+| Microsoft Store package | ✅ builds unsigned | `electron-builder --win appx`: "AppX is not signed (Windows Store only build)" |
+| **Linux** engine (PipeWire) | ✅ in WSL Ubuntu 24.04 | build + unit tests 3/3; runs and answers without a PipeWire server; `linux-pipewire.mjs` 11/11 before the rename |
+| **Linux AppImage** | ✅ | `scripts/package-linux.sh` + `.github/scripts/smoke-linux.sh`: the AppImage's engine starts and answers (1.0.0) |
+| Single version source, release script | ✅ | `node --test scripts/` 6/6: first release v1.0.0 after the Python v0.2.1, then patch bumps |
+| CI workflow | ✅ lints (actionlint); ⏳ first run on GitHub | `.github/workflows/ci.yml`, `pages.yml` |
+| Secrets | ✅ | gitleaks over the whole merged history (120 commits): no findings. The VM password is generated per machine outside the repository |
 
 ## How to run
 
 ```powershell
-.\scripts\build.ps1 -Test            # engine, ASIO driver, tools, test plugin + unit tests (x64)
+.\scripts\setup-dev.ps1              # toolchain from a fresh clone (see docs/DEVELOPMENT.md)
+.\scripts\build.ps1 -Test            # engine, ASIO driver, tools, test plugins + unit tests (x64)
 .\scripts\build.ps1 -Arch x86        # 32-bit ASIO driver
 .\drivers\win\vad\build.ps1          # kernel driver package (test-signed)
-cd ui; npm run build; npx electron . # UI (starts the engine automatically when packaged)
-
-.\tests\run-all.ps1                  # every host-safe suite (+ UI e2e); needs VB-CABLE + FlexASIO
-.\vm\Test-InVM.ps1                   # virtual driver tests in the Hyper-V VM
-.\vm\Test-Installer.ps1              # desktop installer in a pristine VM
-.\vm\Test-Msix.ps1                   # Store package in a pristine VM
-.\vm\Test-Wack.ps1                   # App Certification Kit in a pristine VM
-
-cd ui; npm run dist:win              # desktop installer  → ui\release\
-cd ui; npm run dist:store            # Store package      → ui\release-store\  (see packaging\store\README.md)
-wsl -e bash scripts/build-linux.sh   # Linux engine + unit tests (WSL)
-node tests\integration\linux-pipewire.mjs   # Linux end-to-end (PipeWire in WSL)
-wsl -e bash scripts/package-linux.sh # Linux AppImage → ui\release\
+.\tests\run-all.ps1                  # every host-safe suite + UI e2e; needs VB-CABLE + FlexASIO
+.\vm\Test-VbCable.ps1                # public installer + VB-CABLE "Install drivers" in a pristine VM
+.\vm\Test-DriverInstall.ps1 ; .\vm\Test-InVM.ps1   # virtual audio driver in the VM
+build\x64-release\bin\tonesphere-dsp-bench.exe     # multi-core speed-up
 ```
 
 ## Pending / known limitations
 
-- **Virtual audio driver signing.** The driver is **test-signed**. It only loads on PCs with
-  Windows test signing on; it was verified inside the Hyper-V test VM and never installed on
-  the host. Public use needs Microsoft attestation signing, which requires an EV certificate.
-  Without it, ToneSphere uses Compatibility mode (VB-CABLE etc.) for virtual devices. The ASIO
-  driver is user-mode and works everywhere.
-- **Store submission is yours to do.** Follow `packaging/store/README.md`: identity values
-  from Partner Center, listing text, privacy policy, and a GPLv3 source link.
-- **WACK.** Run in a pristine VM, 15 tests pass. The other results are not real failures:
-  - **Six metadata tests** can't start in the VM ("platform metadata directory does not
-    exist") because only part of the SDK is copied there. They validate WinRT `.winmd`
-    components, and ToneSphere ships none.
-  - **"Blocked executables" and "Platform appropriate files"** are optional tests. The
-    blocked-executable findings are string matches such as "cmd" inside Chromium resources,
-    expected for every Electron app.
-  - **DPI awareness** is a warning only.
-
-  To get a fully clean report, run WACK on a PC with the Windows SDK installed. It installs the
-  package and needs the dev certificate trusted, so it was not run on this host.
-- **Audio under heavy CPU load.** With the test VM saturating all cores, the VB-CABLE loopback
-  suites (host-audio, asio-host) can record clicks that the engine itself doesn't see (no ring
-  underrun, no device starvation). With the VM idle, every suite passes.
-  - A real start-up issue was found and fixed: only 2 WASAPI periods were queued when a stream
-    started, which starved VB-CABLE once in roughly a third of runs. The queue now starts at 3
-    periods and adapts.
-  - Device starvation is now detected and reported as xruns.
-- **VST3 limitations.**
-  - Plugins run inside the engine. A fault while processing switches the plugin off instead of
-    crashing the engine, but a plugin can still hang the engine.
-  - There are no generic sliders for plugin parameters; use the plugin window.
-  - Plugin latency isn't compensated.
-  - Plugin windows are DPI-unaware, so Windows scales them.
-  - Plugin windows are Windows-only for now.
-- **Not implemented yet:**
-  - Linux: per-app output redirection and app microphones (only app capture exists); plugin windows; MIDI. macOS: not started.
-  - MIDI/OSC control.
-  - FLAC recording (WAV only).
-- **Reconnect transients.** Re-enabling the virtual audio driver in the VM makes Windows re-create all 8 endpoints, and the audio stack glitches for roughly 10–15 s (the test recorder itself loses data). The sound comes back by itself, and later measurements are clean, with no xruns. Streams that have just started can click during their first seconds. Unplugging the AI-04 over USB is a different, single-device path; that's for the owner's manual test.
-- **Intermittent:** asio-host "shared interface" clicked once (13 clicks, −4.95 dB) in a `run-all` that started right after a full rebuild. It passed 5 times in a row afterwards on an idle machine.
+- **Virtual audio driver signing.** Test-signed only; public builds leave it out until Microsoft
+  attestation-signs it (needs an EV certificate). Virtual devices come from VB-CABLE meanwhile.
+- **VB-CABLE install is VB-Audio's installer.** Its licence forbids building it into another
+  installer, so ToneSphere downloads, verifies and opens it; the user clicks *Install Driver*.
+- **Store submission is the owner's** (`packaging/store/README.md`).
+- **MIDI from hardware ports** (controllers and instrument keyboards): the logic is unit-tested and
+  instruments are verified through `fx.midi`, but no MIDI device was connected to test the winmm
+  input path itself.
+- **ASIO4ALL** as the engine's interface driver: not yet run here (FlexASIO is verified).
+- **VST3:** plugins run inside the engine (a fault switches the plugin off, a hang can still stall
+  the engine); no generic parameter sliders; plugin latency isn't compensated; plugin windows are
+  Windows-only.
+- **Not implemented:** macOS; Linux per-app redirection, plugin windows and MIDI; FLAC recording.
+  From the old Python ToneSphere, deliberately not carried over: its custom UDP/TCP/Opus network
+  protocol (VBAN interoperates with existing tools instead), the PortAudio fallback host and the
+  macOS CoreAudio plug-in (a whole platform port), and its own kernel cable driver (superseded).
+- **Audio under heavy CPU load.** With the host saturated (builds, the VM busy), the VB-CABLE
+  loopback suites can record clicks the engine itself doesn't see; run them on an idle machine.
+- **Hindi** is a machine translation, not yet reviewed by a native speaker.

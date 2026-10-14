@@ -70,10 +70,13 @@ async function main() {
     return;
   }
 
+  // The cable's endpoint names differ between VB-CABLE versions ("CABLE Input", "CABLE In 16 Ch"):
+  // the probe uses whichever endpoints the engine paired. A virtual input is named after the
+  // endpoint apps record from (CABLE Output), a virtual output after the one apps play into.
   // 1) Render path: tone -> virtual input (CABLE Input) -> probe records CABLE Output.
   await call('tone.set', { enabled: true, freq: 1000, levelDb: -12, target: cableIn.id });
   await sleep(1000);
-  const cap = JSON.parse(execFileSync(probe, ['capture', 'CABLE Output', String(SOAK)], { encoding: 'utf8' }).trim());
+  const cap = JSON.parse(execFileSync(probe, ['capture', cableIn.name, String(SOAK)], { encoding: 'utf8' }).trim());
   check('render path: frequency', Math.abs(cap.freqHz - 1000) < 5, cap.freqHz);
   check('render path: level', Math.abs(cap.peakDb + 12) < 0.3, cap.peakDb);
   check('render path: no clicks', cap.clicks === 0, { clicks: cap.clicks, firstGapAt: cap.firstGapAt, captureDiscontinuities: cap.discontinuities });
@@ -85,7 +88,7 @@ async function main() {
   // 2) Capture path: probe plays into CABLE Input -> engine records it -> mix bus meter.
   const bus = await call('bus.create', { name: 'Test mix', channels: 2 });
   await call('route.connect', { from: cableOut.id, to: bus.id });
-  const player = spawn(probe, ['play', 'CABLE Input', '440', '-6', String(SOAK + 20)]);
+  const player = spawn(probe, ['play', cableOut.name, '440', '-6', String(SOAK + 20)]);
   await sleep(2500);
   const levels = [];
   for (let i = 0; i < SOAK * 4; i++) {

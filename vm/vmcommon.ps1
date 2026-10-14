@@ -35,6 +35,25 @@ function Wait-TestVM {
   throw "VM $VmName did not become reachable within $TimeoutMinutes minutes"
 }
 
+# Waits until Windows in the VM has been up for $Minutes without restarting, riding out a
+# restart it still had pending (first sign-in reconfiguration, updates).
+function Wait-TestVMSettled {
+  param([string]$VmName = 'ToneSphere-DriverTest', [int]$Minutes = 4, [int]$TimeoutMinutes = 30)
+  $cred = Get-TestVMCredential
+  $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
+  while ((Get-Date) -lt $deadline) {
+    Wait-TestVM -VmName $VmName
+    try {
+      $up = Invoke-Command -VMName $VmName -Credential $cred -ErrorAction Stop -ScriptBlock {
+        ((Get-Date) - (Get-CimInstance Win32_OperatingSystem).LastBootUpTime).TotalMinutes
+      }
+      if ($up -ge $Minutes) { return }
+    } catch {}
+    Start-Sleep -Seconds 30
+  }
+  throw "VM $VmName kept restarting for $TimeoutMinutes minutes"
+}
+
 function Restore-TestVM {
   param([string]$VmName = 'ToneSphere-DriverTest', [string]$Checkpoint = 'clean')
   Stop-VM -Name $VmName -TurnOff -Force -ErrorAction SilentlyContinue

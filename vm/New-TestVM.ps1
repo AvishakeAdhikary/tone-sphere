@@ -87,6 +87,9 @@ Invoke-Command -VMName $VmName -Credential (Get-TestVMCredential) -ScriptBlock {
   bcdedit | Select-String testsigning
   Get-Service Audiosrv, AudioEndpointBuilder | Select-Object Name, Status
 }
+# First sign-in still has a restart pending (CloudExperienceHost "reconfiguration"). Let it happen
+# before the checkpoint, or every Restore-TestVM reboots the VM a minute later, mid-test.
+Wait-TestVMSettled -VmName $VmName
 Stop-VM -Name $VmName -Force
 Checkpoint-VM -Name $VmName -SnapshotName 'clean'
 Start-VM -Name $VmName
