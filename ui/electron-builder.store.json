@@ -1,0 +1,28 @@
+{
+  "extends": null,
+  "appId": "com.nextone.app",
+  "productName": "NexTone",
+  "directories": { "output": "release-store", "buildResources": "build" },
+  "files": ["dist/**", "dist-electron/**", "assets/**", "package.json"],
+  "extraResources": [
+    { "from": "../build/x64-release/bin/nextone-engine.exe", "to": "engine/nextone-engine.exe" },
+    { "from": "../build/x64-release/bin/nextone-plugscan.exe", "to": "engine/nextone-plugscan.exe" },
+    { "from": "../LICENSE", "to": "LICENSE.txt" }
+  ],
+  "win": { "icon": "assets/icon.ico", "target": ["appx"], "executableName": "NexTone" },
+  "appx": {
+    "applicationId": "NexTone",
+    "identityName": "NexTone.NexTone",
+    "publisher": "CN=NexTone Dev",
+    "publisherDisplayName": "NexTone",
+    "displayName": "NexTone",
+    "backgroundColor": "transparent",
+    "showNameOnTiles": false,
+    "languages": ["en-US"],
+    "customExtensionsPath": "build/appx-extensions.xml",
+    "customManifestPath": "build/appxmanifest.xml",
+    "minVersion": "10.0.19041.0",
+    "maxVersionTested": "10.0.26100.0",
+    "artifactName": "NexTone-${version}.${ext}"
+  }
+}
