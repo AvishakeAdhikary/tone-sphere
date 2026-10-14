@@ -10,7 +10,7 @@
 #include <thread>
 #include <vector>
 
-namespace nt {
+namespace ts {
 
 class WsServer {
 public:
@@ -47,4 +47,4 @@ private:
     std::vector<std::shared_ptr<Client>> clients_;
 };
 
-}  // namespace nt
+}  // namespace ts

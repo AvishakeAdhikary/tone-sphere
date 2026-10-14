@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-namespace nt {
+namespace ts {
 
 struct ParamDef {
     std::string id;
@@ -67,4 +67,4 @@ private:
 /// Creates a built-in effect by type ("gate", "denoise", "eq", "compressor", "limiter", "ducker", "delay").
 std::shared_ptr<Fx> createBuiltinFx(const std::string& type);
 
-}  // namespace nt
+}  // namespace ts

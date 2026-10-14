@@ -1,4 +1,4 @@
-// WebSocket client for the NexTone engine: typed RPC, state events, binary meters.
+// WebSocket client for the ToneSphere engine: typed RPC, state events, binary meters.
 import {
   METER_MAGIC,
   type EngineDiscovery,
@@ -126,7 +126,7 @@ export class EngineClient {
   ): Promise<RpcMethods[M]['result']> {
     const ws = this.ws;
     if (!ws || ws.readyState !== WebSocket.OPEN) {
-      return Promise.reject(new Error('Not connected to the NexTone engine'));
+      return Promise.reject(new Error('Not connected to the ToneSphere engine'));
     }
     const id = this.nextId++;
     const params = args[0];

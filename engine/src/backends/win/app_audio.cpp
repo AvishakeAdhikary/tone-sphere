@@ -36,7 +36,7 @@ using Microsoft::WRL::FtmBase;
 using Microsoft::WRL::RuntimeClass;
 using Microsoft::WRL::RuntimeClassFlags;
 
-namespace nt {
+namespace ts {
 
 // Undocumented but stable since Windows 10 1803 (used by Windows Settings and EarTrumpet).
 // Only the method we need is declared after the placeholder slots.
@@ -146,7 +146,7 @@ AppAudio::AppAudio() {
         }
         WindowsDeleteString(cls);
     }
-    if (!policy_) NT_WARN("Per-app device redirection is not available on this Windows version");
+    if (!policy_) TS_WARN("Per-app device redirection is not available on this Windows version");
 }
 
 AppAudio::~AppAudio() { shutdown(); }
@@ -202,7 +202,7 @@ bool AppAudio::poll() {
                 const std::wstring path = processPath(pid);
                 if (path.empty()) continue;
                 const std::string exe = lowerExe(path);
-                if (exe == "nextone.exe" || exe == "nextone-engine.exe" || exe == "audiodg.exe") continue;
+                if (exe == "tonesphere.exe" || exe == "tonesphere-engine.exe" || exe == "audiodg.exe") continue;
                 AppSession& a = found[exe];
                 a.exe = exe;
                 a.path = path;
@@ -349,7 +349,7 @@ void AppAudio::applyRouting(Engine& e) {
     auto usedByRoutes = [&](const std::string& id) {
         return std::any_of(e.routes_.begin(), e.routes_.end(), [&](const RouteModel& r) { return r.from == id || r.to == id; });
     };
-    // Prefer NexTone's own virtual devices; fall back to compatibility cables.
+    // Prefer ToneSphere's own virtual devices; fall back to compatibility cables.
     auto freeDevice = [&](Bin bin) -> NodeModel* {
         for (DeviceKind k : {DeviceKind::Vad, DeviceKind::Compat})
             for (auto& [id, n] : e.nodes_)
@@ -367,7 +367,7 @@ void AppAudio::applyRouting(Engine& e) {
             if (want && !cableOut_.count(exe)) {
                 NodeModel* dev = freeDevice(Bin::VirtualOut);
                 if (!dev) {
-                    n.streamError = "Isolating an app needs a free virtual output (install the NexTone Driver Pack or a virtual cable)";
+                    n.streamError = "Isolating an app needs a free virtual output (install the ToneSphere Driver Pack or a virtual cable)";
                     continue;
                 }
                 if (setAppEndpoint(n.app.pids, false, dev->device.appEndpointId)) {
@@ -376,7 +376,7 @@ void AppAudio::applyRouting(Engine& e) {
                     redirectedOut_[exe] = dev->device.appEndpointId;
                     busy.insert(dev->id);
                     if (n.stream) e.closeStreamLocked(n);  // switch from loopback to the virtual device
-                    NT_INFO("Isolated %s on %s", exe.c_str(), dev->name.c_str());
+                    TS_INFO("Isolated %s on %s", exe.c_str(), dev->name.c_str());
                 } else {
                     n.streamError = "Windows refused to move this app to a virtual output";
                 }
@@ -386,13 +386,13 @@ void AppAudio::applyRouting(Engine& e) {
                 cableOutDev_.erase(exe);
                 redirectedOut_.erase(exe);
                 if (n.stream) e.closeStreamLocked(n);
-                NT_INFO("Released %s from isolation", exe.c_str());
+                TS_INFO("Released %s from isolation", exe.c_str());
             }
         } else if (n.bin == Bin::AppIn) {
             if (needed && !cableIn_.count(exe)) {
                 NodeModel* dev = freeDevice(Bin::VirtualIn);
                 if (!dev) {
-                    n.streamError = "Sending sound into an app needs a free virtual microphone (install the NexTone Driver Pack or a virtual cable)";
+                    n.streamError = "Sending sound into an app needs a free virtual microphone (install the ToneSphere Driver Pack or a virtual cable)";
                     continue;
                 }
                 if (setAppEndpoint(n.app.pids, true, dev->device.appEndpointId)) {
@@ -400,7 +400,7 @@ void AppAudio::applyRouting(Engine& e) {
                     cableInDev_[exe] = dev->device;
                     redirectedIn_[exe] = dev->device.appEndpointId;
                     busy.insert(dev->id);
-                    NT_INFO("%s now records from %s", exe.c_str(), dev->name.c_str());
+                    TS_INFO("%s now records from %s", exe.c_str(), dev->name.c_str());
                 } else {
                     n.streamError = "Windows refused to change this app's microphone";
                 }
@@ -462,7 +462,7 @@ std::unique_ptr<DeviceStream> AppAudio::open(NodeModel& n, double engineRate, st
     IAudioClient* client = handler->client_.Detach();
     auto s = std::make_unique<WasapiStream>(client, true, n.name);
     if (!s->initShared(20.0, true, &fmt, err)) return nullptr;
-    NT_INFO("Capturing %s (pid %u, process tree)", exe.c_str(), params.ProcessLoopbackParams.TargetProcessId);
+    TS_INFO("Capturing %s (pid %u, process tree)", exe.c_str(), params.ProcessLoopbackParams.TargetProcessId);
     return s;
 }
 
@@ -486,4 +486,4 @@ void AppAudio::handleRpc(Engine& e, const std::string& method, const nlohmann::j
     }
 }
 
-}  // namespace nt
+}  // namespace ts

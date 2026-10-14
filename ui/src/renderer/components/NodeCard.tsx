@@ -7,7 +7,7 @@ import { Meter } from './Meter';
 import { Fader } from './Fader';
 import { SendToMenu } from './SendToMenu';
 
-const DRAG_TYPE = 'application/x-nextone-node';
+const DRAG_TYPE = 'application/x-tonesphere-node';
 
 function statusLabel(n: NodeInfo): string | null {
   if (n.state === 'unavailable') return n.statusText ?? 'Disconnected';

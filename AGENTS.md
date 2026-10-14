@@ -1,16 +1,16 @@
-# AGENTS.md: working on NexTone
+# AGENTS.md: working on ToneSphere
 
 Working rules for coding agents (and humans) changing this repository. Start with
-[README.md](README.md) for what NexTone is. Read [docs/STATUS.md](docs/STATUS.md) for what is
+[README.md](README.md) for what ToneSphere is. Read [docs/STATUS.md](docs/STATUS.md) for what is
 verified and what is pending.
 
 ## Safety rules (non-negotiable)
 
 - **Kernel driver work happens only in the Hyper-V test VM** (`vm/`, VM name
-  `NexTone-DriverTest`). This covers installing it, Driver Verifier and soak tests. Never install
-  `nextonevad.sys` on the development PC, and never reboot the host. Rebooting the VM is fine:
+  `ToneSphere-DriverTest`). This covers installing it, Driver Verifier and soak tests. Never install
+  `tonespherevad.sys` on the development PC, and never reboot the host. Rebooting the VM is fine:
   `Restore-TestVM` reverts to the `clean` checkpoint.
-- Don't run `AsioLinkProToolPatcher`, and don't disassemble `asiolinkpro.exe`. NexTone is a
+- Don't run `AsioLinkProToolPatcher`, and don't disassemble `asiolinkpro.exe`. ToneSphere is a
   clean-room design based on the public manual and install script. These files are the owner's
   property and are git-ignored.
 - **Don't submit anything to Partner Center or publish releases.** The owner does that
@@ -25,7 +25,7 @@ verified and what is pending.
 | Area | Path | Build / run |
 |---|---|---|
 | Engine (C++20) | `engine/` | `.\scripts\build.ps1 [-Test] [-Arch x86]` → `build\x64-release\bin` |
-| Linux engine | same sources | `wsl -e bash scripts/build-linux.sh` → `~/nt-build/bin` |
+| Linux engine | same sources | `wsl -e bash scripts/build-linux.sh` → `~/ts-build/bin` |
 | UI (Electron + React + Vite) | `ui/` | `npm run build`, `npm run typecheck`, `npx playwright test` |
 | ASIO driver | `drivers/win/asio/` | part of `build.ps1` (x64 and x86) |
 | Virtual audio driver | `drivers/win/vad/` | `.\drivers\win\vad\build.ps1` (cl/link + Inf2Cat + test signing) |
@@ -33,7 +33,7 @@ verified and what is pending.
 
 `scripts/build.ps1` sets up the MSVC environment itself (`scripts/vsenv.ps1`).
 - **Stop a running engine before rebuilding.** Otherwise the linker can't overwrite
-  `nextone-engine.exe`: run `Get-Process nextone-engine | Stop-Process`.
+  `tonesphere-engine.exe`: run `Get-Process tonesphere-engine | Stop-Process`.
 - **VS Code terminals set `ELECTRON_RUN_AS_NODE=1`.** The UI scripts and tests remove it. Do the
   same if you launch Electron yourself.
 
@@ -72,8 +72,8 @@ verified and what is pending.
 ## Style
 
 - **C++.**
-  - C++20, MSVC with a static CRT. Use the 4-space style of the surrounding code, `nt::`
-    namespace, and `NT_INFO`/`NT_WARN` for logging.
+  - C++20, MSVC with a static CRT. Use the 4-space style of the surrounding code, `ts::`
+    namespace, and `TS_INFO`/`TS_WARN` for logging.
   - Error messages that reach the UI are plain sentences a non-expert understands.
   - Comments explain *why*, as in the existing code.
 - **TypeScript/React.**

@@ -11,7 +11,7 @@
 #include "util/log.h"
 #include "util/platform.h"
 
-namespace nt {
+namespace ts {
 
 namespace fs = std::filesystem;
 
@@ -187,7 +187,7 @@ bool Recorder::start(const std::vector<std::string>& nodeIds, const std::string&
         if (it == tracks_.end()) continue;
         Track& t = it->second;
         auto w = std::make_unique<WavWriter>();
-        const std::string path = joinPath(folder, "NexTone " + ts + " - " + sanitize(t.tap.name) + ".wav");
+        const std::string path = joinPath(folder, "ToneSphere " + ts + " - " + sanitize(t.tap.name) + ".wav");
         if (!w->open(path, t.tap.channels, rate_)) {
             error = "Cannot write " + path;
             continue;
@@ -202,7 +202,7 @@ bool Recorder::start(const std::vector<std::string>& nodeIds, const std::string&
     }
     startedAt_ = nowSeconds();
     recording_ = true;
-    NT_INFO("Recording %d track(s) to %s", opened, folder.c_str());
+    TS_INFO("Recording %d track(s) to %s", opened, folder.c_str());
     return true;
 }
 
@@ -221,7 +221,7 @@ std::vector<std::string> Recorder::stop() {
         files.push_back(t.file->path());
         t.file.reset();
     }
-    NT_INFO("Recording stopped (%zu files)", files.size());
+    TS_INFO("Recording stopped (%zu files)", files.size());
     return files;
 }
 
@@ -239,7 +239,7 @@ std::vector<std::string> Recorder::saveReplay(int seconds, const std::string& fo
         const size_t cap = t.replay.size() / ch;
         const size_t want = std::min(t.replayFill, static_cast<size_t>(seconds * rate_));
         WavWriter w;
-        const std::string path = joinPath(folder, "NexTone Replay " + ts + " - " + sanitize(t.tap.name) + ".wav");
+        const std::string path = joinPath(folder, "ToneSphere Replay " + ts + " - " + sanitize(t.tap.name) + ".wav");
         if (!w.open(path, t.tap.channels, rate_)) continue;
         size_t start = (t.replayPos + cap - want) % cap;
         size_t left = want;
@@ -257,7 +257,7 @@ std::vector<std::string> Recorder::saveReplay(int seconds, const std::string& fo
 }
 
 void Recorder::writerLoop() {
-    setThreadName("nt-recorder");
+    setThreadName("ts-recorder");
     std::vector<float> buf;
     while (running_) {
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
@@ -281,4 +281,4 @@ void Recorder::writerLoop() {
     }
 }
 
-}  // namespace nt
+}  // namespace ts

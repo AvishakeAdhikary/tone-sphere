@@ -1,6 +1,6 @@
-# Shared helpers for the NexTone test VM.
-$script:TestVmUser = 'nextone'
-$script:TestVmPassword = 'NexTone-Test-2026!'  # local test VM only, never used elsewhere
+# Shared helpers for the ToneSphere test VM.
+$script:TestVmUser = 'tonesphere'
+$script:TestVmPassword = 'ToneSphere-Test-2026!'  # local test VM only, never used elsewhere
 
 function Get-TestVMCredential {
   $sec = ConvertTo-SecureString $script:TestVmPassword -AsPlainText -Force
@@ -8,7 +8,7 @@ function Get-TestVMCredential {
 }
 
 function Wait-TestVM {
-  param([string]$VmName = 'NexTone-DriverTest', [int]$TimeoutMinutes = 20)
+  param([string]$VmName = 'ToneSphere-DriverTest', [int]$TimeoutMinutes = 20)
   $cred = Get-TestVMCredential
   $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
   while ((Get-Date) -lt $deadline) {
@@ -21,7 +21,7 @@ function Wait-TestVM {
 }
 
 function Restore-TestVM {
-  param([string]$VmName = 'NexTone-DriverTest', [string]$Checkpoint = 'clean')
+  param([string]$VmName = 'ToneSphere-DriverTest', [string]$Checkpoint = 'clean')
   Stop-VM -Name $VmName -TurnOff -Force -ErrorAction SilentlyContinue
   Restore-VMSnapshot -VMName $VmName -Name $Checkpoint -Confirm:$false
   Start-VM -Name $VmName

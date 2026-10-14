@@ -41,7 +41,7 @@ static void closeSocket(SocketT s) {
 
 using nlohmann::json;
 
-namespace nt {
+namespace ts {
 
 // ================================================================ pure helpers (unit tested)
 namespace {
@@ -136,9 +136,13 @@ bool parseOscPacket(const uint8_t* d, size_t len, std::vector<std::pair<std::str
 }
 
 std::optional<RemoteAction> oscToAction(const std::string& address, const std::vector<OscArg>& args) {
-    const std::string prefix = "/nextone/";
-    if (address.rfind(prefix, 0) != 0) return std::nullopt;
-    const std::string verb = address.substr(prefix.size());
+    // "/nextone/" is the prefix from before the rename: controllers set up then keep working.
+    std::string verb;
+    for (const char* prefix : {"/tonesphere/", "/nextone/"}) {
+        const size_t n = std::strlen(prefix);
+        if (address.compare(0, n, prefix) == 0) verb = address.substr(n);
+    }
+    if (verb.empty()) return std::nullopt;
     RemoteAction a;
     a.action = verb;
     if (verb == "volume" || verb == "gain") {
@@ -258,14 +262,14 @@ struct RemoteControl::Impl {
         a.sin_port = htons(static_cast<uint16_t>(port));
         a.sin_addr.s_addr = htonl(INADDR_ANY);  // phones/tablets on the network (opt-in setting)
         if (::bind(s, reinterpret_cast<sockaddr*>(&a), sizeof(a)) != 0) {
-            NT_WARN("OSC: port %d is in use", port);
+            TS_WARN("OSC: port %d is in use", port);
             closeSocket(s);
             return;
         }
         sock = s;
-        NT_INFO("OSC control listening on UDP port %d", port);
+        TS_INFO("OSC control listening on UDP port %d", port);
         oscThread = std::thread([this, s] {
-            setThreadName("nt-osc");
+            setThreadName("ts-osc");
             std::vector<uint8_t> buf(65536);
             while (running && sock.load() == s) {
                 const auto n = ::recv(s, reinterpret_cast<char*>(buf.data()), static_cast<int>(buf.size()), 0);
@@ -302,7 +306,7 @@ struct RemoteControl::Impl {
                 midiIns.push_back(h);
             }
         }
-        if (!midiIns.empty()) NT_INFO("MIDI control: %zu input device(s)", midiIns.size());
+        if (!midiIns.empty()) TS_INFO("MIDI control: %zu input device(s)", midiIns.size());
     }
 
     void closeMidi() {
@@ -424,12 +428,12 @@ struct RemoteControl::Impl {
                 engine.call("recorder.saveReplay", json::object());
             }
         } catch (const std::exception& e) {
-            NT_WARN("Remote control (%s %s): %s", a.action.c_str(), a.target.c_str(), e.what());
+            TS_WARN("Remote control (%s %s): %s", a.action.c_str(), a.target.c_str(), e.what());
         }
     }
 
     void work() {
-        setThreadName("nt-remote");
+        setThreadName("ts-remote");
         double lastReload = -10;
         while (running) {
             std::optional<RemoteAction> a;
@@ -480,4 +484,4 @@ json RemoteControl::midiDevices() {
     return out;
 }
 
-}  // namespace nt
+}  // namespace ts

@@ -14,7 +14,7 @@
 struct IAudioClient;
 struct IMMDeviceEnumerator;
 
-namespace nt {
+namespace ts {
 
 class WasapiNotifier;
 
@@ -29,8 +29,8 @@ public:
     /// When enabled, known virtual-cable endpoints (VB-CABLE, VoiceMeeter, VAC) appear as
     /// virtual inputs/outputs instead of physical devices.
     void setCompatMode(bool on) { compat_ = on; }
-    /// Interface names that belong to the NexTone driver (handled by the VAD backend, hidden here).
-    static bool isNexToneEndpoint(const std::wstring& interfaceName);
+    /// Interface names that belong to the ToneSphere driver (handled by the VAD backend, hidden here).
+    static bool isToneSphereEndpoint(const std::wstring& interfaceName);
     static bool isVirtualCable(const std::wstring& interfaceName, const std::wstring& name);
 
 private:
@@ -88,4 +88,4 @@ private:
     std::atomic<uint64_t> glitches_{0};
 };
 
-}  // namespace nt
+}  // namespace ts

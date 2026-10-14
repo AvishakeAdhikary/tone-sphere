@@ -1,6 +1,6 @@
 #include "backends/device.h"
 
-namespace nt {
+namespace ts {
 
 const char* deviceKindName(DeviceKind k) {
     switch (k) {
@@ -17,4 +17,4 @@ const char* deviceKindName(DeviceKind k) {
     return "?";
 }
 
-}  // namespace nt
+}  // namespace ts

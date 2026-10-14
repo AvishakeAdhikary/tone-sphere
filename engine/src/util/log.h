@@ -4,7 +4,7 @@
 #include <functional>
 #include <string>
 
-namespace nt::log {
+namespace ts::log {
 
 enum class Level { Debug, Info, Warn, Error };
 
@@ -13,9 +13,9 @@ void write(Level level, const char* fmt, ...);
 /// Called for Warn/Error messages so the IPC layer can forward them to the UI.
 void setSink(std::function<void(Level, const std::string&)> sink);
 
-}  // namespace nt::log
+}  // namespace ts::log
 
-#define NT_DEBUG(...) ::nt::log::write(::nt::log::Level::Debug, __VA_ARGS__)
-#define NT_INFO(...) ::nt::log::write(::nt::log::Level::Info, __VA_ARGS__)
-#define NT_WARN(...) ::nt::log::write(::nt::log::Level::Warn, __VA_ARGS__)
-#define NT_ERROR(...) ::nt::log::write(::nt::log::Level::Error, __VA_ARGS__)
+#define TS_DEBUG(...) ::ts::log::write(::ts::log::Level::Debug, __VA_ARGS__)
+#define TS_INFO(...) ::ts::log::write(::ts::log::Level::Info, __VA_ARGS__)
+#define TS_WARN(...) ::ts::log::write(::ts::log::Level::Warn, __VA_ARGS__)
+#define TS_ERROR(...) ::ts::log::write(::ts::log::Level::Error, __VA_ARGS__)

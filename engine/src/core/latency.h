@@ -3,7 +3,7 @@
 #include <cstddef>
 #include <vector>
 
-namespace nt {
+namespace ts {
 
 /// Test signal: a Hann-windowed linear chirp (500 Hz .. 8 kHz), 10 ms, peak 0.5.
 std::vector<float> makeLatencyChirp(double sampleRate);
@@ -16,4 +16,4 @@ struct LatencyEstimate {
 /// Finds `stimulus` in `captured`, where the stimulus was played starting at index `emitAt`.
 LatencyEstimate estimateLatency(const std::vector<float>& captured, const std::vector<float>& stimulus, size_t emitAt);
 
-}  // namespace nt
+}  // namespace ts

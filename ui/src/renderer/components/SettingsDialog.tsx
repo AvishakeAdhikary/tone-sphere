@@ -39,7 +39,7 @@ function SkinPicker() {
   const current = s.skin ?? 'fluent';
   const importSkin = async () => {
     try {
-      const f = await bridge.openFile('Import a NexTone skin', ['json']);
+      const f = await bridge.openFile('Import a ToneSphere skin', ['json']);
       if (!f) return;
       const skin = parseSkin(f.text);
       const others = (s.customSkins ?? []).filter((x) => x.id !== skin.id);
@@ -51,7 +51,7 @@ function SkinPicker() {
   };
   const exportSkin = async () => {
     const skin = skins.find((k) => k.id === current) ?? skins[0];
-    const path = await bridge.saveFile('Export skin', `${skin.name.replace(/[^\w -]+/g, '')}.nextone-skin.json`, skinToFile(skin), ['json']);
+    const path = await bridge.saveFile('Export skin', `${skin.name.replace(/[^\w -]+/g, '')}.tonesphere-skin.json`, skinToFile(skin), ['json']);
     if (path) useStore.getState().toast('info', `Saved ${path}`);
   };
   return (
@@ -154,7 +154,7 @@ function RemoteControlSettings() {
         <span className="grow">
           <span>Allow OSC control</span>
           <span className="hint">
-            For TouchOSC, Open Stage Control or Stream Deck plugins. Other devices on your network can send commands to NexTone
+            For TouchOSC, Open Stage Control or Stream Deck plugins. Other devices on your network can send commands to ToneSphere
             while this is on.
           </span>
         </span>
@@ -177,8 +177,8 @@ function RemoteControlSettings() {
             />
           </label>
           <p className="hint mono small">
-            /nextone/volume "name" 0..1 · /nextone/gain "name" dB · /nextone/mute "name" [0|1] · /nextone/solo "name" [0|1] ·
-            /nextone/scene "name" · /nextone/record [0|1] · /nextone/replay
+            /tonesphere/volume "name" 0..1 · /tonesphere/gain "name" dB · /tonesphere/mute "name" [0|1] · /tonesphere/solo "name" [0|1] ·
+            /tonesphere/scene "name" · /tonesphere/record [0|1] · /tonesphere/replay
           </p>
         </>
       )}
@@ -257,7 +257,7 @@ function LatencyMeter() {
     <>
       <h2>Measure latency</h2>
       <p className="hint">
-        Connect an output to an input with a cable (or a loopback), then measure. NexTone plays a short chirp and listens for it.
+        Connect an output to an input with a cable (or a loopback), then measure. ToneSphere plays a short chirp and listens for it.
       </p>
       <div className="field-row">
         <select aria-label="Output to play the test signal" value={out} onChange={(e) => setOut(e.target.value)}>
@@ -398,22 +398,22 @@ export function SettingsDialog() {
                 <div className="status-item">
                   {st.driverPack.vad ? <CheckCircle2 className="ok" size={18} /> : <XCircle className="bad" size={18} />}
                   <div>
-                    <div>NexTone virtual devices</div>
+                    <div>ToneSphere virtual devices</div>
                     <div className="hint">
                       {st.driverPack.vad
-                        ? 'Installed: virtual inputs/outputs are provided by the NexTone driver.'
-                        : 'Not installed: install the NexTone Driver Pack for native virtual devices.'}
+                        ? 'Installed: virtual inputs/outputs are provided by the ToneSphere driver.'
+                        : 'Not installed: install the ToneSphere Driver Pack for native virtual devices.'}
                     </div>
                   </div>
                 </div>
                 <div className="status-item">
                   {st.driverPack.asio ? <CheckCircle2 className="ok" size={18} /> : <XCircle className="bad" size={18} />}
                   <div>
-                    <div>NexTone ASIO driver</div>
+                    <div>ToneSphere ASIO driver</div>
                     <div className="hint">
                       {st.driverPack.asio
-                        ? 'Installed: DAWs can select “NexTone ASIO” and several can run at once.'
-                        : 'Not installed: part of the NexTone Driver Pack.'}
+                        ? 'Installed: DAWs can select “ToneSphere ASIO” and several can run at once.'
+                        : 'Not installed: part of the ToneSphere Driver Pack.'}
                     </div>
                   </div>
                 </div>
@@ -421,7 +421,7 @@ export function SettingsDialog() {
               {platform === 'win32' && (!st.driverPack.vad || !st.driverPack.asio) && (
                 <div className="field-row">
                   {storeBuild ? (
-                    <span className="hint">The drivers come with the NexTone desktop installer (Driver Pack). Apps from the Microsoft Store can’t install drivers.</span>
+                    <span className="hint">The drivers come with the ToneSphere desktop installer (Driver Pack). Apps from the Microsoft Store can’t install drivers.</span>
                   ) : (
                     <>
                       <button className="btn small" disabled={installing} onClick={() => void installDrivers()}>
@@ -442,7 +442,7 @@ export function SettingsDialog() {
                 <span className="grow">
                   <span>Compatibility mode</span>
                   <span className="hint">
-                    Use already-installed virtual cables (VB-CABLE, VoiceMeeter, VAC) as virtual devices when the NexTone
+                    Use already-installed virtual cables (VB-CABLE, VoiceMeeter, VAC) as virtual devices when the ToneSphere
                     driver isn’t available.
                   </span>
                 </span>
@@ -464,7 +464,7 @@ export function SettingsDialog() {
               {storeBuild ? (
                 <div className="toggle-row">
                   <span className="grow">
-                    <span>Start NexTone when I sign in</span>
+                    <span>Start ToneSphere when I sign in</span>
                     <span className="hint">Windows manages this for apps from the Microsoft Store. It is on by default.</span>
                   </span>
                   <button className="btn small" onClick={() => void bridge.openStartupSettings()}>
@@ -474,7 +474,7 @@ export function SettingsDialog() {
               ) : (
               <label className="toggle-row">
                 <span className="grow">
-                  <span>Start NexTone when I sign in</span>
+                  <span>Start ToneSphere when I sign in</span>
                   <span className="hint">Your routing is active right after sign-in, even before you open this window.</span>
                 </span>
                 <input
@@ -541,7 +541,7 @@ export function SettingsDialog() {
             <>
               <h2>Plugins</h2>
               <p className="hint">
-                NexTone loads VST3 effects from the standard VST3 folders. Add a folder here if your plugins are installed somewhere else.
+                ToneSphere loads VST3 effects from the standard VST3 folders. Add a folder here if your plugins are installed somewhere else.
               </p>
               <div className="field">
                 <span>Extra plugin folders</span>
@@ -579,7 +579,7 @@ export function SettingsDialog() {
                 </span>
               </div>
               <p className="hint">
-                Each plugin is tested in a separate process first, so a broken plugin can't crash NexTone while scanning.
+                Each plugin is tested in a separate process first, so a broken plugin can't crash ToneSphere while scanning.
               </p>
             </>
           )}
@@ -635,17 +635,17 @@ export function SettingsDialog() {
           )}
           {tab === 'About' && (
             <>
-              <h2>About NexTone</h2>
+              <h2>About ToneSphere</h2>
               <p>
                 Engine {state.version} · protocol v{state.protocol} · {st.platform}
               </p>
               <p className="muted small">
-                NexTone is free and open-source software, licensed under the GNU GPL v3. ASIO is a trademark and software of
+                ToneSphere is free and open-source software, licensed under the GNU GPL v3. ASIO is a trademark and software of
                 Steinberg Media Technologies GmbH. VST is a registered trademark of Steinberg Media Technologies GmbH.
               </p>
               {st.testMode && (
                 <p className="notice s-idle">
-                  This PC runs in Windows test-signing mode, which the development build of the NexTone virtual audio driver
+                  This PC runs in Windows test-signing mode, which the development build of the ToneSphere virtual audio driver
                   needs.
                 </p>
               )}

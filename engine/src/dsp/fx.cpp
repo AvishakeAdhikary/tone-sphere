@@ -6,13 +6,13 @@
 
 #include "dsp/biquad.h"
 
-#ifdef NEXTONE_WITH_RNNOISE
+#ifdef TONESPHERE_WITH_RNNOISE
 extern "C" {
 #include "rnnoise.h"
 }
 #endif
 
-namespace nt {
+namespace ts {
 
 Fx::Fx(std::string type, std::string name, std::vector<ParamDef> defs)
     : type_(std::move(type)), name_(std::move(name)), defs_(std::move(defs)) {
@@ -298,13 +298,13 @@ public:
         : Fx("denoise", "Noise suppression",
              {{"amount", "Amount", 0, 100, 100, "%"}, {"vadGate", "Voice gate", 0, 95, 0, "%"}}) {}
     ~DenoiseFx() override {
-#ifdef NEXTONE_WITH_RNNOISE
+#ifdef TONESPHERE_WITH_RNNOISE
         for (auto* s : st_) rnnoise_destroy(s);
 #endif
     }
     void prepare(double sr, int maxBlock, int channels) override {
         Fx::prepare(sr, maxBlock, channels);
-#ifdef NEXTONE_WITH_RNNOISE
+#ifdef TONESPHERE_WITH_RNNOISE
         for (auto* s : st_) rnnoise_destroy(s);
         st_.clear();
         for (int c = 0; c < channels; ++c) st_.push_back(rnnoise_create(nullptr));
@@ -314,7 +314,7 @@ public:
         fill_ = 0;
     }
     void process(float* const* buf, int ch, int n) override {
-#ifdef NEXTONE_WITH_RNNOISE
+#ifdef TONESPHERE_WITH_RNNOISE
         if (std::fabs(sr_ - 48000.0) > 1.0 || ch > static_cast<int>(st_.size())) return;  // RNNoise is 48 kHz only
         const float wet = param(0) / 100.0f;
         const float vadThr = param(1) / 100.0f;
@@ -352,7 +352,7 @@ public:
 
 private:
     static constexpr int kFrame = 480;
-#ifdef NEXTONE_WITH_RNNOISE
+#ifdef TONESPHERE_WITH_RNNOISE
     std::vector<DenoiseState*> st_;
 #endif
     std::vector<float> in_, out_;
@@ -372,4 +372,4 @@ std::shared_ptr<Fx> createBuiltinFx(const std::string& type) {
     return nullptr;
 }
 
-}  // namespace nt
+}  // namespace ts

@@ -1,6 +1,6 @@
 #pragma once
 // VBAN (VB-Audio network audio protocol) — audio sub-protocol, PCM codec.
-// Compatible with VoiceMeeter, VBAN Receptor/Talkie and other NexTone computers.
+// Compatible with VoiceMeeter, VBAN Receptor/Talkie and other ToneSphere computers.
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -8,7 +8,7 @@
 
 #include "backends/device.h"
 
-namespace nt::vban {
+namespace ts::vban {
 
 constexpr size_t kHeaderBytes = 28;
 constexpr size_t kMaxPayload = 1436;
@@ -50,4 +50,4 @@ public:
     std::unique_ptr<DeviceStream> open(const DeviceInfo& dev, const StreamRequest& req, std::string& error) override;
 };
 
-}  // namespace nt::vban
+}  // namespace ts::vban

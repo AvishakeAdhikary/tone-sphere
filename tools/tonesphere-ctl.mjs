@@ -1,32 +1,32 @@
 #!/usr/bin/env node
-// nextone-ctl — command-line control of the running NexTone engine.
-//   node tools/nextone-ctl.mjs state                 # summary of devices and connections
-//   node tools/nextone-ctl.mjs json                  # full state as JSON
-//   node tools/nextone-ctl.mjs call <method> [json]  # raw RPC, e.g. call route.connect '{"from":"tone","to":"..."}'
-//   node tools/nextone-ctl.mjs connect <from> <to>   # ids or unique name fragments
-//   node tools/nextone-ctl.mjs disconnect <from> <to>
-//   node tools/nextone-ctl.mjs tone on|off [freq] [levelDb] [target]
-//   node tools/nextone-ctl.mjs meters [seconds]      # prints live peak levels
+// tonesphere-ctl — command-line control of the running ToneSphere engine.
+//   node tools/tonesphere-ctl.mjs state                 # summary of devices and connections
+//   node tools/tonesphere-ctl.mjs json                  # full state as JSON
+//   node tools/tonesphere-ctl.mjs call <method> [json]  # raw RPC, e.g. call route.connect '{"from":"tone","to":"..."}'
+//   node tools/tonesphere-ctl.mjs connect <from> <to>   # ids or unique name fragments
+//   node tools/tonesphere-ctl.mjs disconnect <from> <to>
+//   node tools/tonesphere-ctl.mjs tone on|off [freq] [levelDb] [target]
+//   node tools/tonesphere-ctl.mjs meters [seconds]      # prints live peak levels
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
 function discoveryPath() {
-  if (process.env.NEXTONE_DISCOVERY) return process.env.NEXTONE_DISCOVERY;
+  if (process.env.TONESPHERE_DISCOVERY) return process.env.TONESPHERE_DISCOVERY;
   if (process.platform === 'win32') {
     const local = process.env.LOCALAPPDATA ?? path.join(os.homedir(), 'AppData', 'Local');
-    const desktop = path.join(local, 'NexTone', 'engine.json');
+    const desktop = path.join(local, 'ToneSphere', 'engine.json');
     if (fs.existsSync(desktop)) return desktop;
     // The Store (MSIX) build's AppData writes land in the package's private LocalCache.
     const pkgs = path.join(local, 'Packages');
     for (const p of fs.existsSync(pkgs) ? fs.readdirSync(pkgs) : []) {
-      const f = path.join(pkgs, p, 'LocalCache', 'Local', 'NexTone', 'engine.json');
-      if (/nextone/i.test(p) && fs.existsSync(f)) return f;
+      const f = path.join(pkgs, p, 'LocalCache', 'Local', 'ToneSphere', 'engine.json');
+      if (/tonesphere/i.test(p) && fs.existsSync(f)) return f;
     }
     return desktop;
   }
-  if (process.platform === 'darwin') return path.join(os.homedir(), 'Library', 'Application Support', 'NexTone', 'engine.json');
-  return path.join(process.env.XDG_RUNTIME_DIR ?? path.join(os.homedir(), '.local', 'state'), 'nextone', 'engine.json');
+  if (process.platform === 'darwin') return path.join(os.homedir(), 'Library', 'Application Support', 'ToneSphere', 'engine.json');
+  return path.join(process.env.XDG_RUNTIME_DIR ?? path.join(os.homedir(), '.local', 'state'), 'tonesphere', 'engine.json');
 }
 
 const d = JSON.parse(fs.readFileSync(discoveryPath(), 'utf8'));
@@ -72,7 +72,7 @@ const db = (v) => (v <= 1e-6 ? '  -inf' : (20 * Math.log10(v)).toFixed(1).padSta
 async function main() {
   await new Promise((r, j) => {
     ws.onopen = r;
-    ws.onerror = () => j(new Error('Cannot connect to the NexTone engine'));
+    ws.onerror = () => j(new Error('Cannot connect to the ToneSphere engine'));
   });
   while (!state) await new Promise((r) => setTimeout(r, 20));
   const [cmd = 'state', ...args] = process.argv.slice(2);

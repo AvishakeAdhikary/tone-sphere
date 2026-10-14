@@ -21,7 +21,7 @@
 #include "util/log.h"
 #include "util/platform.h"
 
-namespace nt {
+namespace ts {
 
 namespace {
 
@@ -38,7 +38,7 @@ std::vector<DriverReg> listDrivers() {
     for (DWORD i = 0;; ++i) {
         DWORD len = 256;
         if (RegEnumKeyExW(asio, i, name, &len, nullptr, nullptr, nullptr, nullptr) != ERROR_SUCCESS) break;
-        if (_wcsicmp(name, L"NexTone ASIO") == 0) continue;  // never host ourselves
+        if (_wcsicmp(name, L"ToneSphere ASIO") == 0) continue;  // never host ourselves
         wchar_t clsid[128];
         DWORD clen = sizeof(clsid);
         if (RegGetValueW(asio, name, L"CLSID", RRF_RT_REG_SZ, nullptr, clsid, &clen) != ERROR_SUCCESS) continue;
@@ -134,12 +134,12 @@ public:
 
 private:
     void run() {
-        setThreadName("nt-asio-sta");
+        setThreadName("ts-asio-sta");
         CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
         tid_ = GetCurrentThreadId();
         MSG m;
         PeekMessageW(&m, nullptr, WM_USER, WM_USER, PM_NOREMOVE);  // create the queue
-        hwnd_ = CreateWindowExW(0, L"STATIC", L"NexToneAsioHost", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr, nullptr, nullptr);
+        hwnd_ = CreateWindowExW(0, L"STATIC", L"ToneSphereAsioHost", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr, nullptr, nullptr);
         {
             std::lock_guard lk(mu_);
             ready_ = true;
@@ -241,7 +241,7 @@ public:
         inLatencyMs_ = il / rate_ * 1000.0;
         outLatencyMs_ = ol / rate_ * 1000.0;
         reset_ = false;
-        NT_INFO("ASIO: loaded %s (%ld in, %ld out, %.0f Hz, buffer %ld)", reg.name.c_str(), inputs_, outputs_, rate_, bufferSize_);
+        TS_INFO("ASIO: loaded %s (%ld in, %ld out, %.0f Hz, buffer %ld)", reg.name.c_str(), inputs_, outputs_, rate_, bufferSize_);
         return true;
     }
 
@@ -252,7 +252,7 @@ public:
         drv_->disposeBuffers();
         drv_->Release();
         drv_ = nullptr;
-        NT_INFO("ASIO: unloaded %s", loaded_.c_str());
+        TS_INFO("ASIO: unloaded %s", loaded_.c_str());
         loaded_.clear();
     }
 
@@ -479,4 +479,4 @@ bool AsioHostBackend::controlPanel(const std::string& driverName, std::string& e
     return true;
 }
 
-}  // namespace nt
+}  // namespace ts

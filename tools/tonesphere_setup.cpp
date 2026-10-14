@@ -1,10 +1,10 @@
-// nextone-setup: installs/removes the NexTone Driver Pack components (run elevated).
-//   nextone-setup status
-//   nextone-setup install-asio  <dir> [--engine <path>] [--ui <path>]
-//   nextone-setup uninstall-asio <dir>
-//   nextone-setup install-vad   <dir>      (dir contains nextonevad.inf/.sys/.cat [+ NexToneTest.cer])
-//   nextone-setup uninstall-vad
-//   nextone-setup install-all   <dir> [--engine <path>] [--ui <path>]   (ASIO from <dir>, driver from <dir>\vad)
+// tonesphere-setup: installs/removes the ToneSphere Driver Pack components (run elevated).
+//   tonesphere-setup status
+//   tonesphere-setup install-asio  <dir> [--engine <path>] [--ui <path>]
+//   tonesphere-setup uninstall-asio <dir>
+//   tonesphere-setup install-vad   <dir>      (dir contains tonespherevad.inf/.sys/.cat [+ ToneSphereTest.cer])
+//   tonesphere-setup uninstall-vad
+//   tonesphere-setup install-all   <dir> [--engine <path>] [--ui <path>]   (ASIO from <dir>, driver from <dir>\vad)
 // Prints one JSON line with the result; exit code 0 on success.
 #include <windows.h>
 
@@ -27,7 +27,7 @@
 
 namespace {
 
-const wchar_t* kHwid = L"ROOT\\NexToneVad";
+const wchar_t* kHwid = L"ROOT\\ToneSphereVad";
 
 std::string utf8(const std::wstring& w) {
     if (w.empty()) return {};
@@ -108,7 +108,7 @@ int forEachVadDevice(F fn) {
 
 bool asioRegistered() {
     HKEY k;
-    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\ASIO\\NexTone ASIO", 0, KEY_READ | KEY_WOW64_64KEY, &k) != ERROR_SUCCESS) return false;
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\ASIO\\ToneSphere ASIO", 0, KEY_READ | KEY_WOW64_64KEY, &k) != ERROR_SUCCESS) return false;
     RegCloseKey(k);
     return true;
 }
@@ -153,31 +153,31 @@ bool registerDll(const std::wstring& path, bool unregister) {
 
 void setPath(const wchar_t* name, const std::wstring& value) {
     HKEY k;
-    if (RegCreateKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\NexTone", 0, nullptr, 0, KEY_WRITE | KEY_WOW64_64KEY, nullptr, &k, nullptr) != ERROR_SUCCESS)
+    if (RegCreateKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\ToneSphere", 0, nullptr, 0, KEY_WRITE | KEY_WOW64_64KEY, nullptr, &k, nullptr) != ERROR_SUCCESS)
         return;
     RegSetValueExW(k, name, 0, REG_SZ, reinterpret_cast<const BYTE*>(value.c_str()), static_cast<DWORD>((value.size() + 1) * 2));
     RegCloseKey(k);
 }
 
 int installAsio(const std::wstring& dir, const std::wstring& engine, const std::wstring& ui) {
-    const bool a = registerDll(dir + L"\\NexToneASIO64.dll", false);
-    const bool b = registerDll(dir + L"\\NexToneASIO32.dll", false);
+    const bool a = registerDll(dir + L"\\ToneSphereASIO64.dll", false);
+    const bool b = registerDll(dir + L"\\ToneSphereASIO32.dll", false);
     if (!engine.empty()) setPath(L"EnginePath", engine);
     if (!ui.empty()) setPath(L"UiPath", ui);
     return result(a, a ? (b ? "ASIO driver registered (64- and 32-bit)" : "ASIO driver registered (64-bit)") : "Could not register the ASIO driver");
 }
 
 int uninstallAsio(const std::wstring& dir) {
-    registerDll(dir + L"\\NexToneASIO64.dll", true);
-    registerDll(dir + L"\\NexToneASIO32.dll", true);
-    RegDeleteKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\NexTone", KEY_WOW64_64KEY, 0);
+    registerDll(dir + L"\\ToneSphereASIO64.dll", true);
+    registerDll(dir + L"\\ToneSphereASIO32.dll", true);
+    RegDeleteKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\ToneSphere", KEY_WOW64_64KEY, 0);
     return result(true, "ASIO driver removed");
 }
 
 int installVad(const std::wstring& dir) {
-    const std::wstring inf = dir + L"\\nextonevad.inf";
-    if (GetFileAttributesW(inf.c_str()) == INVALID_FILE_ATTRIBUTES) return result(false, "nextonevad.inf not found");
-    const std::wstring cer = dir + L"\\NexToneTest.cer";
+    const std::wstring inf = dir + L"\\tonespherevad.inf";
+    if (GetFileAttributesW(inf.c_str()) == INVALID_FILE_ATTRIBUTES) return result(false, "tonespherevad.inf not found");
+    const std::wstring cer = dir + L"\\ToneSphereTest.cer";
     const bool testCert = GetFileAttributesW(cer.c_str()) != INVALID_FILE_ATTRIBUTES;
     if (testCert) {
         if (!testSigningEnabled())
@@ -196,7 +196,7 @@ int installVad(const std::wstring& dir) {
             SetupDiDestroyDeviceInfoList(set);
             return result(false, lastError("Creating the device"));
         }
-        const wchar_t hw[] = L"ROOT\\NexToneVad\0";
+        const wchar_t hw[] = L"ROOT\\ToneSphereVad\0";
         SetupDiSetDeviceRegistryPropertyW(set, &d, SPDRP_HARDWAREID, reinterpret_cast<const BYTE*>(hw), sizeof(hw));
         if (!SetupDiCallClassInstaller(DIF_REGISTERDEVICE, set, &d)) {
             SetupDiDestroyDeviceInfoList(set);
@@ -234,7 +234,7 @@ int uninstallVad() {
             // INF files are UTF-16 or ANSI: search for the service binary name in both encodings.
             const std::string a(data.data(), read);
             std::wstring w(reinterpret_cast<const wchar_t*>(data.data()), read / 2);
-            if (a.find("nextonevad.sys") != std::string::npos || w.find(L"nextonevad.sys") != std::wstring::npos)
+            if (a.find("tonespherevad.sys") != std::string::npos || w.find(L"tonespherevad.sys") != std::wstring::npos)
                 SetupUninstallOEMInfW(fd.cFileName, SUOI_FORCEDELETE, nullptr);
         } while (FindNextFileW(h, &fd));
         FindClose(h);

@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cstring>
 
-namespace nt {
+namespace ts {
 
 namespace {
 constexpr int kHalfTaps = 16;
@@ -303,4 +303,4 @@ void RenderBridge::deviceRead(float* interleaved, size_t frames, double nowSec) 
     }
 }
 
-}  // namespace nt
+}  // namespace ts

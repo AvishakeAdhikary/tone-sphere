@@ -1,8 +1,8 @@
-// NexTone engine <-> UI protocol types (v1). See shared/protocol/PROTOCOL.md.
+// ToneSphere engine <-> UI protocol types (v1). See shared/protocol/PROTOCOL.md.
 // The C++ engine serialises exactly these shapes (engine/src/ipc/state_json.cpp).
 
 export const PROTOCOL_VERSION = 1;
-export const METER_MAGIC = 0x314d544e; // "NTM1"
+export const METER_MAGIC = 0x314d5354; // "TSM1"
 
 /** The six user-facing bins, plus internal mix buses. */
 export type Bin =
@@ -29,7 +29,7 @@ export type NodeKind =
 
 export type NodeState = 'active' | 'idle' | 'unavailable' | 'error';
 
-/** Sources feed audio into NexTone; destinations receive it. Buses are both. */
+/** Sources feed audio into ToneSphere; destinations receive it. Buses are both. */
 export const SOURCE_BINS: Bin[] = ['physical-in', 'virtual-out', 'app-out'];
 export const DEST_BINS: Bin[] = ['physical-out', 'virtual-in', 'app-in'];
 
@@ -137,7 +137,7 @@ export interface NodeInfo {
   channelNames: string[];
   state: NodeState;
   statusText?: string;
-  /** Not shown in lists (e.g. an app's plain card while it uses the NexTone ASIO driver). */
+  /** Not shown in lists (e.g. an app's plain card while it uses the ToneSphere ASIO driver). */
   hidden?: boolean;
   enabled: boolean;
   gainDb: number;
@@ -213,7 +213,7 @@ export interface EngineSettings {
   blockSize: number;
   /** Node id of the clock master, or 'auto' / 'internal'. */
   clockMaster: string;
-  /** Use already-installed signed virtual cables when the NexTone driver is missing. */
+  /** Use already-installed signed virtual cables when the ToneSphere driver is missing. */
   compatMode: boolean;
   startWithSystem: boolean;
   startMinimized: boolean;

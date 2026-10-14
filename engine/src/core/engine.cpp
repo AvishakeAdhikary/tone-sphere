@@ -1,4 +1,5 @@
 #include "core/engine.h"
+#include "version.h"
 
 #include <algorithm>
 #include <cmath>
@@ -21,25 +22,25 @@
 #include "backends/win/vad.h"
 #include "backends/win/wasapi.h"
 #endif
-#ifdef NEXTONE_WITH_PIPEWIRE
+#ifdef TONESPHERE_WITH_PIPEWIRE
 #include "backends/linux/pipewire.h"
 #endif
 
 #ifndef _WIN32
-namespace nt {
+namespace ts {
 // Per-app audio and OS peak meters are Windows features; other platforms get empty stand-ins.
 class AppAudio {
 public:
     void shutdown() {}
 };
 class PeakMeters {};
-}  // namespace nt
+}  // namespace ts
 #endif
 
-namespace nt {
+namespace ts {
 
 namespace {
-constexpr const char* kVersion = "0.1.0";
+constexpr const char* kVersion = TONESPHERE_VERSION;
 
 double clampRate(double r) { return r >= 8000 && r <= 384000 ? r : 48000.0; }
 }  // namespace
@@ -58,9 +59,9 @@ Engine::~Engine() { shutdown(); }
 bool Engine::start() {
     std::lock_guard lock(mu_);
 #ifdef _WIN32
-    const char* scanner = "nextone-plugscan.exe";
+    const char* scanner = "tonesphere-plugscan.exe";
 #else
-    const char* scanner = "nextone-plugscan";
+    const char* scanner = "tonesphere-plugscan";
 #endif
     plugins_ = std::make_unique<PluginManager>(dataDir() + "/plugins.json", exeDir() + "/" + scanner);
     plugins_->onChanged = [this] {
@@ -88,7 +89,7 @@ bool Engine::start() {
     apps_ = std::make_unique<AppAudio>();
     peaks_ = std::make_unique<PeakMeters>();
 #endif
-#ifdef NEXTONE_WITH_PIPEWIRE
+#ifdef TONESPHERE_WITH_PIPEWIRE
     backends_.push_back(std::make_unique<PipeWireBackend>());
 #endif
     backends_.push_back(std::make_unique<vban::VbanBackend>());
@@ -109,7 +110,7 @@ bool Engine::start() {
     rebuildLocked();
     startClock();
     maint_ = std::thread([this] { maintenanceThread(); });
-    NT_INFO("Engine started at %.0f Hz, block %d", runningRate_, settings_.blockSize);
+    TS_INFO("Engine started at %.0f Hz, block %d", runningRate_, settings_.blockSize);
     return true;
 }
 
@@ -127,19 +128,19 @@ void Engine::shutdown() {
     retired_.clear();
     // Unload plugins now, while COM and the main thread are still up.
     for (auto& [id, n] : nodes_) n.fx.clear();
-    NT_INFO("Engine stopped");
+    TS_INFO("Engine stopped");
 }
 
 // ============================================================ helpers
 void Engine::applyPluginFoldersLocked() {
-    // User folders from settings, plus NEXTONE_VST3_PATH (tests, portable setups).
+    // User folders from settings, plus TONESPHERE_VST3_PATH (tests, portable setups).
     std::vector<std::string> folders = settings_.pluginFolders;
 #ifdef _WIN32
     const char sep = ';';
 #else
     const char sep = ':';
 #endif
-    if (const char* extra = std::getenv("NEXTONE_VST3_PATH")) {
+    if (const char* extra = std::getenv("TONESPHERE_VST3_PATH")) {
         const std::string s = extra;
         for (size_t a = 0, b; a <= s.size(); a = b + 1) {
             b = s.find(sep, a);
@@ -203,7 +204,7 @@ void Engine::instantiatePendingFxLocked(NodeModel& n) {
                 fx = plugins_->create(fc.pluginId);
                 fx->loadState(fc.state);
             } catch (const std::exception& e) {
-                NT_WARN("Plugin %s on %s: %s", fc.name.c_str(), n.id.c_str(), e.what());
+                TS_WARN("Plugin %s on %s: %s", fc.name.c_str(), n.id.c_str(), e.what());
                 fx = createMissingPluginFx(fc.pluginId, fc.name, fc.state);
             }
         } else {
@@ -258,7 +259,7 @@ void Engine::refreshDevicesLocked() {
         NodeModel& n = it->second;
         const bool device = n.kind != DeviceKind::Vban && n.bin != Bin::Bus && n.id != "tone";
         if (device && !seen.count(n.id)) {
-            if (n.present) NT_INFO("Device gone: %s", n.name.c_str());
+            if (n.present) TS_INFO("Device gone: %s", n.name.c_str());
             n.present = false;
             closeStreamLocked(n);
             const bool referenced = std::any_of(routes_.begin(), routes_.end(), [&](const RouteModel& r) { return r.from == n.id || r.to == n.id; });
@@ -346,7 +347,7 @@ bool Engine::openStreamLocked(NodeModel& n) {
         n.stream = be->open(dev, req, err);
         if (!n.stream) {
             n.streamError = err.empty() ? "Could not open device" : err;
-            NT_WARN("%s: %s", n.name.c_str(), n.streamError.c_str());
+            TS_WARN("%s: %s", n.name.c_str(), n.streamError.c_str());
             return false;
         }
     }
@@ -393,7 +394,7 @@ bool Engine::openStreamLocked(NodeModel& n) {
         return false;
     }
     n.streamError.clear();
-    NT_INFO("Opened %s (%.0f Hz, %d ch, period %d)", n.name.c_str(), n.streamRate, n.channels, n.stream->periodFrames());
+    TS_INFO("Opened %s (%.0f Hz, %d ch, period %d)", n.name.c_str(), n.streamRate, n.channels, n.stream->periodFrames());
     return true;
 }
 
@@ -401,7 +402,7 @@ void Engine::closeStreamLocked(NodeModel& n) {
     if (n.stream) {
         n.stream->stop();
         n.stream.reset();
-        NT_INFO("Closed %s", n.name.c_str());
+        TS_INFO("Closed %s", n.name.c_str());
     }
     if (n.rt) {
         n.rt->capture.store(nullptr, std::memory_order_release);
@@ -620,7 +621,7 @@ void Engine::cycle(int frames, double now) {
 }
 
 void Engine::clockThread() {
-    setAudioThreadPriority("nt-engine");
+    setAudioThreadPriority("ts-engine");
 #ifdef _WIN32
     HANDLE timer = CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
     if (!timer) timer = CreateWaitableTimerW(nullptr, FALSE, nullptr);
@@ -673,7 +674,7 @@ void Engine::clockThread() {
 
 // ============================================================ maintenance
 void Engine::maintenanceThread() {
-    setThreadName("nt-maint");
+    setThreadName("ts-maint");
 #ifdef _WIN32
     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
 #endif
@@ -704,7 +705,7 @@ void Engine::maintenanceThread() {
                     changed = true;
                     continue;
                 }
-                NT_WARN("%s: %s", n.name.c_str(), n.streamError.c_str());
+                TS_WARN("%s: %s", n.name.c_str(), n.streamError.c_str());
                 closeStreamLocked(n);
                 changed = true;
             }
@@ -814,4 +815,4 @@ std::vector<std::tuple<int, int, float>> Engine::defaultCrosspoints(const NodeMo
     return x;
 }
 
-}  // namespace nt
+}  // namespace ts

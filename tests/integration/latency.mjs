@@ -1,11 +1,11 @@
 // Round-trip latency measurement (latency.measure) against the running engine, through the
-// VB-CABLE loop: NexTone plays a chirp into "CABLE Input" and records "CABLE Output".
+// VB-CABLE loop: ToneSphere plays a chirp into "CABLE Input" and records "CABLE Output".
 //   node tests/integration/latency.mjs
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const disc = JSON.parse(fs.readFileSync(path.join(process.env.LOCALAPPDATA ?? os.homedir(), 'NexTone', 'engine.json'), 'utf8'));
+const disc = JSON.parse(fs.readFileSync(path.join(process.env.LOCALAPPDATA ?? os.homedir(), 'ToneSphere', 'engine.json'), 'utf8'));
 const ws = new WebSocket(`ws://127.0.0.1:${disc.port}/?token=${disc.token}`);
 let state = null, id = 1;
 const pending = new Map();
@@ -36,8 +36,8 @@ async function main() {
   await new Promise((r, j) => ((ws.onopen = r), (ws.onerror = () => j(new Error('engine not running')))));
   while (!state) await sleep(20);
   for (const r of [...state.routes]) await call('route.disconnect', { id: r.id });
-  const out = state.nodes.find((n) => n.kind === 'compat' && n.bin === 'virtual-in'); // NexTone plays into the cable
-  const inp = state.nodes.find((n) => n.kind === 'compat' && n.bin === 'virtual-out'); // NexTone records the cable
+  const out = state.nodes.find((n) => n.kind === 'compat' && n.bin === 'virtual-in'); // ToneSphere plays into the cable
+  const inp = state.nodes.find((n) => n.kind === 'compat' && n.bin === 'virtual-out'); // ToneSphere records the cable
   if (!out || !inp) return check('virtual cable present', false, 'install VB-CABLE');
 
   const runs = [];

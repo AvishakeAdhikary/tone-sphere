@@ -1,4 +1,4 @@
-# NexTone engine ↔ UI protocol (v1)
+# ToneSphere engine ↔ UI protocol (v1)
 
 The engine runs on its own and the UI (and the CLI) connect to it over a local WebSocket.
 
@@ -7,12 +7,12 @@ On start the engine writes `engine.json`:
 
 | Platform | Location |
 |---|---|
-| Windows | `%LOCALAPPDATA%\NexTone\engine.json` |
-| Linux | `$XDG_RUNTIME_DIR/nextone/engine.json` (fallback `~/.local/state/nextone/engine.json`) |
-| macOS | `~/Library/Application Support/NexTone/engine.json` |
+| Windows | `%LOCALAPPDATA%\ToneSphere\engine.json` |
+| Linux | `$XDG_RUNTIME_DIR/tonesphere/engine.json` (fallback `~/.local/state/tonesphere/engine.json`) |
+| macOS | `~/Library/Application Support/ToneSphere/engine.json` |
 
 ```json
-{ "port": 49873, "token": "hex32", "pid": 1234, "version": "0.1.0", "protocol": 1 }
+{ "port": 49873, "token": "hex32", "pid": 1234, "version": "1.0.0", "protocol": 1 }
 ```
 
 Connect to `ws://127.0.0.1:<port>/?token=<token>`. The engine listens on loopback only, and a wrong token is rejected with HTTP 403.
@@ -27,7 +27,7 @@ Connect to `ws://127.0.0.1:<port>/?token=<token>`. The engine listens on loopbac
 All fields are little-endian:
 
 ```
-u32 magic = 0x314D544E ("NTM1")
+u32 magic = 0x314D5354 ("TSM1")
 u32 layoutVersion        // must equal EngineState.layoutVersion; otherwise ignore frame
 u32 floatCount
 f32 values[floatCount]
@@ -79,10 +79,10 @@ See `ui/src/shared/protocol.ts` (the source of truth for types) and `engine/src/
 |---|---|
 | WASAPI endpoint | `wasapi:in:<endpointId>` / `wasapi:out:<endpointId>` |
 | ASIO device | `asio:in:<driverName>` / `asio:out:<driverName>` |
-| NexTone virtual device | `vad:in:<n>` / `vad:out:<n>` |
+| ToneSphere virtual device | `vad:in:<n>` / `vad:out:<n>` |
 | Compatibility cable | `compat:in:<endpointId>` / `compat:out:<endpointId>` |
 | Application | `app:out:<exe>` / `app:in:<exe>` |
-| NexTone ASIO client | `asioclient:out:<exe>` / `asioclient:in:<exe>` |
+| ToneSphere ASIO client | `asioclient:out:<exe>` / `asioclient:in:<exe>` |
 | Bus | `bus:<uuid>` |
 | VBAN | `vban:in:<uuid>` / `vban:out:<uuid>` |
 | Built-in | `tone` |
@@ -90,8 +90,8 @@ See `ui/src/shared/protocol.ts` (the source of truth for types) and `engine/src/
 ## VST3 plugins
 
 - **Scanning.** Plugins come from the standard VST3 folders plus `EngineSettings.pluginFolders`
-  (and the `NEXTONE_VST3_PATH` environment variable). Each module is loaded by
-  `nextone-plugscan` in its own process, and the results are cached in `plugins.json` (data
+  (and the `TONESPHERE_VST3_PATH` environment variable). Each module is loaded by
+  `tonesphere-plugscan` in its own process, and the results are cached in `plugins.json` (data
   directory), keyed by modification time.
 - **Plugin effects.** `FxInfo.type` is `"vst3"` and `FxInfo.pluginId` is the VST3 class id.
   Plugin parameters are edited in the plugin window, so `params` is empty.
@@ -106,7 +106,7 @@ See `ui/src/shared/protocol.ts` (the source of truth for types) and `engine/src/
 | `preset.export` | `{name, description?}` | the preset object |
 | `node.forget` | `{id}`: a device that isn't connected | – |
 
-- **Presets** describe devices by bin, kind and name patterns (`"match": ["Line (AI-04)", "AI-04"]`). NexTone ASIO clients and apps are described by `exe`.
+- **Presets** describe devices by bin, kind and name patterns (`"match": ["Line (AI-04)", "AI-04"]`). ToneSphere ASIO clients and apps are described by `exe`.
 - **Import** replaces the routing and saves it as a scene with the preset's name.
 - **Devices that aren't connected yet** become placeholders. They bind to the device when it appears.
 - **A device that returns under a new id** (another USB port, for example) takes over the routing of its old entry. This works by label or by preset rule.

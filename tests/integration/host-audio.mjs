@@ -13,7 +13,7 @@ const probe = path.join(root, 'build', 'x64-release', 'bin', 'audio-probe.exe');
 const soakIdx = process.argv.indexOf('--soak');
 const SOAK = soakIdx > 0 ? Number(process.argv[soakIdx + 1]) : 20;
 
-const disc = JSON.parse(fs.readFileSync(path.join(process.env.LOCALAPPDATA ?? os.homedir(), 'NexTone', 'engine.json'), 'utf8'));
+const disc = JSON.parse(fs.readFileSync(path.join(process.env.LOCALAPPDATA ?? os.homedir(), 'ToneSphere', 'engine.json'), 'utf8'));
 const ws = new WebSocket(`ws://127.0.0.1:${disc.port}/?token=${disc.token}`);
 ws.binaryType = 'arraybuffer';
 let state = null;
@@ -63,8 +63,8 @@ async function main() {
   while (!state) await sleep(20);
   await clearRoutes();
 
-  const cableIn = node((n) => n.kind === 'compat' && n.bin === 'virtual-in'); // NexTone renders into the cable
-  const cableOut = node((n) => n.kind === 'compat' && n.bin === 'virtual-out'); // NexTone records the cable
+  const cableIn = node((n) => n.kind === 'compat' && n.bin === 'virtual-in'); // ToneSphere renders into the cable
+  const cableOut = node((n) => n.kind === 'compat' && n.bin === 'virtual-out'); // ToneSphere records the cable
   if (!cableIn || !cableOut) {
     check('virtual cable present (compatibility mode)', false, 'install VB-CABLE to run loopback tests');
     return;

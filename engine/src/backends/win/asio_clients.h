@@ -1,14 +1,14 @@
 #pragma once
-// DAWs using the "NexTone ASIO" driver. The engine owns the shared registry region; each
+// DAWs using the "ToneSphere ASIO" driver. The engine owns the shared registry region; each
 // connected DAW appears as an application with outputs (DAW playback) and inputs (DAW recording).
 #include <string>
 #include <vector>
 
 #include "backends/device.h"
 
-struct NTASIO_SERVER;  // drivers/win/asio/nextone_asio_shared.h (global scope)
+struct TSASIO_SERVER;  // drivers/win/asio/tonesphere_asio_shared.h (global scope)
 
-namespace nt {
+namespace ts {
 
 class AsioClientBackend final : public Backend {
 public:
@@ -24,8 +24,8 @@ public:
 
 private:
     void* map_ = nullptr;
-    ::NTASIO_SERVER* server_ = nullptr;
+    ::TSASIO_SERVER* server_ = nullptr;
     std::string signature_;
 };
 
-}  // namespace nt
+}  // namespace ts

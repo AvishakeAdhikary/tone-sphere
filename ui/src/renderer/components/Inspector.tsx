@@ -194,7 +194,7 @@ function NodeInspector({ node, onClose }: { node: NodeInfo; onClose: () => void 
             {(
               [
                 ['copy', 'Copy', 'Hear the app normally and also route a copy of its sound.'],
-                ['isolate', 'Isolate', 'Take the app’s sound out of your speakers and route it only through NexTone.'],
+                ['isolate', 'Isolate', 'Take the app’s sound out of your speakers and route it only through ToneSphere.'],
                 ['off', 'Off', 'Don’t capture this app.'],
               ] as const
             ).map(([mode, label, hint]) => (
@@ -223,7 +223,7 @@ function NodeInspector({ node, onClose }: { node: NodeInfo; onClose: () => void 
         <div className="insp-section">
           <h3>Microphone for this app</h3>
           <p className="muted small">
-            Anything you connect here becomes this app’s microphone. NexTone points the app at a private virtual
+            Anything you connect here becomes this app’s microphone. ToneSphere points the app at a private virtual
             microphone automatically.
           </p>
           <Toggle
@@ -272,7 +272,7 @@ function NodeInspector({ node, onClose }: { node: NodeInfo; onClose: () => void 
         {node.caps.exclusiveMode && (
           <Toggle
             label="Exclusive mode (lowest latency)"
-            hint="NexTone takes the device for itself. Other apps can’t use it directly."
+            hint="ToneSphere takes the device for itself. Other apps can’t use it directly."
             checked={!!node.settings.exclusive}
             onChange={(v) => set({ exclusive: v })}
           />
@@ -369,7 +369,7 @@ function NodeInspector({ node, onClose }: { node: NodeInfo; onClose: () => void 
       {node.state === 'unavailable' && node.kind !== 'bus' && node.kind !== 'vban' && (
         <div className="insp-section">
           <p className="hint">
-            This device isn’t connected. NexTone keeps its connections and restores them when it comes back.
+            This device isn’t connected. ToneSphere keeps its connections and restores them when it comes back.
           </p>
           <button className="btn danger small" onClick={() => void act(engine.call('node.forget', { id: node.id })).then(onClose)}>
             <Trash2 size={13} /> Forget this device

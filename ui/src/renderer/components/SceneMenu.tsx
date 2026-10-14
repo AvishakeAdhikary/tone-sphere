@@ -29,13 +29,13 @@ export function SceneMenu() {
   const toast = useStore.getState().toast;
   const importPreset = async () => {
     try {
-      const f = await bridge.openFile('Import a NexTone preset', ['json']);
+      const f = await bridge.openFile('Import a ToneSphere preset', ['json']);
       if (!f) return;
       let preset: unknown;
       try {
         preset = JSON.parse(f.text);
       } catch {
-        throw new Error("This file isn't a NexTone preset (it isn't valid JSON).");
+        throw new Error("This file isn't a ToneSphere preset (it isn't valid JSON).");
       }
       const r = await engine.call('preset.import', { preset });
       setOpen(false);
@@ -47,10 +47,10 @@ export function SceneMenu() {
     }
   };
   const exportPreset = async () => {
-    const name = active?.name ?? 'My NexTone setup';
+    const name = active?.name ?? 'My ToneSphere setup';
     try {
       const p = await engine.call('preset.export', { name });
-      const file = `${name.replace(/[^\w -]+/g, '').trim() || 'preset'}.nextone.json`;
+      const file = `${name.replace(/[^\w -]+/g, '').trim() || 'preset'}.tonesphere.json`;
       const path = await bridge.saveFile('Export preset', file, JSON.stringify(p, null, 2) + '\n', ['json']);
       if (path) toast('info', `Saved ${path}`);
     } catch (e) {

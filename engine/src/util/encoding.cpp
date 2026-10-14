@@ -3,7 +3,7 @@
 #include <cstring>
 #include <vector>
 
-namespace nt {
+namespace ts {
 
 std::string base64Encode(const void* data, size_t len) {
     static const char* t = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -92,4 +92,4 @@ std::array<uint8_t, 20> sha1(std::string_view s) {
     return out;
 }
 
-}  // namespace nt
+}  // namespace ts

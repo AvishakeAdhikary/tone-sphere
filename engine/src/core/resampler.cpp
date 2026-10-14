@@ -4,7 +4,7 @@
 #include <cmath>
 #include <cstring>
 
-namespace nt {
+namespace ts {
 
 namespace {
 constexpr double kPi = 3.14159265358979323846;
@@ -139,4 +139,4 @@ size_t VarispeedResampler::pullInterleaved(float* out, size_t maxOut, double ste
     return produced;
 }
 
-}  // namespace nt
+}  // namespace ts

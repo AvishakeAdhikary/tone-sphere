@@ -1,9 +1,9 @@
 // Skins: named sets of design-token overrides (see the :root tokens in styles.css).
 // A skin may force light or dark mode. Skins are shared as small JSON files:
-//   { "format": "nextone-skin", "version": 1, "id": "…", "name": "…", "mode": "dark",
+//   { "format": "tonesphere-skin", "version": 1, "id": "…", "name": "…", "mode": "dark",
 //     "tokens": { "--accent": "#ffb020", … }, "light": { … }, "dark": { … } }
 export interface Skin {
-  format?: 'nextone-skin';
+  format?: 'tonesphere-skin';
   version?: number;
   id: string;
   name: string;
@@ -86,10 +86,13 @@ export function parseSkin(text: string): Skin {
   try {
     raw = JSON.parse(text);
   } catch {
-    throw new Error("This file isn't a NexTone skin (it isn't valid JSON).");
+    throw new Error("This file isn't a ToneSphere skin (it isn't valid JSON).");
   }
   const o = raw as Partial<Skin>;
-  if (!o || typeof o !== 'object' || o.format !== 'nextone-skin') throw new Error("This file isn't a NexTone skin.");
+  // 'nextone-skin' files were exported before the rename and have the same layout.
+  const format = (o as { format?: string } | null)?.format;
+  if (!o || typeof o !== 'object' || (format !== 'tonesphere-skin' && format !== 'nextone-skin'))
+    throw new Error("This file isn't a ToneSphere skin.");
   if (typeof o.name !== 'string' || !o.name.trim()) throw new Error('This skin has no name.');
   const clean = (m: unknown) => {
     const out: Record<string, string> = {};
@@ -100,7 +103,7 @@ export function parseSkin(text: string): Skin {
   };
   const name = o.name.trim().slice(0, 40);
   return {
-    format: 'nextone-skin',
+    format: 'tonesphere-skin',
     version: 1,
     id: `custom-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
     name,
@@ -113,7 +116,7 @@ export function parseSkin(text: string): Skin {
 
 export function skinToFile(skin: Skin): string {
   const { preview: _preview, ...rest } = skin;
-  return JSON.stringify({ ...rest, format: 'nextone-skin', version: 1 }, null, 2) + '\n';
+  return JSON.stringify({ ...rest, format: 'tonesphere-skin', version: 1 }, null, 2) + '\n';
 }
 
 /** Picker swatch colours: explicit preview, else the skin's own tokens. */

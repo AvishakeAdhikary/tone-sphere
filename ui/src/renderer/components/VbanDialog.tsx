@@ -33,10 +33,10 @@ export function VbanDialog({ direction, onClose }: { direction: 'in' | 'out'; on
           </button>
         </div>
         <p className="muted small">
-          Uses the VBAN protocol, compatible with VoiceMeeter, VBAN apps and other NexTone computers on your network.
+          Uses the VBAN protocol, compatible with VoiceMeeter, VBAN apps and other ToneSphere computers on your network.
         </p>
         <label className="field">
-          <span>Name in NexTone</span>
+          <span>Name in ToneSphere</span>
           <input value={name} onChange={(e) => setName(e.target.value)} required />
         </label>
         <label className="field">

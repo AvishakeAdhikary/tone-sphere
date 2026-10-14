@@ -4,7 +4,7 @@
 
 #include "core/engine.h"
 
-namespace nt {
+namespace ts {
 
 Bin binFromString(const std::string& s);
 DeviceKind kindFromString(const std::string& s);
@@ -15,4 +15,4 @@ FxConfig fxConfigFrom(const json& j);
 json routeJson(const RouteModel& r);
 RouteModel routeFrom(const json& j);
 
-}  // namespace nt
+}  // namespace ts

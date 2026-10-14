@@ -7,7 +7,7 @@
 
 #include "backends/device.h"
 
-namespace nt {
+namespace ts {
 
 class AsioHostBackend final : public Backend {
 public:
@@ -22,4 +22,4 @@ public:
     void setPreferred(double sampleRate, int bufferSize);
 };
 
-}  // namespace nt
+}  // namespace ts

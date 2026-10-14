@@ -1,6 +1,6 @@
 #pragma once
 // VST3 plugin hosting.
-//  - Scanning runs out of process (nextone-plugscan), so a plugin that crashes while
+//  - Scanning runs out of process (tonesphere-plugscan), so a plugin that crashes while
 //    loading cannot take the engine down; results are cached per file modification time.
 //  - Plugins run in-process as effects (Fx). Creation, state, editors and destruction happen
 //    on the main (UI) thread; process() runs on the audio thread. A plugin that faults while
@@ -18,7 +18,7 @@
 
 #include "dsp/fx.h"
 
-namespace nt {
+namespace ts {
 
 struct PluginEntry {
     std::string id;  // VST3 class id (32 hex digits)
@@ -27,7 +27,7 @@ struct PluginEntry {
 
 class PluginManager {
 public:
-    /// `cacheFile`: JSON scan cache; `scannerExe`: path of nextone-plugscan.
+    /// `cacheFile`: JSON scan cache; `scannerExe`: path of tonesphere-plugscan.
     PluginManager(std::string cacheFile, std::string scannerExe);
     ~PluginManager();
 
@@ -66,11 +66,11 @@ private:
 /// Placeholder for a saved plugin that is not installed (keeps its settings and state).
 std::shared_ptr<Fx> createMissingPluginFx(const std::string& pluginId, const std::string& name, const std::string& state);
 
-/// Loads a plugin module and lists its effect classes (used by nextone-plugscan).
+/// Loads a plugin module and lists its effect classes (used by tonesphere-plugscan).
 nlohmann::json describeVst3Module(const std::string& path);
 /// Standard VST3 module locations on this platform.
 std::vector<std::string> standardVst3Modules(const std::vector<std::string>& extraFolders);
-/// Loads and instantiates one class directly (tests / nextone-plugscan --probe).
+/// Loads and instantiates one class directly (tests / tonesphere-plugscan --probe).
 std::shared_ptr<Fx> createVst3Fx(const std::string& modulePath, const std::string& classId);
 
-}  // namespace nt
+}  // namespace ts

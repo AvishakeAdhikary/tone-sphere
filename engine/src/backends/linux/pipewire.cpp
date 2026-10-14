@@ -15,7 +15,7 @@
 #include "util/log.h"
 #include "util/platform.h"
 
-namespace nt {
+namespace ts {
 
 namespace {
 
@@ -56,10 +56,10 @@ struct PipeWireBackend::Impl {
     std::map<uint32_t, NodeRec> nodes;
     std::atomic<bool> changed{true};
 
-    // NexTone's own virtual devices (persistent while the engine runs).
+    // ToneSphere's own virtual devices (persistent while the engine runs).
     struct Virtual {
         std::string nodeName, label;
-        bool apps_play_into = true;  // "NexTone Output N" (true) or "NexTone Mic N" (false)
+        bool apps_play_into = true;  // "ToneSphere Output N" (true) or "ToneSphere Mic N" (false)
         std::shared_ptr<Port> port;
     };
     std::vector<Virtual> virtuals;
@@ -71,8 +71,8 @@ struct PipeWireBackend::Impl {
 // A PipeWire stream that is bound to at most one engine bridge at a time.
 class Port {
 public:
-    Port(PipeWireBackend::Impl& pw, bool captureIntoNexTone, int channels, double rate, pw_properties* props, bool autoconnect)
-        : pw_(pw), capture_(captureIntoNexTone), channels_(channels) {
+    Port(PipeWireBackend::Impl& pw, bool captureIntoToneSphere, int channels, double rate, pw_properties* props, bool autoconnect)
+        : pw_(pw), capture_(captureIntoToneSphere), channels_(channels) {
         static const pw_stream_events events = [] {
             pw_stream_events e{};
             e.version = PW_VERSION_STREAM_EVENTS;
@@ -81,7 +81,7 @@ public:
             return e;
         }();
         pw_thread_loop_lock(pw_.loop);
-        stream_ = pw_stream_new(pw_.core, "NexTone", props);
+        stream_ = pw_stream_new(pw_.core, "ToneSphere", props);
         if (stream_) {
             pw_stream_add_listener(stream_, &listener_, &events, this);
             uint8_t buf[1024];
@@ -141,7 +141,7 @@ private:
         auto* self = static_cast<Port*>(data);
         if (state == PW_STREAM_STATE_STREAMING || state == PW_STREAM_STATE_PAUSED) self->connected_ = true;
         if (state == PW_STREAM_STATE_ERROR || (state == PW_STREAM_STATE_UNCONNECTED && self->connected_)) {
-            if (err) NT_WARN("PipeWire stream: %s", err);
+            if (err) TS_WARN("PipeWire stream: %s", err);
             self->failed_ = true;
         }
     }
@@ -222,9 +222,9 @@ public:
         if (!port_) {
             pw_properties* props = pw_properties_new(PW_KEY_MEDIA_TYPE, "Audio", PW_KEY_MEDIA_CATEGORY, dev_.input ? "Capture" : "Playback",
                                                      PW_KEY_MEDIA_ROLE, "Production", PW_KEY_NODE_NAME,
-                                                     dev_.input ? "nextone.capture" : "nextone.playback", PW_KEY_NODE_DESCRIPTION,
-                                                     ("NexTone: " + dev_.name).c_str(), PW_KEY_TARGET_OBJECT, dev_.endpointId.c_str(),
-                                                     "node.dont-reconnect", "true", PW_KEY_APP_NAME, "NexTone", nullptr);
+                                                     dev_.input ? "tonesphere.capture" : "tonesphere.playback", PW_KEY_NODE_DESCRIPTION,
+                                                     ("ToneSphere: " + dev_.name).c_str(), PW_KEY_TARGET_OBJECT, dev_.endpointId.c_str(),
+                                                     "node.dont-reconnect", "true", PW_KEY_APP_NAME, "ToneSphere", nullptr);
             pw_properties_setf(props, PW_KEY_NODE_LATENCY, "%d/%u", kQuantum, static_cast<unsigned>(rate_));
             port_ = std::make_shared<Port>(*pw_, dev_.input, channels_, rate_, props, true);
         }
@@ -263,7 +263,7 @@ void onRegistryGlobal(void* data, uint32_t id, uint32_t, const char* type, uint3
     r.serial = prop(props, PW_KEY_OBJECT_SERIAL);
     const std::string ch = prop(props, PW_KEY_AUDIO_CHANNELS);
     if (!ch.empty()) r.channels = std::clamp(std::atoi(ch.c_str()), 1, 32);
-    if (r.name.rfind("nextone.", 0) == 0 || r.appName == "NexTone") return;  // our own nodes
+    if (r.name.rfind("tonesphere.", 0) == 0 || r.appName == "ToneSphere") return;  // our own nodes
     std::lock_guard lk(pw->mu);
     pw->nodes[id] = r;
     pw->changed = true;
@@ -289,17 +289,17 @@ PipeWireBackend::PipeWireBackend(int virtualDevices) : impl_(std::make_shared<Im
     static std::once_flag once;
     std::call_once(once, [] { pw_init(nullptr, nullptr); });
     Impl& pw = *impl_;
-    pw.loop = pw_thread_loop_new("nt-pipewire", nullptr);
-    pw.context = pw_context_new(pw_thread_loop_get_loop(pw.loop), pw_properties_new(PW_KEY_APP_NAME, "NexTone", nullptr), 0);
+    pw.loop = pw_thread_loop_new("ts-pipewire", nullptr);
+    pw.context = pw_context_new(pw_thread_loop_get_loop(pw.loop), pw_properties_new(PW_KEY_APP_NAME, "ToneSphere", nullptr), 0);
     if (!pw.loop || !pw.context || pw_thread_loop_start(pw.loop) < 0) {
-        NT_WARN("PipeWire: cannot start the client loop");
+        TS_WARN("PipeWire: cannot start the client loop");
         return;
     }
     pw_thread_loop_lock(pw.loop);
     pw.core = pw_context_connect(pw.context, nullptr, 0);
     if (!pw.core) {
         pw_thread_loop_unlock(pw.loop);
-        NT_WARN("PipeWire: no server running");
+        TS_WARN("PipeWire: no server running");
         return;
     }
     static const pw_core_events coreEvents = [] {
@@ -329,19 +329,19 @@ PipeWireBackend::PipeWireBackend(int virtualDevices) : impl_(std::make_shared<Im
         for (bool appsPlay : {true, false}) {
             Impl::Virtual v;
             v.apps_play_into = appsPlay;
-            v.nodeName = (appsPlay ? "nextone.output." : "nextone.mic.") + std::to_string(i);
-            v.label = (appsPlay ? "NexTone Output " : "NexTone Mic ") + std::to_string(i);
+            v.nodeName = (appsPlay ? "tonesphere.output." : "tonesphere.mic.") + std::to_string(i);
+            v.label = (appsPlay ? "ToneSphere Output " : "ToneSphere Mic ") + std::to_string(i);
             pw_properties* props = pw_properties_new(PW_KEY_MEDIA_TYPE, "Audio", PW_KEY_MEDIA_CLASS,
                                                      appsPlay ? "Audio/Sink" : "Audio/Source", PW_KEY_NODE_NAME,
                                                      v.nodeName.c_str(), PW_KEY_NODE_DESCRIPTION, v.label.c_str(),
-                                                     "node.always-process", "true", PW_KEY_APP_NAME, "NexTone", nullptr);
+                                                     "node.always-process", "true", PW_KEY_APP_NAME, "ToneSphere", nullptr);
             pw_properties_setf(props, PW_KEY_NODE_LATENCY, "%d/%u", kQuantum, static_cast<unsigned>(pw.rate));
-            // A sink receives audio from apps (NexTone captures it); a source sends audio to apps.
+            // A sink receives audio from apps (ToneSphere captures it); a source sends audio to apps.
             v.port = std::make_shared<Port>(pw, appsPlay, 2, pw.rate, props, false);
             pw.virtuals.push_back(std::move(v));
         }
     }
-    NT_INFO("PipeWire connected: %zu audio nodes, %zu virtual devices", pw.nodes.size(), pw.virtuals.size());
+    TS_INFO("PipeWire connected: %zu audio nodes, %zu virtual devices", pw.nodes.size(), pw.virtuals.size());
 }
 
 PipeWireBackend::~PipeWireBackend() = default;
@@ -361,7 +361,7 @@ std::vector<DeviceInfo> PipeWireBackend::enumerate() {
         d.endpointId = "virtual:" + std::to_string(i);
         d.appEndpointId = v.nodeName;
         d.name = v.label;
-        d.subtitle = v.apps_play_into ? "Apps play into this; NexTone records it" : "NexTone plays into this; apps record it";
+        d.subtitle = v.apps_play_into ? "Apps play into this; ToneSphere records it" : "ToneSphere plays into this; apps record it";
         d.bin = v.apps_play_into ? Bin::VirtualOut : Bin::VirtualIn;
         d.input = v.apps_play_into;
         d.channels = 2;
@@ -432,4 +432,4 @@ std::unique_ptr<DeviceStream> PipeWireBackend::open(const DeviceInfo& dev, const
     return std::make_unique<PwStream>(impl_, dev, std::max(1, dev.channels), rate, persistent);
 }
 
-}  // namespace nt
+}  // namespace ts

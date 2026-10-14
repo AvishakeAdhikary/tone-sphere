@@ -8,20 +8,20 @@
 #include "core/bridge.h"
 #include "core/graph.h"
 
-namespace nt {
+namespace ts {
 
 enum class DeviceKind { Wasapi, Asio, Vad, Compat, App, AsioClient, Vban, PipeWire, CoreAudio };
 const char* deviceKindName(DeviceKind k);
 
 struct DeviceInfo {
     std::string nodeId;      // stable node id, e.g. "wasapi:out:{0.0.0.00000000}.{guid}"
-    std::string endpointId;  // platform endpoint id NexTone streams with
+    std::string endpointId;  // platform endpoint id ToneSphere streams with
     std::string appEndpointId;  // virtual devices: the Windows endpoint apps should be pointed at
     std::string name;
     std::string subtitle;
     DeviceKind kind = DeviceKind::Wasapi;
     Bin bin = Bin::PhysicalIn;
-    bool input = true;  // true: captures into NexTone (source); false: renders (destination)
+    bool input = true;  // true: captures into ToneSphere (source); false: renders (destination)
     int channels = 2;
     double sampleRate = 48000.0;
     std::vector<std::string> channelNames;
@@ -73,4 +73,4 @@ public:
     std::function<void()> onDevicesChanged;
 };
 
-}  // namespace nt
+}  // namespace ts

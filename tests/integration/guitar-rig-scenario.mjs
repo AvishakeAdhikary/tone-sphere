@@ -1,5 +1,5 @@
 // Guitar Rig live scenario, run inside the test VM's desktop session (see vm/Test-GuitarRig.ps1):
-//   guitar (stand-in) → NexTone → Guitar Rig 7 (NexTone ASIO) → NexTone → speakers + OBS (stand-ins)
+//   guitar (stand-in) → ToneSphere → Guitar Rig 7 (ToneSphere ASIO) → ToneSphere → speakers + OBS (stand-ins)
 // Checks the sound at both destinations, then that unplugging devices and restarting Guitar Rig
 // keep the routing and the sound comes back by itself.
 //   node guitar-rig-scenario.mjs <preset.json> <audio-probe.exe>
@@ -38,13 +38,13 @@ const capture = (dev, secs = 5) => JSON.parse(execFileSync(probe, ['capture', de
 let player = null;
 const play = () => {
   player?.kill();
-  player = spawn(probe, ['play', 'NexTone Output 1', '220', '-18', '600'], { stdio: 'ignore' });
+  player = spawn(probe, ['play', 'ToneSphere Output 1', '220', '-18', '600'], { stdio: 'ignore' });
 };
 const audible = (c) => c.peakDb > -45 && c.gaps === 0;
 const ps = (cmd) => execFileSync('powershell', ['-NoProfile', '-Command', cmd], { encoding: 'utf8' }).trim();
 
 async function main() {
-  const discPath = path.join(process.env.LOCALAPPDATA ?? os.homedir(), 'NexTone', 'engine.json');
+  const discPath = path.join(process.env.LOCALAPPDATA ?? os.homedir(), 'ToneSphere', 'engine.json');
   await until(() => fs.existsSync(discPath), 60000);
   const disc = JSON.parse(fs.readFileSync(discPath, 'utf8'));
   ws = new WebSocket(`ws://127.0.0.1:${disc.port}/?token=${disc.token}`);
@@ -65,12 +65,12 @@ async function main() {
   const imp = await call('preset.import', { preset: JSON.parse(fs.readFileSync(presetFile, 'utf8')) });
   check('preset imported; Guitar Rig not running yet, so its ports wait', imp.connections === 3 && imp.waiting.length === 2, imp);
 
-  // 2) Start Guitar Rig (set to the NexTone ASIO driver): its ports bind to the preset.
+  // 2) Start Guitar Rig (set to the ToneSphere ASIO driver): its ports bind to the preset.
   const t0 = Date.now();
   spawn(GR, [], { detached: true, stdio: 'ignore' }).unref();
   const rigIn = 'asioclient:in:guitar rig 7.exe', rigOut = 'asioclient:out:guitar rig 7.exe';
   const up = await until(() => node(rigIn)?.state !== 'unavailable' && node(rigOut)?.state !== 'unavailable' && node(rigIn) && node(rigOut), 180000);
-  check('Guitar Rig opened NexTone ASIO and joined the preset', up && state.routes.length === 3, {
+  check('Guitar Rig opened ToneSphere ASIO and joined the preset', up && state.routes.length === 3, {
     seconds: Math.round((Date.now() - t0) / 1000), in: node(rigIn)?.state, out: node(rigOut)?.state, routes: state.routes.length,
   });
   if (!up) return;
@@ -78,21 +78,21 @@ async function main() {
   // 3) Play the "guitar" and listen at both destinations.
   play();
   await sleep(8000); // streams that just started settle in the first seconds
-  const obs1 = capture('NexTone Mic 1'), spk1 = capture('NexTone Mic 2');
+  const obs1 = capture('ToneSphere Mic 1'), spk1 = capture('ToneSphere Mic 2');
   check('OBS hears Guitar Rig', audible(obs1), obs1);
   check('speakers hear Guitar Rig', audible(spk1), spk1);
   const st = state.status;
   check('no dropouts in the engine', (st.xruns ?? 0) === 0, { xruns: st.xruns, cpu: st.cpuPercent });
 
-  // 4) Unplug all virtual devices (driver disabled) while NexTone and Guitar Rig run, then plug them back in.
+  // 4) Unplug all virtual devices (driver disabled) while ToneSphere and Guitar Rig run, then plug them back in.
   //    Windows refuses to disable a device an app still has open, so the player app stops first
-  //    (a real USB unplug can't be refused, so this is the gentler case for the device, not for NexTone).
+  //    (a real USB unplug can't be refused, so this is the gentler case for the device, not for ToneSphere).
   const routesBefore = JSON.stringify(state.routes.map((r) => [r.from, r.to]).sort());
   player.kill();
   await sleep(1500);
   for (let i = 0; i < 5; i++) {
     try {
-      ps("Get-PnpDevice | Where-Object { $_.HardwareID -contains 'ROOT\\NexToneVad' } | Disable-PnpDevice -Confirm:$false");
+      ps("Get-PnpDevice | Where-Object { $_.HardwareID -contains 'ROOT\\ToneSphereVad' } | Disable-PnpDevice -Confirm:$false");
       break;
     } catch {
       await sleep(2000);
@@ -101,12 +101,12 @@ async function main() {
   const gone = await until(() => !state.nodes.some((n) => n.kind === 'vad' && n.state !== 'unavailable'), 20000);
   const keptWhileGone = JSON.stringify(state.routes.map((r) => [r.from, r.to]).sort()) === routesBefore;
   check('unplugged: devices shown as disconnected, connections kept', gone && keptWhileGone, { routes: state.routes.length });
-  ps("Get-PnpDevice | Where-Object { $_.HardwareID -contains 'ROOT\\NexToneVad' } | Enable-PnpDevice -Confirm:$false");
+  ps("Get-PnpDevice | Where-Object { $_.HardwareID -contains 'ROOT\\ToneSphereVad' } | Enable-PnpDevice -Confirm:$false");
   const back = await until(() => state.nodes.filter((n) => n.kind === 'vad' && n.state !== 'unavailable').length >= 8, 40000);
   await sleep(3000);
   play(); // the player app lost its device too, like any app would
   await sleep(12000); // Windows re-creates all 8 endpoints, then buffers re-settle: judge the steady state
-  const obs2 = capture('NexTone Mic 1'), spk2 = capture('NexTone Mic 2');
+  const obs2 = capture('ToneSphere Mic 1'), spk2 = capture('ToneSphere Mic 2');
   const sameRoutes = JSON.stringify(state.routes.map((r) => [r.from, r.to]).sort()) === routesBefore;
   check('plugged back in: same connections, sound returns by itself', back && sameRoutes && audible(obs2) && audible(spk2), { obs: obs2, speakers: spk2 });
 
@@ -117,7 +117,7 @@ async function main() {
   spawn(GR, [], { detached: true, stdio: 'ignore' }).unref();
   const reopened = await until(() => node(rigIn)?.state !== 'unavailable' && node(rigOut)?.state !== 'unavailable', 180000);
   await sleep(8000);
-  const obs3 = capture('NexTone Mic 1');
+  const obs3 = capture('ToneSphere Mic 1');
   check('Guitar Rig reopened: sound returns by itself', reopened && audible(obs3), obs3);
 }
 

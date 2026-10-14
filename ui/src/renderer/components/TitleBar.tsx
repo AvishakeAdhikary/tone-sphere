@@ -42,7 +42,7 @@ export function TitleBar() {
             />
           </svg>
         </span>
-        <span className="brand-name">NexTone</span>
+        <span className="brand-name">ToneSphere</span>
       </div>
 
       <div className="segmented no-drag" role="tablist" aria-label="View">

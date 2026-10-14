@@ -38,7 +38,7 @@ let toastId = 1;
 export const useStore = create<Store>((set) => ({
   status: 'connecting',
   state: null,
-  view: (localStorage.getItem('nextone.view') as View) || 'simple',
+  view: (localStorage.getItem('tonesphere.view') as View) || 'simple',
   selection: null,
   hoverNode: null,
   dragFrom: null,
@@ -46,7 +46,7 @@ export const useStore = create<Store>((set) => ({
   toasts: [],
   setView: (view) => {
     try {
-      localStorage.setItem('nextone.view', view);
+      localStorage.setItem('tonesphere.view', view);
     } catch {
       /* storage unavailable */
     }

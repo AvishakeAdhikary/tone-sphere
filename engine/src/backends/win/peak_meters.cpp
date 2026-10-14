@@ -16,7 +16,7 @@
 
 using Microsoft::WRL::ComPtr;
 
-namespace nt {
+namespace ts {
 
 struct PeakMeters::Impl {
     std::mutex mu;
@@ -135,4 +135,4 @@ void PeakMeters::poll(MeterBank& bank, uint32_t) {
     }
 }
 
-}  // namespace nt
+}  // namespace ts

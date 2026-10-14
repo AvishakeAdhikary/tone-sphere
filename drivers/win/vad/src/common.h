@@ -230,7 +230,7 @@ typedef struct _ENDPOINT_MINIPAIR
     // General endpoint flags (one of more ENDPOINT_<flag-type>, see above)
     ULONG                           DeviceFlags;
 
-    // NexTone: 0-based index of the shared ring for this endpoint.
+    // ToneSphere: 0-based index of the shared ring for this endpoint.
     ULONG                           RingIndex;
 } ENDPOINT_MINIPAIR;
 

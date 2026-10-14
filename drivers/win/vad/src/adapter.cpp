@@ -48,7 +48,7 @@ DRIVER_DISPATCH PnpHandler;
 // Rendering streams are not saved to a file by default. Use the registry value 
 // DoNotCreateDataFiles (DWORD) = 0 to override this default.
 //
-PDRIVER_OBJECT g_DriverObject = NULL;  // NexTone: saved in DriverEntry (no WDF)
+PDRIVER_OBJECT g_DriverObject = NULL;  // ToneSphere: saved in DriverEntry (no WDF)
 UNICODE_STRING g_RegistryPath;      // This is used to store the registry settings path for the driver
 
 //-----------------------------------------------------------------------------
@@ -111,7 +111,7 @@ Environment:
         gPCDriverUnloadRoutine(DriverObject);
     }
 
-    NtRingsDestroyAll();
+    TsRingsDestroyAll();
 Done:
     return;
 }
@@ -205,7 +205,7 @@ Return Value:
         Done);
     
     g_DriverObject = DriverObject;
-    NtBuildEndpoints();
+    TsBuildEndpoints();
 
     //
     // Tell the class driver to initialize the driver.
@@ -618,12 +618,12 @@ Return Value:
     IF_FAILED_JUMP(ntStatus, Exit);
 
     //
-    // NexTone: shared rings used by the engine. Failure is not fatal: endpoints still
+    // ToneSphere: shared rings used by the engine. Failure is not fatal: endpoints still
     // work (render discards, capture is silent) until the rings can be created.
     //
-    if (!NT_SUCCESS(NtRingsCreateAll()))
+    if (!NT_SUCCESS(TsRingsCreateAll()))
     {
-        DPF(D_ERROR, ("NtRingsCreateAll failed"));
+        DPF(D_ERROR, ("TsRingsCreateAll failed"));
     }
 
     //
@@ -719,7 +719,7 @@ Return Value:
         }
         if (stack->MinorFunction != IRP_MN_STOP_DEVICE)
         {
-            NtRingsDestroyAll();
+            TsRingsDestroyAll();
         }
         break;
 

@@ -1,4 +1,4 @@
-// VST3 hosting test against the running engine, using the NexTone Test Gain plugin
+// VST3 hosting test against the running engine, using the ToneSphere Test Gain plugin
 // (build/x64-release/bin/test-plugins): scan, insert on a mix (-6 dB), open the plugin
 // window and move its slider (edit reaches the audio thread: +12 dB), save/restore the
 // plugin state through a scene, close the window, remove the plugin.
@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const pluginDir = path.join(root, 'build', 'x64-release', 'bin', 'test-plugins');
 const TEST_GAIN = '4E78546F6E65546573744761696E3031';
-const disc = JSON.parse(fs.readFileSync(path.join(process.env.LOCALAPPDATA ?? os.homedir(), 'NexTone', 'engine.json'), 'utf8'));
+const disc = JSON.parse(fs.readFileSync(path.join(process.env.LOCALAPPDATA ?? os.homedir(), 'ToneSphere', 'engine.json'), 'utf8'));
 const ws = new WebSocket(`ws://127.0.0.1:${disc.port}/?token=${disc.token}`);
 ws.binaryType = 'arraybuffer';
 let state = null, meters = null, id = 1;
@@ -51,15 +51,15 @@ const WIN32 = `Add-Type -TypeDefinition 'using System;using System.Text;using Sy
 [DllImport("user32.dll")]public static extern bool PostMessage(IntPtr h,uint m,IntPtr w,IntPtr l);
 [DllImport("user32.dll")]public static extern bool IsWindowVisible(IntPtr h);}'`;
 const ps = (body) => execFileSync('powershell', ['-NoProfile', '-Command', `${WIN32}\n${body}`], { encoding: 'utf8' }).trim();
-const editorOpen = () => ps(`$h=[W]::FindWindow('NexTonePluginWindow','NexTone Test Gain'); [int]($h -ne [IntPtr]::Zero -and [W]::IsWindowVisible($h))`) === '1';
+const editorOpen = () => ps(`$h=[W]::FindWindow('ToneSpherePluginWindow','ToneSphere Test Gain'); [int]($h -ne [IntPtr]::Zero -and [W]::IsWindowVisible($h))`) === '1';
 const moveSlider = (pos) =>
-  ps(`$h=[W]::FindWindow('NexTonePluginWindow','NexTone Test Gain')
-$v=[W]::FindWindowEx($h,[IntPtr]::Zero,'NexToneTestGainView',$null)
+  ps(`$h=[W]::FindWindow('ToneSpherePluginWindow','ToneSphere Test Gain')
+$v=[W]::FindWindowEx($h,[IntPtr]::Zero,'ToneSphereTestGainView',$null)
 $s=[W]::FindWindowEx($v,[IntPtr]::Zero,'msctls_trackbar32',$null)
 [void][W]::SendMessage($s,0x405,[IntPtr]1,[IntPtr]${pos})   # TBM_SETPOS
 [void][W]::SendMessage($v,0x114,[IntPtr]8,$s)               # WM_HSCROLL / TB_ENDTRACK
 [int]($s -ne [IntPtr]::Zero)`);
-const closeEditor = () => ps(`$h=[W]::FindWindow('NexTonePluginWindow','NexTone Test Gain'); [void][W]::PostMessage($h,0x10,[IntPtr]::Zero,[IntPtr]::Zero)`);
+const closeEditor = () => ps(`$h=[W]::FindWindow('ToneSpherePluginWindow','ToneSphere Test Gain'); [void][W]::PostMessage($h,0x10,[IntPtr]::Zero,[IntPtr]::Zero)`);
 
 async function levelDb(nodeId, ms = 900) {
   await sleep(ms);

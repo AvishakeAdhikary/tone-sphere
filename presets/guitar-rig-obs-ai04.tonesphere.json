@@ -1,9 +1,9 @@
 {
-  "format": "nextone-preset",
+  "format": "tonesphere-preset",
   "version": 1,
   "name": "Guitar Rig live: AI-04 → earphones + OBS",
-  "description": "Guitar on AI-04 input 1 (Hi-Z) → Guitar Rig 7 (through the NexTone ASIO driver) → your earphones (Realtek HD Audio 2nd output) and VB-CABLE for OBS. Desktop audio (YouTube…) keeps playing on the Windows default device as usual. In Guitar Rig: Audio and MIDI Settings → Driver: ASIO, Device: NexTone ASIO. In OBS: add an Audio Input Capture with the device “CABLE Output (VB-Audio Virtual Cable)”. Devices that are unplugged keep their connections and reconnect when plugged back in.",
-  "app": "NexTone 0.1.0",
+  "description": "Guitar on AI-04 input 1 (Hi-Z) → Guitar Rig 7 (through the ToneSphere ASIO driver) → your earphones (Realtek HD Audio 2nd output) and VB-CABLE for OBS. Desktop audio (YouTube…) keeps playing on the Windows default device as usual. In Guitar Rig: Audio and MIDI Settings → Driver: ASIO, Device: ToneSphere ASIO. In OBS: add an Audio Input Capture with the device “CABLE Output (VB-Audio Virtual Cable)”. Devices that are unplugged keep their connections and reconnect when plugged back in.",
+  "app": "ToneSphere 1.0.0",
   "devices": [
     {
       "key": "guitar",
@@ -16,7 +16,7 @@
     },
     {
       "key": "rig-in",
-      "label": "Guitar Rig 7 input (NexTone ASIO)",
+      "label": "Guitar Rig 7 input (ToneSphere ASIO)",
       "bin": "app-in",
       "kind": "asioclient",
       "exe": "guitar rig 7.exe",
@@ -24,7 +24,7 @@
     },
     {
       "key": "rig-out",
-      "label": "Guitar Rig 7 output (NexTone ASIO)",
+      "label": "Guitar Rig 7 output (ToneSphere ASIO)",
       "bin": "app-out",
       "kind": "asioclient",
       "exe": "guitar rig 7.exe",

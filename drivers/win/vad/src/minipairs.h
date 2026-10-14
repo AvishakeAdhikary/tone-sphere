@@ -21,7 +21,7 @@ Abstract:
 #include "micarraytopo.h"
 #include "micarray1toptable.h"
 #include "micarraywavtable.h"
-#include "../include/nextone_vad_shared.h"
+#include "../include/tonesphere_vad_shared.h"
 
 
 NTSTATUS
@@ -145,49 +145,49 @@ ENDPOINT_MINIPAIR MicArray1Miniports =
 
 //=============================================================================
 //
-// NexTone endpoints: NT_OUTPUTS render endpoints ("NexTone Output N") and NT_MICS
-// capture endpoints ("NexTone Mic N"), built at DriverEntry from the speaker and mic
+// ToneSphere endpoints: TS_OUTPUTS render endpoints ("ToneSphere Output N") and TS_MICS
+// capture endpoints ("ToneSphere Mic N"), built at DriverEntry from the speaker and mic
 // templates above. Each endpoint gets unique KS filter names (matching the INF) and a
 // pin Name GUID whose display name is registered under MediaCategories by the INF.
 //
-// {7C1F3A10-2B5E-4B7A-9E61-0A1B2C3D4E01} .. 08 : outputs
-// {7C1F3A10-2B5E-4B7A-9E61-0A1B2C3D4F01} .. 08 : mics
-static const GUID g_NtOutNameGuids[NTVAD_MAX_OUTPUTS] = {
-    {0x7c1f3a10, 0x2b5e, 0x4b7a, {0x9e, 0x61, 0x0a, 0x1b, 0x2c, 0x3d, 0x4e, 0x01}},
-    {0x7c1f3a10, 0x2b5e, 0x4b7a, {0x9e, 0x61, 0x0a, 0x1b, 0x2c, 0x3d, 0x4e, 0x02}},
-    {0x7c1f3a10, 0x2b5e, 0x4b7a, {0x9e, 0x61, 0x0a, 0x1b, 0x2c, 0x3d, 0x4e, 0x03}},
-    {0x7c1f3a10, 0x2b5e, 0x4b7a, {0x9e, 0x61, 0x0a, 0x1b, 0x2c, 0x3d, 0x4e, 0x04}},
-    {0x7c1f3a10, 0x2b5e, 0x4b7a, {0x9e, 0x61, 0x0a, 0x1b, 0x2c, 0x3d, 0x4e, 0x05}},
-    {0x7c1f3a10, 0x2b5e, 0x4b7a, {0x9e, 0x61, 0x0a, 0x1b, 0x2c, 0x3d, 0x4e, 0x06}},
-    {0x7c1f3a10, 0x2b5e, 0x4b7a, {0x9e, 0x61, 0x0a, 0x1b, 0x2c, 0x3d, 0x4e, 0x07}},
-    {0x7c1f3a10, 0x2b5e, 0x4b7a, {0x9e, 0x61, 0x0a, 0x1b, 0x2c, 0x3d, 0x4e, 0x08}},
+// {124670D4-2423-459E-848E-97798DC64E01} .. 08 : outputs
+// {124670D4-2423-459E-848E-97798DC64F01} .. 08 : mics
+static const GUID g_NtOutNameGuids[TSVAD_MAX_OUTPUTS] = {
+    {0x124670d4, 0x2423, 0x459e, {0x84, 0x8e, 0x97, 0x79, 0x8d, 0xc6, 0x4e, 0x01}},
+    {0x124670d4, 0x2423, 0x459e, {0x84, 0x8e, 0x97, 0x79, 0x8d, 0xc6, 0x4e, 0x02}},
+    {0x124670d4, 0x2423, 0x459e, {0x84, 0x8e, 0x97, 0x79, 0x8d, 0xc6, 0x4e, 0x03}},
+    {0x124670d4, 0x2423, 0x459e, {0x84, 0x8e, 0x97, 0x79, 0x8d, 0xc6, 0x4e, 0x04}},
+    {0x124670d4, 0x2423, 0x459e, {0x84, 0x8e, 0x97, 0x79, 0x8d, 0xc6, 0x4e, 0x05}},
+    {0x124670d4, 0x2423, 0x459e, {0x84, 0x8e, 0x97, 0x79, 0x8d, 0xc6, 0x4e, 0x06}},
+    {0x124670d4, 0x2423, 0x459e, {0x84, 0x8e, 0x97, 0x79, 0x8d, 0xc6, 0x4e, 0x07}},
+    {0x124670d4, 0x2423, 0x459e, {0x84, 0x8e, 0x97, 0x79, 0x8d, 0xc6, 0x4e, 0x08}},
 };
-static const GUID g_NtMicNameGuids[NTVAD_MAX_MICS] = {
-    {0x7c1f3a10, 0x2b5e, 0x4b7a, {0x9e, 0x61, 0x0a, 0x1b, 0x2c, 0x3d, 0x4f, 0x01}},
-    {0x7c1f3a10, 0x2b5e, 0x4b7a, {0x9e, 0x61, 0x0a, 0x1b, 0x2c, 0x3d, 0x4f, 0x02}},
-    {0x7c1f3a10, 0x2b5e, 0x4b7a, {0x9e, 0x61, 0x0a, 0x1b, 0x2c, 0x3d, 0x4f, 0x03}},
-    {0x7c1f3a10, 0x2b5e, 0x4b7a, {0x9e, 0x61, 0x0a, 0x1b, 0x2c, 0x3d, 0x4f, 0x04}},
-    {0x7c1f3a10, 0x2b5e, 0x4b7a, {0x9e, 0x61, 0x0a, 0x1b, 0x2c, 0x3d, 0x4f, 0x05}},
-    {0x7c1f3a10, 0x2b5e, 0x4b7a, {0x9e, 0x61, 0x0a, 0x1b, 0x2c, 0x3d, 0x4f, 0x06}},
-    {0x7c1f3a10, 0x2b5e, 0x4b7a, {0x9e, 0x61, 0x0a, 0x1b, 0x2c, 0x3d, 0x4f, 0x07}},
-    {0x7c1f3a10, 0x2b5e, 0x4b7a, {0x9e, 0x61, 0x0a, 0x1b, 0x2c, 0x3d, 0x4f, 0x08}},
+static const GUID g_NtMicNameGuids[TSVAD_MAX_MICS] = {
+    {0x124670d4, 0x2423, 0x459e, {0x84, 0x8e, 0x97, 0x79, 0x8d, 0xc6, 0x4f, 0x01}},
+    {0x124670d4, 0x2423, 0x459e, {0x84, 0x8e, 0x97, 0x79, 0x8d, 0xc6, 0x4f, 0x02}},
+    {0x124670d4, 0x2423, 0x459e, {0x84, 0x8e, 0x97, 0x79, 0x8d, 0xc6, 0x4f, 0x03}},
+    {0x124670d4, 0x2423, 0x459e, {0x84, 0x8e, 0x97, 0x79, 0x8d, 0xc6, 0x4f, 0x04}},
+    {0x124670d4, 0x2423, 0x459e, {0x84, 0x8e, 0x97, 0x79, 0x8d, 0xc6, 0x4f, 0x05}},
+    {0x124670d4, 0x2423, 0x459e, {0x84, 0x8e, 0x97, 0x79, 0x8d, 0xc6, 0x4f, 0x06}},
+    {0x124670d4, 0x2423, 0x459e, {0x84, 0x8e, 0x97, 0x79, 0x8d, 0xc6, 0x4f, 0x07}},
+    {0x124670d4, 0x2423, 0x459e, {0x84, 0x8e, 0x97, 0x79, 0x8d, 0xc6, 0x4f, 0x08}},
 };
 
-static ENDPOINT_MINIPAIR   g_NtOutPairs[NT_OUTPUTS];
-static ENDPOINT_MINIPAIR   g_NtMicPairs[NT_MICS];
-static PCFILTER_DESCRIPTOR g_NtOutTopoDesc[NT_OUTPUTS];
-static PCFILTER_DESCRIPTOR g_NtMicTopoDesc[NT_MICS];
-static PCPIN_DESCRIPTOR    g_NtOutTopoPins[NT_OUTPUTS][SIZEOF_ARRAY(SpeakerTopoMiniportPins)];
-static PCPIN_DESCRIPTOR    g_NtMicTopoPins[NT_MICS][SIZEOF_ARRAY(MicArray1TopoMiniportPins)];
-static WCHAR               g_NtNames[(NT_OUTPUTS + NT_MICS) * 2][32];
+static ENDPOINT_MINIPAIR   g_NtOutPairs[TS_OUTPUTS];
+static ENDPOINT_MINIPAIR   g_NtMicPairs[TS_MICS];
+static PCFILTER_DESCRIPTOR g_NtOutTopoDesc[TS_OUTPUTS];
+static PCFILTER_DESCRIPTOR g_NtMicTopoDesc[TS_MICS];
+static PCPIN_DESCRIPTOR    g_NtOutTopoPins[TS_OUTPUTS][SIZEOF_ARRAY(SpeakerTopoMiniportPins)];
+static PCPIN_DESCRIPTOR    g_NtMicTopoPins[TS_MICS][SIZEOF_ARRAY(MicArray1TopoMiniportPins)];
+static WCHAR               g_NtNames[(TS_OUTPUTS + TS_MICS) * 2][32];
 
-static PENDPOINT_MINIPAIR  g_RenderEndpoints[NT_OUTPUTS];
-static PENDPOINT_MINIPAIR  g_CaptureEndpoints[NT_MICS];
+static PENDPOINT_MINIPAIR  g_RenderEndpoints[TS_OUTPUTS];
+static PENDPOINT_MINIPAIR  g_CaptureEndpoints[TS_MICS];
 
 #define g_cRenderEndpoints  (SIZEOF_ARRAY(g_RenderEndpoints))
 #define g_cCaptureEndpoints (SIZEOF_ARRAY(g_CaptureEndpoints))
 
-static void NtSetName(WCHAR* dst, PCWSTR prefix, ULONG n)
+static void TsSetName(WCHAR* dst, PCWSTR prefix, ULONG n)
 {
     UNICODE_STRING s;
     RtlInitEmptyUnicodeString(&s, dst, 32 * sizeof(WCHAR) - sizeof(WCHAR));
@@ -196,15 +196,15 @@ static void NtSetName(WCHAR* dst, PCWSTR prefix, ULONG n)
 }
 
 // Called once from DriverEntry (PASSIVE_LEVEL).
-static void NtBuildEndpoints()
+static void TsBuildEndpoints()
 {
     ULONG nameSlot = 0;
-    for (ULONG i = 0; i < NT_OUTPUTS; ++i)
+    for (ULONG i = 0; i < TS_OUTPUTS; ++i)
     {
         RtlCopyMemory(g_NtOutTopoPins[i], SpeakerTopoMiniportPins, sizeof(SpeakerTopoMiniportPins));
         g_NtOutTopoPins[i][KSPIN_TOPO_LINEOUT_DEST].KsPinDescriptor.Name = &g_NtOutNameGuids[i];
         // Windows names KSNODETYPE_SPEAKER endpoints "Speakers" regardless of the pin name;
-        // a line connector keeps our own name ("NexTone Output N").
+        // a line connector keeps our own name ("ToneSphere Output N").
         g_NtOutTopoPins[i][KSPIN_TOPO_LINEOUT_DEST].KsPinDescriptor.Category = &KSNODETYPE_LINE_CONNECTOR;
         g_NtOutTopoDesc[i] = SpeakerTopoMiniportFilterDescriptor;
         g_NtOutTopoDesc[i].Pins = g_NtOutTopoPins[i];
@@ -212,15 +212,15 @@ static void NtBuildEndpoints()
         g_NtOutPairs[i] = SpeakerMiniports;
         WCHAR* topo = g_NtNames[nameSlot++];
         WCHAR* wave = g_NtNames[nameSlot++];
-        NtSetName(topo, L"TopologyNexToneOut", i + 1);
-        NtSetName(wave, L"WaveNexToneOut", i + 1);
+        TsSetName(topo, L"TopologyToneSphereOut", i + 1);
+        TsSetName(wave, L"WaveToneSphereOut", i + 1);
         g_NtOutPairs[i].TopoName = topo;
         g_NtOutPairs[i].WaveName = wave;
         g_NtOutPairs[i].TopoDescriptor = &g_NtOutTopoDesc[i];
         g_NtOutPairs[i].RingIndex = i;
         g_RenderEndpoints[i] = &g_NtOutPairs[i];
     }
-    for (ULONG i = 0; i < NT_MICS; ++i)
+    for (ULONG i = 0; i < TS_MICS; ++i)
     {
         RtlCopyMemory(g_NtMicTopoPins[i], MicArray1TopoMiniportPins, sizeof(MicArray1TopoMiniportPins));
         g_NtMicTopoPins[i][KSPIN_TOPO_MIC_ELEMENTS].KsPinDescriptor.Name = &g_NtMicNameGuids[i];
@@ -230,8 +230,8 @@ static void NtBuildEndpoints()
         g_NtMicPairs[i] = MicArray1Miniports;
         WCHAR* topo = g_NtNames[nameSlot++];
         WCHAR* wave = g_NtNames[nameSlot++];
-        NtSetName(topo, L"TopologyNexToneMic", i + 1);
-        NtSetName(wave, L"WaveNexToneMic", i + 1);
+        TsSetName(topo, L"TopologyToneSphereMic", i + 1);
+        TsSetName(wave, L"WaveToneSphereMic", i + 1);
         g_NtMicPairs[i].TopoName = topo;
         g_NtMicPairs[i].WaveName = wave;
         g_NtMicPairs[i].TopoDescriptor = &g_NtMicTopoDesc[i];

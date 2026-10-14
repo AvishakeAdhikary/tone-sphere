@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const probe = path.join(root, 'build', 'x64-release', 'bin', 'audio-probe.exe');
-const disc = JSON.parse(fs.readFileSync(path.join(process.env.LOCALAPPDATA ?? os.homedir(), 'NexTone', 'engine.json'), 'utf8'));
+const disc = JSON.parse(fs.readFileSync(path.join(process.env.LOCALAPPDATA ?? os.homedir(), 'ToneSphere', 'engine.json'), 'utf8'));
 const ws = new WebSocket(`ws://127.0.0.1:${disc.port}/?token=${disc.token}`);
 ws.binaryType = 'arraybuffer';
 let state = null, meters = null, id = 1;

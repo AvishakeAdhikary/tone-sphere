@@ -10,7 +10,7 @@ import { VbanDialog } from './VbanDialog';
 function useCollapsed(key: string): [boolean, () => void] {
   const [c, setC] = useState(() => {
     try {
-      return localStorage.getItem(`nextone.collapsed.${key}`) === '1';
+      return localStorage.getItem(`tonesphere.collapsed.${key}`) === '1';
     } catch {
       return false;
     }
@@ -20,7 +20,7 @@ function useCollapsed(key: string): [boolean, () => void] {
     () => {
       setC(!c);
       try {
-        localStorage.setItem(`nextone.collapsed.${key}`, c ? '0' : '1');
+        localStorage.setItem(`tonesphere.collapsed.${key}`, c ? '0' : '1');
       } catch {
         /* ignore */
       }

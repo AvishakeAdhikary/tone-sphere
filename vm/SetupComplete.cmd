@@ -1,5 +1,5 @@
 @echo off
-rem Runs once as SYSTEM at the end of first boot in the NexTone test VM.
+rem Runs once as SYSTEM at the end of first boot in the ToneSphere test VM.
 bcdedit /set {current} testsigning on
 rem Kernel memory dumps for driver debugging.
 reg add "HKLM\SYSTEM\CurrentControlSet\Control\CrashControl" /v CrashDumpEnabled /t REG_DWORD /d 2 /f

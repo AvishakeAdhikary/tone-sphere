@@ -6,7 +6,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace nt {
+namespace ts {
 
 class DriftController {
 public:
@@ -62,4 +62,4 @@ private:
     bool settled_ = false;
 };
 
-}  // namespace nt
+}  // namespace ts

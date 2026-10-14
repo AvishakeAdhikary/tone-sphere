@@ -36,7 +36,7 @@ DEFINE_GUIDSTRUCT("836BA6D1-3FF7-4411-8BCD-469553452DCE", PID_SIMPLEAUDIOSAMPLE)
 #define SIMPLEAUDIOSAMPLE_POOLTAG               'dVtN'  
 
 // Debug module name
-#define STR_MODULENAME              "NexToneVad: "
+#define STR_MODULENAME              "ToneSphereVad: "
 
 // Debug utility macros
 #define D_FUNC                      4
@@ -191,6 +191,6 @@ NTSTATUS PropertyHandler_GenericPin
 // common.h uses some of the above definitions.
 #include "common.h"
 #include "kshelper.h"
-#include "nextone_ring.h"
+#include "tonesphere_ring.h"
 
 #endif // _SIMPLEAUDIOSAMPLE_DEFINITIONS_H_

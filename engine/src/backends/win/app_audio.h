@@ -15,7 +15,7 @@
 
 #include "backends/device.h"
 
-namespace nt {
+namespace ts {
 
 class Engine;
 struct NodeModel;
@@ -65,4 +65,4 @@ private:
     bool policyNew_ = true;
 };
 
-}  // namespace nt
+}  // namespace ts

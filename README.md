@@ -1,8 +1,8 @@
-# NexTone
+# ToneSphere
 
 **Route any audio anywhere: simple for everyone, deep enough for studios.**
 
-NexTone is a free, open-source audio router for Windows (Linux too; macOS later). Everything on
+ToneSphere is a free, open-source audio router for Windows (Linux too; macOS later). Everything on
 your computer that makes or takes sound is sorted into six bins:
 
 | Sources (sound comes from) | Destinations (sound goes to) |
@@ -13,7 +13,7 @@ your computer that makes or takes sound is sorted into six bins:
 
 To connect two things, drag a source onto a destination. Everything else is optional.
 
-NexTone is a clean-room successor to *ODeus ASIO Link Pro*: it keeps the power and drops the
+ToneSphere is a clean-room successor to *ODeus ASIO Link Pro*: it keeps the power and drops the
 confusion. See [docs/parity.md](docs/parity.md) for the feature-by-feature comparison.
 
 ## Features
@@ -24,7 +24,7 @@ confusion. See [docs/parity.md](docs/parity.md) for the feature-by-feature compa
   slow drift and no clicks between devices.
 - **Applications.** Capture any app's sound, give an app its own output, or feed a mix into an
   app's microphone.
-- **NexTone ASIO driver.** Several DAWs can share one audio interface at once (64- and 32-bit
+- **ToneSphere ASIO driver.** Several DAWs can share one audio interface at once (64- and 32-bit
   hosts).
 - **Effects.** Built-in effects: noise suppression (RNNoise), gate, EQ, compressor, limiter,
   auto-duck and delay. **VST3 plugins** work on any input, output or mix, with their own
@@ -45,10 +45,10 @@ confusion. See [docs/parity.md](docs/parity.md) for the feature-by-feature compa
 | Platform | Package | Notes |
 |---|---|---|
 | Windows (recommended) | Microsoft Store | Free, signed by Microsoft. Virtual devices use *Compatibility mode* (an installed cable such as VB-CABLE). |
-| Windows (full) | `NexTone-Setup-<version>.exe` (Driver Pack) | Adds the NexTone ASIO driver and the NexTone virtual audio driver. |
-| Linux | `NexTone-<version>-x86_64.AppImage` | Needs PipeWire. NexTone's virtual devices are native PipeWire nodes. |
+| Windows (full) | `ToneSphere-Setup-<version>.exe` (Driver Pack) | Adds the ToneSphere ASIO driver and the ToneSphere virtual audio driver. |
+| Linux | `ToneSphere-<version>-x86_64.AppImage` | Needs PipeWire. ToneSphere's virtual devices are native PipeWire nodes. |
 
-> **Note.** The NexTone *virtual audio driver* is currently **test-signed**, so Windows only loads
+> **Note.** The ToneSphere *virtual audio driver* is currently **test-signed**, so Windows only loads
 > it with test signing turned on. Public builds need Microsoft attestation signing. Everything
 > else, including the ASIO driver, works on any PC. See [docs/STATUS.md](docs/STATUS.md).
 
@@ -94,9 +94,9 @@ What is verified and what is still pending is tracked in [docs/STATUS.md](docs/S
 engine/        C++20 audio engine: graph, bridges, effects, VST3 host, backends (WASAPI, ASIO,
                PipeWire, VBAN), OSC/MIDI, WebSocket JSON-RPC
 ui/            Electron + React app (bins, matrix, inspector, settings) and packaging
-drivers/win/   NexTone ASIO driver (user mode) and virtual audio driver (kernel, WaveRT)
+drivers/win/   ToneSphere ASIO driver (user mode) and virtual audio driver (kernel, WaveRT)
 shared/        Engine ⇄ UI protocol (PROTOCOL.md; TypeScript types live in ui/src/shared)
-presets/       ready-made routing presets (.nextone.json) and how to use them/         nextone-ctl (CLI), nextone-setup (driver installer), audio-probe, asio-test-host
+presets/       ready-made routing presets (.tonesphere.json) and how to use them/         tonesphere-ctl (CLI), tonesphere-setup (driver installer), audio-probe, asio-test-host
 tests/         Integration suites (Node) that drive the real engine with real audio
 vm/            Hyper-V test VM automation
 packaging/     Microsoft Store listing, privacy policy, submission guide
@@ -108,25 +108,25 @@ docs/          STATUS.md (verified / pending), parity.md
 **OSC.** Turn on *Settings › Control › Allow OSC control* (UDP port 9000 by default). Then send:
 
 ```
-/nextone/volume "Stream mix" 0.75     /nextone/mute "Microphone"      (toggle)
-/nextone/gain   "Speakers"  -6.0      /nextone/scene "Gaming"
-/nextone/record 1                     /nextone/replay
+/tonesphere/volume "Stream mix" 0.75     /tonesphere/mute "Microphone"      (toggle)
+/tonesphere/gain   "Speakers"  -6.0      /tonesphere/scene "Gaming"
+/tonesphere/record 1                     /tonesphere/replay
 ```
 
 **MIDI.** In *Settings › Control*, choose an action, press **Learn** and move a knob, fader or
 pad.
 
-**Command line.** Use `node tools/nextone-ctl.mjs state`, plus `connect`, `tone`, `meters` and
+**Command line.** Use `node tools/tonesphere-ctl.mjs state`, plus `connect`, `tone`, `meters` and
 raw `call`.
 
 ## License
 
-NexTone is free software under the **GNU General Public License v3.0 or later** (see
+ToneSphere is free software under the **GNU General Public License v3.0 or later** (see
 [LICENSE](LICENSE)). Third-party components:
 - ASIO SDK (GPLv3 option), VST3 SDK (MIT), RNNoise (BSD-3), nlohmann/json (MIT), Catch2 (BSL-1.0).
 - JetBrains Mono (SIL OFL 1.1).
 - The virtual audio driver is based on Microsoft's SimpleAudioSample (MS-PL; see
   `drivers/win/vad/LICENSE-MS-PL.txt`).
 
-ASIO is a trademark of Steinberg Media Technologies GmbH. NexTone is not affiliated with ODeus
+ASIO is a trademark of Steinberg Media Technologies GmbH. ToneSphere is not affiliated with ODeus
 or Steinberg.

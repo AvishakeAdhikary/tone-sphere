@@ -109,7 +109,7 @@ protected:
     PLONG                       m_plPeakMeter;
     PWAVEFORMATEXTENSIBLE       m_pWfExt;
     ULONG                       m_ulContentId;
-    NTVAD_RING*                 m_pRing;            // NexTone shared ring for this endpoint
+    TSVAD_RING*                 m_pRing;            // ToneSphere shared ring for this endpoint
     GUID                        m_SignalProcessingMode;
     BOOLEAN                     m_bEoSReceived;
     BOOLEAN                     m_bLastBufferRendered;

@@ -302,8 +302,8 @@ Return Value:
         return STATUS_INSUFFICIENT_RESOURCES;
     }
 
-    // NexTone: attach this stream to its endpoint's shared ring and publish the format.
-    m_pRing = NtRingGet(m_bCapture, m_pMiniport->GetRingIndex());
+    // ToneSphere: attach this stream to its endpoint's shared ring and publish the format.
+    m_pRing = TsRingGet(m_bCapture, m_pMiniport->GetRingIndex());
     {
         BOOLEAN isFloat = FALSE;
         ULONG validBits = m_pWfExt->Format.wBitsPerSample;
@@ -316,7 +316,7 @@ Return Value:
         {
             isFloat = TRUE;
         }
-        NtRingSetFormat(m_pRing, m_pWfExt->Format.nSamplesPerSec, m_pWfExt->Format.nChannels,
+        TsRingSetFormat(m_pRing, m_pWfExt->Format.nSamplesPerSec, m_pWfExt->Format.nChannels,
                         m_pWfExt->Format.wBitsPerSample, validBits, isFloat, m_pWfExt->Format.nBlockAlign);
     }
 
@@ -1133,7 +1133,7 @@ NTSTATUS CMiniportWaveRTStream::SetState
 
             KeReleaseSpinLock(&m_PositionSpinLock, oldIrql);
 
-            NtRingSetActive(m_pRing, FALSE);
+            TsRingSetActive(m_pRing, FALSE);
             break;
 
         case KSSTATE_ACQUIRE:
@@ -1178,7 +1178,7 @@ NTSTATUS CMiniportWaveRTStream::SetState
             break;
 
         case KSSTATE_RUN:
-            NtRingSetActive(m_pRing, TRUE);
+            TsRingSetActive(m_pRing, TRUE);
             // Start DMA
             LARGE_INTEGER ullPerfCounterTemp;
             ullPerfCounterTemp = KeQueryPerformanceCounter(&m_ullPerformanceCounterFrequency);
@@ -1296,7 +1296,7 @@ VOID CMiniportWaveRTStream::UpdatePosition
             m_bLastBufferRendered = TRUE;
         }
 
-        // NexTone: hand the rendered audio to the engine.
+        // ToneSphere: hand the rendered audio to the engine.
         ReadBytes(ByteDisplacement);
     }
     
@@ -1342,8 +1342,8 @@ ByteDisplacement - # of bytes to process.
     {
         ULONG runWrite = min(ByteDisplacement, m_ulDmaBufferSize - bufferOffset);
         
-        // NexTone: audio produced by the engine (silence when it has none).
-        NtRingConsume(m_pRing, m_pDmaBuffer + bufferOffset, runWrite, FALSE, m_pWfExt->Format.wBitsPerSample);
+        // ToneSphere: audio produced by the engine (silence when it has none).
+        TsRingConsume(m_pRing, m_pDmaBuffer + bufferOffset, runWrite, FALSE, m_pWfExt->Format.wBitsPerSample);
            	
         bufferOffset = (bufferOffset + runWrite) % m_ulDmaBufferSize;
         ByteDisplacement -= runWrite;
@@ -1375,7 +1375,7 @@ ByteDisplacement - # of bytes to process.
     while (ByteDisplacement > 0)
     {
         ULONG runWrite = min(ByteDisplacement, m_ulDmaBufferSize - bufferOffset);
-        NtRingProduce(m_pRing, m_pDmaBuffer + bufferOffset, runWrite);
+        TsRingProduce(m_pRing, m_pDmaBuffer + bufferOffset, runWrite);
         bufferOffset = (bufferOffset + runWrite) % m_ulDmaBufferSize;
         ByteDisplacement -= runWrite;
     }

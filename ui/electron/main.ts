@@ -1,4 +1,4 @@
-// NexTone UI — Electron main process.
+// ToneSphere UI — Electron main process.
 // Owns the window + tray, discovers (or launches) the always-running audio engine,
 // and exposes a small, explicit API to the renderer through preload.
 import {
@@ -18,7 +18,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 
-const DEV_URL = process.env.NEXTONE_DEV_URL;
+const DEV_URL = process.env.TONESPHERE_DEV_URL;
 const isMac = process.platform === 'darwin';
 const isWin = process.platform === 'win32';
 
@@ -35,16 +35,16 @@ interface Discovery {
 }
 
 function discoveryPath(): string {
-  if (process.env.NEXTONE_DISCOVERY) return process.env.NEXTONE_DISCOVERY;
+  if (process.env.TONESPHERE_DISCOVERY) return process.env.TONESPHERE_DISCOVERY;
   if (isWin) {
     const base = process.env.LOCALAPPDATA ?? path.join(os.homedir(), 'AppData', 'Local');
-    return path.join(base, 'NexTone', 'engine.json');
+    return path.join(base, 'ToneSphere', 'engine.json');
   }
-  if (isMac) return path.join(os.homedir(), 'Library', 'Application Support', 'NexTone', 'engine.json');
+  if (isMac) return path.join(os.homedir(), 'Library', 'Application Support', 'ToneSphere', 'engine.json');
   const runtime = process.env.XDG_RUNTIME_DIR;
   return runtime
-    ? path.join(runtime, 'nextone', 'engine.json')
-    : path.join(os.homedir(), '.local', 'state', 'nextone', 'engine.json');
+    ? path.join(runtime, 'tonesphere', 'engine.json')
+    : path.join(os.homedir(), '.local', 'state', 'tonesphere', 'engine.json');
 }
 
 function readDiscovery(): Discovery | null {
@@ -72,9 +72,9 @@ function portOpen(port: number): Promise<boolean> {
 }
 
 function engineExecutable(): string | null {
-  const exe = isWin ? 'nextone-engine.exe' : 'nextone-engine';
+  const exe = isWin ? 'tonesphere-engine.exe' : 'tonesphere-engine';
   const candidates = [
-    process.env.NEXTONE_ENGINE_PATH,
+    process.env.TONESPHERE_ENGINE_PATH,
     path.join(process.resourcesPath ?? '', 'engine', exe),
     path.join(app.getAppPath(), '..', 'build', 'engine', exe),
     path.join(app.getAppPath(), '..', 'build', 'engine', 'Release', exe),
@@ -121,7 +121,7 @@ function createWindow(): void {
     minWidth: 940,
     minHeight: 600,
     show: false,
-    title: 'NexTone',
+    title: 'ToneSphere',
     icon: appIcon(),
     backgroundColor: isWin ? '#00000000' : nativeTheme.shouldUseDarkColors ? '#1c1c1e' : '#f5f5f7',
     backgroundMaterial: isWin ? 'mica' : undefined,
@@ -169,15 +169,15 @@ function showWindow(): void {
 
 function createTray(): void {
   tray = new Tray(trayIcon());
-  tray.setToolTip('NexTone');
+  tray.setToolTip('ToneSphere');
   tray.on('click', showWindow);
   tray.setContextMenu(
     Menu.buildFromTemplate([
-      { label: 'Open NexTone', click: showWindow },
+      { label: 'Open ToneSphere', click: showWindow },
       { type: 'separator' },
       {
         label: 'Mute all outputs',
-        click: () => win?.webContents.send('nextone:command', 'mute-all'),
+        click: () => win?.webContents.send('tonesphere:command', 'mute-all'),
       },
       { type: 'separator' },
       {
@@ -188,9 +188,9 @@ function createTray(): void {
         },
       },
       {
-        label: 'Quit NexTone completely',
+        label: 'Quit ToneSphere completely',
         click: () => {
-          win?.webContents.send('nextone:command', 'shutdown-engine');
+          win?.webContents.send('tonesphere:command', 'shutdown-engine');
           setTimeout(() => {
             quitting = true;
             app.quit();
@@ -202,40 +202,40 @@ function createTray(): void {
 }
 
 // ---- IPC API for the renderer (kept deliberately small) -------------------
-ipcMain.handle('nextone:discover', async () => ensureEngine());
-ipcMain.handle('nextone:platform', () => ({
+ipcMain.handle('tonesphere:discover', async () => ensureEngine());
+ipcMain.handle('tonesphere:platform', () => ({
   platform: process.platform,
   version: app.getVersion(),
   arch: process.arch,
   // Microsoft Store (MSIX) build: sign-in startup is a package startup task managed by Windows.
   store: !!process.windowsStore,
 }));
-ipcMain.handle('nextone:set-theme', (_e, theme: 'system' | 'light' | 'dark') => {
+ipcMain.handle('tonesphere:set-theme', (_e, theme: 'system' | 'light' | 'dark') => {
   nativeTheme.themeSource = theme;
   if (win && !isMac) win.setTitleBarOverlay(overlayColors());
 });
-ipcMain.handle('nextone:pick-folder', async () => {
+ipcMain.handle('tonesphere:pick-folder', async () => {
   if (!win) return null;
   const r = await dialog.showOpenDialog(win, { properties: ['openDirectory', 'createDirectory'] });
   return r.canceled ? null : r.filePaths[0];
 });
-ipcMain.handle('nextone:open-path', async (_e, p: string) => {
+ipcMain.handle('tonesphere:open-path', async (_e, p: string) => {
   if (typeof p === 'string' && fs.existsSync(p)) await shell.openPath(p);
 });
-ipcMain.handle('nextone:open-sound-settings', async () => {
+ipcMain.handle('tonesphere:open-sound-settings', async () => {
   if (isWin) await shell.openExternal('ms-settings:sound');
 });
-ipcMain.handle('nextone:open-startup-settings', async () => {
+ipcMain.handle('tonesphere:open-startup-settings', async () => {
   if (isWin) await shell.openExternal('ms-settings:startupapps');
 });
 // Desktop build: installs the ASIO driver + virtual audio driver shipped in resources/drivers
 // (one UAC prompt). The Store build doesn't contain drivers (MSIX can't install them).
-ipcMain.handle('nextone:install-drivers', async (): Promise<{ ok: boolean; message: string }> => {
-  if (!isWin || process.windowsStore) return { ok: false, message: 'Drivers come with the NexTone desktop installer (Driver Pack).' };
+ipcMain.handle('tonesphere:install-drivers', async (): Promise<{ ok: boolean; message: string }> => {
+  if (!isWin || process.windowsStore) return { ok: false, message: 'Drivers come with the ToneSphere desktop installer (Driver Pack).' };
   const dir = path.join(process.resourcesPath, 'drivers');
-  const setup = path.join(dir, 'nextone-setup.exe');
+  const setup = path.join(dir, 'tonesphere-setup.exe');
   if (!fs.existsSync(setup)) return { ok: false, message: 'This build does not include the drivers.' };
-  const engineExe = path.join(process.resourcesPath, 'engine', 'nextone-engine.exe');
+  const engineExe = path.join(process.resourcesPath, 'engine', 'tonesphere-engine.exe');
   const q = (s: string) => `"${s}"`.replace(/'/g, "''");
   const argList = ['install-all', q(dir), '--engine', q(engineExe), '--ui', q(process.execPath)].join(' ');
   const ps = `try { $p = Start-Process -FilePath '${setup.replace(/'/g, "''")}' -ArgumentList '${argList}' -Verb RunAs -Wait -PassThru -WindowStyle Hidden; exit $p.ExitCode } catch { exit 1223 }`;
@@ -248,18 +248,18 @@ ipcMain.handle('nextone:install-drivers', async (): Promise<{ ok: boolean; messa
   return { ok: true, message: 'Drivers installed.' };
 });// Presets and skins: the user picks the file; only that file is read or written.
 const fileFilters = (extensions: string[]) => [
-  { name: 'NexTone files', extensions: extensions.filter((e) => /^[a-z0-9]+$/i.test(e)) },
+  { name: 'ToneSphere files', extensions: extensions.filter((e) => /^[a-z0-9]+$/i.test(e)) },
   { name: 'All files', extensions: ['*'] },
 ];
-ipcMain.handle('nextone:open-file', async (_e, title: string, extensions: string[]) => {
+ipcMain.handle('tonesphere:open-file', async (_e, title: string, extensions: string[]) => {
   if (!win) return null;
   const r = await dialog.showOpenDialog(win, { title: String(title), properties: ['openFile'], filters: fileFilters(extensions) });
   const p = r.filePaths[0];
   if (r.canceled || !p) return null;
-  if (fs.statSync(p).size > 2_000_000) throw new Error('That file is too large to be a NexTone file.');
+  if (fs.statSync(p).size > 2_000_000) throw new Error('That file is too large to be a ToneSphere file.');
   return { name: path.basename(p), text: fs.readFileSync(p, 'utf8') };
 });
-ipcMain.handle('nextone:save-file', async (_e, title: string, defaultName: string, text: string, extensions: string[]) => {
+ipcMain.handle('tonesphere:save-file', async (_e, title: string, defaultName: string, text: string, extensions: string[]) => {
   if (!win || typeof text !== 'string') return null;
   const safeName = String(defaultName).replace(/[\\/:*?"<>|]+/g, '-');
   const r = await dialog.showSaveDialog(win, {
@@ -271,7 +271,7 @@ ipcMain.handle('nextone:save-file', async (_e, title: string, defaultName: strin
   fs.writeFileSync(r.filePath, text, 'utf8');
   return r.filePath;
 });
-ipcMain.handle('nextone:set-login-item', (_e, enabled: boolean) => {
+ipcMain.handle('tonesphere:set-login-item', (_e, enabled: boolean) => {
   app.setLoginItemSettings({ openAtLogin: !!enabled, args: ['--hidden'] });
 });
 
@@ -279,12 +279,30 @@ nativeTheme.on('updated', () => {
   if (win && !isMac) win.setTitleBarOverlay(overlayColors());
 });
 
+// ToneSphere was called NexTone before. Its window profile (view choice, collapsed sections) lived
+// in a folder named after the old product; carry it over once, into a profile that doesn't exist yet.
+// (The engine migrates its own settings, presets and plugin cache.)
+function migrateLegacyProfile(): void {
+  try {
+    const userData = app.getPath('userData');
+    const legacy = path.join(path.dirname(userData), isWin || isMac ? 'NexTone' : 'nextone');
+    const from = path.join(legacy, 'Local Storage');
+    const to = path.join(userData, 'Local Storage');
+    if (!fs.existsSync(from) || fs.existsSync(to)) return;
+    fs.mkdirSync(userData, { recursive: true });
+    fs.cpSync(from, to, { recursive: true });
+  } catch {
+    /* best effort: a fresh profile only loses the remembered view */
+  }
+}
+
 // ---- Lifecycle -------------------------------------------------------------
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on('second-instance', showWindow);
-  app.setAppUserModelId('com.nextone.app');
+  app.setAppUserModelId('com.neuralnexusstudios.tonesphere');
+  migrateLegacyProfile();
   void app.whenReady().then(() => {
     createWindow();
     createTray();

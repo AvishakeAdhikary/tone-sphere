@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 const SECS = Number(process.argv[2] ?? 10);
-const disc = JSON.parse(fs.readFileSync(path.join(process.env.LOCALAPPDATA ?? os.homedir(), 'NexTone', 'engine.json'), 'utf8'));
+const disc = JSON.parse(fs.readFileSync(path.join(process.env.LOCALAPPDATA ?? os.homedir(), 'ToneSphere', 'engine.json'), 'utf8'));
 const ws = new WebSocket(`ws://127.0.0.1:${disc.port}/?token=${disc.token}`);
 ws.binaryType = 'arraybuffer';
 let state = null, meters = null, id = 1;

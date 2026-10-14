@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 const PORT = 9123;
-const disc = JSON.parse(fs.readFileSync(path.join(process.env.LOCALAPPDATA ?? os.homedir(), 'NexTone', 'engine.json'), 'utf8'));
+const disc = JSON.parse(fs.readFileSync(path.join(process.env.LOCALAPPDATA ?? os.homedir(), 'ToneSphere', 'engine.json'), 'utf8'));
 const ws = new WebSocket(`ws://127.0.0.1:${disc.port}/?token=${disc.token}`);
 let state = null, id = 1;
 const pending = new Map();
@@ -69,25 +69,25 @@ async function main() {
   await sleep(2600); // the remote-control worker picks up settings every 2 s
   const bus = await call('bus.create', { name: 'OSC test mix', channels: 2 });
 
-  await send(osc('/nextone/volume', 'OSC test mix', 0.5));
+  await send(osc('/tonesphere/volume', 'OSC test mix', 0.5));
   check('volume by name (fader 0.5 = -27 dB)', await until(() => Math.abs((node(bus.id)?.gainDb ?? 0) + 27) < 0.01), { gainDb: node(bus.id)?.gainDb });
 
-  await send(osc('/nextone/gain', bus.id, -12.5));
+  await send(osc('/tonesphere/gain', bus.id, -12.5));
   check('gain by id in dB', await until(() => Math.abs((node(bus.id)?.gainDb ?? 0) + 12.5) < 0.01), { gainDb: node(bus.id)?.gainDb });
 
-  await send(osc('/nextone/mute', 'OSC test mix'));
+  await send(osc('/tonesphere/mute', 'OSC test mix'));
   const muted = await until(() => node(bus.id)?.muted === true);
-  await send(osc('/nextone/mute', 'OSC test mix'));
+  await send(osc('/tonesphere/mute', 'OSC test mix'));
   const unmuted = await until(() => node(bus.id)?.muted === false);
   check('mute toggles', muted && unmuted, { muted, unmuted });
 
-  await send(osc('/nextone/solo', 'osc test', 1)); // partial, case-insensitive name
+  await send(osc('/tonesphere/solo', 'osc test', 1)); // partial, case-insensitive name
   check('solo set by partial name', await until(() => node(bus.id)?.solo === true), { solo: node(bus.id)?.solo });
-  await send(osc('/nextone/solo', 'osc test', 0));
+  await send(osc('/tonesphere/solo', 'osc test', 0));
   await until(() => node(bus.id)?.solo === false);
 
   await send(Buffer.from('not osc at all'));
-  await send(osc('/nextone/volume', 'No such device', 0.9));
+  await send(osc('/tonesphere/volume', 'No such device', 0.9));
   await sleep(300);
   const alive = await call('engine.getState').then(() => true, () => false);
   check('bad packets are ignored', alive && Math.abs(node(bus.id).gainDb + 12.5) < 0.01, { alive });

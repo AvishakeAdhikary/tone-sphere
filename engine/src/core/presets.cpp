@@ -11,7 +11,7 @@
 #include "util/log.h"
 #include "util/platform.h"
 
-namespace nt {
+namespace ts {
 
 namespace {
 
@@ -43,7 +43,7 @@ std::string slug(const std::string& s) {
 
 bool isDeviceNode(const NodeModel& n) { return n.bin != Bin::Bus && n.id != "tone" && n.kind != DeviceKind::Vban; }
 
-// Exe-addressed nodes (NexTone ASIO clients, per-app audio) have deterministic ids.
+// Exe-addressed nodes (ToneSphere ASIO clients, per-app audio) have deterministic ids.
 std::string exeNodeId(const json& ref) {
     const std::string kind = ref.value("kind", ""), exe = lower(ref.value("exe", "")), bin = ref.value("bin", "");
     if (exe.empty() || (kind != "asioclient" && kind != "app")) return {};
@@ -145,7 +145,7 @@ void Engine::rebindDevicesLocked(const std::set<std::string>& seen) {
             for (auto& f : n.fx) f->prepare(runningRate_, kMaxBlock, n.channels);
         }
         applyNodeParamsLocked(n);
-        NT_INFO("Device %s connected for %s", label.c_str(), deviceLabel(m.name, m.subtitle).c_str());
+        TS_INFO("Device %s connected for %s", label.c_str(), deviceLabel(m.name, m.subtitle).c_str());
         renameNodeRefsLocked(bestId, nid);
         if (m.rt) retireLocked(m.rt);
         closeStreamLocked(m);
@@ -169,7 +169,7 @@ std::string Engine::resolvePresetDeviceLocked(const json& ref, bool& waiting) {
             n.bin = b;
             n.kind = kindFromString(kind);
             if (n.name.empty() || n.name == id) n.name = label;
-            n.subtitle = kind == "asioclient" ? "Waiting for the app to open NexTone ASIO" : "Waiting for the app to play";
+            n.subtitle = kind == "asioclient" ? "Waiting for the app to open ToneSphere ASIO" : "Waiting for the app to play";
             n.channels = std::clamp(ref.value("channels", 2), 1, kMaxChannels);
             n.channelNames.clear();
             for (int c = 0; c < n.channels; ++c) n.channelNames.push_back(std::to_string(c + 1));
@@ -214,7 +214,7 @@ std::string Engine::resolvePresetDeviceLocked(const json& ref, bool& waiting) {
     n.bin = b;
     n.kind = kind.empty() ? DeviceKind::Wasapi : kindFromString(kind);
     n.name = label;
-    n.subtitle = "Not connected yet: plug it in and NexTone connects it";
+    n.subtitle = "Not connected yet: plug it in and ToneSphere connects it";
     n.channels = std::clamp(ref.value("channels", 2), 1, kMaxChannels);
     n.channelNames = n.channels == 2 ? std::vector<std::string>{"L", "R"} : std::vector<std::string>{};
     for (int c = static_cast<int>(n.channelNames.size()); c < n.channels; ++c) n.channelNames.push_back(std::to_string(c + 1));
@@ -226,8 +226,10 @@ std::string Engine::resolvePresetDeviceLocked(const json& ref, bool& waiting) {
 }
 
 json Engine::importPresetLocked(const json& pr) {
-    if (!pr.is_object() || pr.value("format", "") != "nextone-preset") throw std::runtime_error("This file isn't a NexTone preset");
-    if (pr.value("version", 1) > 1) throw std::runtime_error("This preset was made by a newer NexTone. Please update NexTone first.");
+    // "nextone-preset" files were exported before the rename and have the same layout.
+    const std::string format = pr.is_object() ? pr.value("format", "") : "";
+    if (format != "tonesphere-preset" && format != "nextone-preset") throw std::runtime_error("This file isn't a ToneSphere preset");
+    if (pr.value("version", 1) > 1) throw std::runtime_error("This preset was made by a newer ToneSphere. Please update ToneSphere first.");
     const std::string name = pr.value("name", "Imported preset");
     std::map<std::string, std::string> ids;
     json waiting = json::array();
@@ -320,7 +322,7 @@ json Engine::importPresetLocked(const json& pr) {
     sc->snapshot = snapshotLocked();
     activeScene_ = sc->id;
     markDirty();
-    NT_INFO("Imported preset \"%s\": %zu connections, %zu waiting for devices", name.c_str(), routes_.size(), waiting.size());
+    TS_INFO("Imported preset \"%s\": %zu connections, %zu waiting for devices", name.c_str(), routes_.size(), waiting.size());
     return {{"sceneId", sc->id}, {"name", name}, {"connections", routes_.size()}, {"waiting", waiting}, {"skipped", skipped}};
 }
 
@@ -394,8 +396,8 @@ json Engine::exportPresetLocked(const std::string& name, const std::string& desc
         for (auto& [f, t, g] : r.xps) x.push_back({f, t, g});
         routes.push_back({{"from", keyOf[r.from]}, {"to", keyOf[r.to]}, {"gainDb", r.gainDb}, {"muted", r.muted}, {"channels", x}});
     }
-    return {{"format", "nextone-preset"}, {"version", 1}, {"name", name}, {"description", description}, {"app", "NexTone " + version()},
+    return {{"format", "tonesphere-preset"}, {"version", 1}, {"name", name}, {"description", description}, {"app", "ToneSphere " + version()},
             {"devices", devices}, {"mixes", mixes}, {"routes", routes}};
 }
 
-}  // namespace nt
+}  // namespace ts

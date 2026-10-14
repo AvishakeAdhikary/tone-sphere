@@ -2,13 +2,13 @@
 // Remote control: OSC over UDP and MIDI controllers (Windows).
 //
 // OSC (off unless EngineSettings::oscPort is set), node = id or name:
-//   /nextone/volume ,sf  <node> <0..1>     fader position (0 = silent, 1 = +6 dB)
-//   /nextone/gain   ,sf  <node> <dB>
-//   /nextone/mute   ,s[i|f|T|F] <node> [0/1]   (no value = toggle)
-//   /nextone/solo   ,s[i|f|T|F] <node> [0/1]
-//   /nextone/scene  ,s   <scene id or name>
-//   /nextone/record [,i] [0/1]               (no value = toggle)
-//   /nextone/replay                          (save the instant replay)
+//   /tonesphere/volume ,sf  <node> <0..1>     fader position (0 = silent, 1 = +6 dB)
+//   /tonesphere/gain   ,sf  <node> <dB>
+//   /tonesphere/mute   ,s[i|f|T|F] <node> [0/1]   (no value = toggle)
+//   /tonesphere/solo   ,s[i|f|T|F] <node> [0/1]
+//   /tonesphere/scene  ,s   <scene id or name>
+//   /tonesphere/record [,i] [0/1]               (no value = toggle)
+//   /tonesphere/replay                          (save the instant replay)
 // MIDI: EngineSettings::midiMappings, e.g.
 //   {"type":"cc","channel":1,"number":7,"action":"volume","target":"bus_1"}
 //   {"type":"note","channel":0,"number":60,"action":"mute","target":"Microphone"}   (channel 0 = any)
@@ -21,7 +21,7 @@
 
 #include <nlohmann/json.hpp>
 
-namespace nt {
+namespace ts {
 
 class Engine;
 
@@ -61,4 +61,4 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
-}  // namespace nt
+}  // namespace ts

@@ -1,8 +1,8 @@
-// End-to-end test of the NexTone virtual audio driver + engine (run inside the test VM).
+// End-to-end test of the ToneSphere virtual audio driver + engine (run inside the test VM).
 //   node vad-audio.mjs <path-to-audio-probe.exe> [seconds]
-// 1) engine tone -> "NexTone Mic 1"           : recorded by a Windows app (audio-probe)
-// 2) app plays into "NexTone Output 1" -> mix  : level reaches NexTone
-// 3) app -> "NexTone Output 1" -> NexTone -> "NexTone Mic 2" -> app : full virtual cable through NexTone
+// 1) engine tone -> "ToneSphere Mic 1"           : recorded by a Windows app (audio-probe)
+// 2) app plays into "ToneSphere Output 1" -> mix  : level reaches ToneSphere
+// 3) app -> "ToneSphere Output 1" -> ToneSphere -> "ToneSphere Mic 2" -> app : full virtual cable through ToneSphere
 import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -10,7 +10,7 @@ import path from 'node:path';
 
 const probe = process.argv[2];
 const SECS = Number(process.argv[3] ?? 10);
-const disc = JSON.parse(fs.readFileSync(path.join(process.env.LOCALAPPDATA ?? os.homedir(), 'NexTone', 'engine.json'), 'utf8'));
+const disc = JSON.parse(fs.readFileSync(path.join(process.env.LOCALAPPDATA ?? os.homedir(), 'ToneSphere', 'engine.json'), 'utf8'));
 const ws = new WebSocket(`ws://127.0.0.1:${disc.port}/?token=${disc.token}`);
 ws.binaryType = 'arraybuffer';
 let state = null, meters = null, id = 1;
@@ -63,10 +63,10 @@ async function main() {
   const mic2 = node((n) => n.id === 'vad:in:2');
   if (!out1 || !mic1 || !mic2) return;
 
-  // 1) NexTone -> virtual microphone -> app
+  // 1) ToneSphere -> virtual microphone -> app
   await call('tone.set', { enabled: true, freq: 1000, levelDb: -12, target: mic1.id });
   await sleep(1500);
-  const c1 = capture('NexTone Mic 1', SECS);
+  const c1 = capture('ToneSphere Mic 1', SECS);
   check('mic path: frequency', Math.abs(c1.freqHz - 1000) < 5, c1.freqHz);
   check('mic path: level', Math.abs(c1.peakDb + 12) < 0.5, c1.peakDb);
   check('mic path: no clicks', c1.clicks === 0, c1.clicks);
@@ -74,10 +74,10 @@ async function main() {
   check('mic path: engine dropouts', (node((n) => n.id === mic1.id).xruns ?? 0) === 0, node((n) => n.id === mic1.id).diag);
   await clearRoutes();
 
-  // 2) app -> virtual output -> NexTone mix
+  // 2) app -> virtual output -> ToneSphere mix
   const bus = await call('bus.create', { name: 'VAD test', channels: 2 });
   await call('route.connect', { from: out1.id, to: bus.id });
-  const player = spawn(probe, ['play', 'NexTone Output 1', '440', '-6', String(SECS * 2 + 15)]);
+  const player = spawn(probe, ['play', 'ToneSphere Output 1', '440', '-6', String(SECS * 2 + 15)]);
   await sleep(2500);
   const lv = [];
   for (let i = 0; i < SECS * 2; i++) {
@@ -87,10 +87,10 @@ async function main() {
   check('output path: level reaches mix', Math.max(...lv) > -7 && Math.max(...lv) < -5, { max: Math.max(...lv) });
   check('output path: continuous', Math.min(...lv) > -9, { min: Math.min(...lv) });
 
-  // 3) app -> NexTone Output 1 -> NexTone -> NexTone Mic 2 -> app
+  // 3) app -> ToneSphere Output 1 -> ToneSphere -> ToneSphere Mic 2 -> app
   await call('route.connect', { from: out1.id, to: mic2.id });
   await sleep(1500);
-  const c3 = capture('NexTone Mic 2', SECS);
+  const c3 = capture('ToneSphere Mic 2', SECS);
   check('cable path: frequency', Math.abs(c3.freqHz - 440) < 4, c3.freqHz);
   check('cable path: level', Math.abs(c3.peakDb + 6) < 0.6, c3.peakDb);
   check('cable path: no clicks', c3.clicks === 0, c3.clicks);

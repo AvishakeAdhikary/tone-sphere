@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- NexTone Store manifest template (electron-builder default + uap3 for the execution alias). -->
+<!-- ToneSphere Store manifest template (electron-builder default + uap3 for the execution alias). -->
 <Package IgnorableNamespaces="uap uap3 desktop rescap"
    xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
    xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"

@@ -20,7 +20,7 @@ run('node', ['scripts/build-electron.mjs', '--watch']);
 const server = await createServer({ configFile: 'vite.config.ts' });
 await server.listen();
 const url = `http://localhost:${server.config.server.port}`;
-const electron = run('npx', ['electron', '.'], { NEXTONE_DEV_URL: url });
+const electron = run('npx', ['electron', '.'], { TONESPHERE_DEV_URL: url });
 electron.on('exit', () => {
   for (const c of children) c.kill();
   server.close();

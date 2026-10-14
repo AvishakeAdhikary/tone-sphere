@@ -1,6 +1,6 @@
-// "NexTone Test Gain": a tiny VST3 effect used by the automated tests.
+// "ToneSphere Test Gain": a tiny VST3 effect used by the automated tests.
 // One parameter (Gain, -24..+12 dB, default -6 dB), mono or stereo, state save/restore,
-// and a native editor window with a slider (class "NexToneTestGainView") that sends
+// and a native editor window with a slider (class "ToneSphereTestGainView") that sends
 // edits through the host like any real plugin editor.
 #include <cmath>
 #include <cstring>
@@ -135,13 +135,13 @@ tresult PLUGIN_API GainView::attached(void* parent, FIDString type) {
         wc.lpfnWndProc = proc;
         wc.hInstance = GetModuleHandleW(nullptr);
         wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
-        wc.lpszClassName = L"NexToneTestGainView";
+        wc.lpszClassName = L"ToneSphereTestGainView";
         return RegisterClassW(&wc) != 0;
     }();
     (void)reg;
-    container_ = CreateWindowExW(0, L"NexToneTestGainView", L"", WS_CHILD | WS_VISIBLE, 0, 0, rect.getWidth(), rect.getHeight(),
+    container_ = CreateWindowExW(0, L"ToneSphereTestGainView", L"", WS_CHILD | WS_VISIBLE, 0, 0, rect.getWidth(), rect.getHeight(),
                                  static_cast<HWND>(parent), nullptr, GetModuleHandleW(nullptr), this);
-    CreateWindowExW(0, L"STATIC", L"NexTone Test Gain", WS_CHILD | WS_VISIBLE, 12, 10, 300, 20, container_, nullptr, nullptr, nullptr);
+    CreateWindowExW(0, L"STATIC", L"ToneSphere Test Gain", WS_CHILD | WS_VISIBLE, 12, 10, 300, 20, container_, nullptr, nullptr, nullptr);
     slider_ = CreateWindowExW(0, TRACKBAR_CLASSW, L"", WS_CHILD | WS_VISIBLE | TBS_HORZ, 12, 40, 330, 30, container_,
                               reinterpret_cast<HMENU>(static_cast<INT_PTR>(kSliderId)), nullptr, nullptr);
     SendMessageW(slider_, TBM_SETRANGE, TRUE, MAKELPARAM(0, 1000));
@@ -163,7 +163,7 @@ LRESULT CALLBACK GainView::proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
 
 }  // namespace
 
-BEGIN_FACTORY_DEF("NexTone", "https://github.com/nextone-audio", "mailto:nextone@example.invalid")
-DEF_CLASS2(INLINE_UID_FROM_FUID(kTestGainUID), PClassInfo::kManyInstances, kVstAudioEffectClass, "NexTone Test Gain", 0, "Fx",
+BEGIN_FACTORY_DEF("ToneSphere", "https://github.com/AvishakeAdhikary/tone-sphere", "mailto:tonesphere@example.invalid")
+DEF_CLASS2(INLINE_UID_FROM_FUID(kTestGainUID), PClassInfo::kManyInstances, kVstAudioEffectClass, "ToneSphere Test Gain", 0, "Fx",
            "1.0.0", kVstVersionString, TestGain::create)
 END_FACTORY

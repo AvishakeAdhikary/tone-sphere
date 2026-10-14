@@ -14,7 +14,7 @@
 #include "core/bridge.h"
 #include "dsp/fx.h"
 
-namespace nt {
+namespace ts {
 
 constexpr int kMaxChannels = 64;
 constexpr int kMaxBlock = 2048;
@@ -136,4 +136,4 @@ struct Program {
 /// Runs one block (frames <= kMaxBlock) of the program. Audio thread only.
 void processProgram(Program& p, int frames, double nowSec);
 
-}  // namespace nt
+}  // namespace ts

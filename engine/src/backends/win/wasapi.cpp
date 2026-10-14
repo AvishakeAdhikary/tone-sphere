@@ -19,7 +19,7 @@
 
 #pragma comment(lib, "ole32.lib")
 
-namespace nt {
+namespace ts {
 
 namespace {
 
@@ -217,7 +217,7 @@ WasapiBackend::WasapiBackend() {
     HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator),
                                   reinterpret_cast<void**>(&enumerator_));
     if (FAILED(hr)) {
-        NT_ERROR("WASAPI: cannot create device enumerator (0x%08lx)", hr);
+        TS_ERROR("WASAPI: cannot create device enumerator (0x%08lx)", hr);
         return;
     }
     notifier_ = new WasapiNotifier(this);
@@ -233,8 +233,8 @@ WasapiBackend::~WasapiBackend() {
     safeRelease(enumerator_);
 }
 
-bool WasapiBackend::isNexToneEndpoint(const std::wstring& iface) {
-    return iface.find(L"NexTone") != std::wstring::npos;
+bool WasapiBackend::isToneSphereEndpoint(const std::wstring& iface) {
+    return iface.find(L"ToneSphere") != std::wstring::npos;
 }
 
 bool WasapiBackend::isVirtualCable(const std::wstring& iface, const std::wstring& name) {
@@ -311,7 +311,7 @@ std::vector<DeviceInfo> WasapiBackend::enumerate() {
     // Group virtual-cable endpoints into render/capture pairs by interface name.
     std::map<std::wstring, std::pair<const Ep*, const Ep*>> cables;  // iface -> (render, capture)
     for (const Ep& e : eps) {
-        if (isNexToneEndpoint(e.iface)) continue;  // provided by the VAD backend
+        if (isToneSphereEndpoint(e.iface)) continue;  // provided by the VAD backend
         if (compat_ && isVirtualCable(e.iface, e.desc)) {
             auto& pair = cables[e.iface];
             (e.capture ? pair.second : pair.first) = &e;
@@ -337,7 +337,7 @@ std::vector<DeviceInfo> WasapiBackend::enumerate() {
         const Ep* r = pair.first;
         const Ep* c = pair.second;
         if (!r || !c) continue;
-        // Virtual output: apps play into the render side; NexTone records the capture side.
+        // Virtual output: apps play into the render side; ToneSphere records the capture side.
         DeviceInfo vo;
         vo.kind = DeviceKind::Compat;
         vo.bin = Bin::VirtualOut;
@@ -352,7 +352,7 @@ std::vector<DeviceInfo> WasapiBackend::enumerate() {
         vo.channelNames = channelNamesFor(c->ch, c->mask);
         vo.isDefault = r->id == defOut;
         out.push_back(vo);
-        // Virtual input: NexTone plays into the render side; apps record the capture side.
+        // Virtual input: ToneSphere plays into the render side; apps record the capture side.
         DeviceInfo vi;
         vi.kind = DeviceKind::Compat;
         vi.bin = Bin::VirtualIn;
@@ -395,7 +395,7 @@ std::unique_ptr<DeviceStream> WasapiBackend::open(const DeviceInfo& dev, const S
     if (req.exclusive && dev.kind == DeviceKind::Wasapi) {
         ok = s->initExclusive(req.bufferMs, req.preferredRate, dev.channels, error);
         if (!ok) {
-            NT_WARN("%s: exclusive mode failed (%s), using shared mode", dev.name.c_str(), error.c_str());
+            TS_WARN("%s: exclusive mode failed (%s), using shared mode", dev.name.c_str(), error.c_str());
             client = nullptr;
             hr = d->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, reinterpret_cast<void**>(&client));
             if (SUCCEEDED(hr)) {
@@ -577,7 +577,7 @@ std::string WasapiStream::error() const { return hasError_.load() ? error_ : std
 
 void WasapiStream::run() {
     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-    setAudioThreadPriority(capture_ ? "nt-wasapi-in" : "nt-wasapi-out");
+    setAudioThreadPriority(capture_ ? "ts-wasapi-in" : "ts-wasapi-out");
     if (FAILED(client_->Start())) {
         error_ = "Device could not start";
         hasError_ = true;
@@ -697,4 +697,4 @@ void WasapiStream::renderLoop() {
     rc->Release();
 }
 
-}  // namespace nt
+}  // namespace ts

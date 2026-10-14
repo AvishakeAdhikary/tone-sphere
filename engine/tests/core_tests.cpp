@@ -11,7 +11,7 @@
 #include "core/resampler.h"
 #include "core/ring_buffer.h"
 
-using namespace nt;
+using namespace ts;
 using Catch::Matchers::WithinAbs;
 
 static constexpr double kPi = 3.14159265358979323846;

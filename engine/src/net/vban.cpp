@@ -29,7 +29,7 @@ static constexpr socket_t kBadSocket = -1;
 static void closeSocket(socket_t s) { ::close(s); }
 #endif
 
-namespace nt::vban {
+namespace ts::vban {
 
 namespace {
 constexpr double kRates[] = {6000,  12000, 24000, 48000,  96000,  192000, 384000, 8000,   16000,  32000, 64000,
@@ -221,7 +221,7 @@ private:
         a.sin_addr.s_addr = htonl(INADDR_ANY);
         a.sin_port = htons(static_cast<uint16_t>(port));
         if (bind(sock_, reinterpret_cast<sockaddr*>(&a), sizeof(a)) != 0) {
-            NT_WARN("VBAN: UDP port %d is already in use", port);
+            TS_WARN("VBAN: UDP port %d is already in use", port);
             closeSocket(sock_);
             sock_ = kBadSocket;
             return;
@@ -236,7 +236,7 @@ private:
         thread_ = std::thread([this] { run(); });
     }
     void run() {
-        setAudioThreadPriority("nt-vban-rx");
+        setAudioThreadPriority("ts-vban-rx");
         uint8_t buf[2048];
         while (running_) {
             sockaddr_in from{};
@@ -415,7 +415,7 @@ public:
 
 private:
     void run() {
-        setAudioThreadPriority("nt-vban-tx");
+        setAudioThreadPriority("ts-vban-tx");
         std::vector<float> frames(static_cast<size_t>(frames_) * channels_);
         uint8_t pkt[kHeaderBytes + kMaxPayload];
         Header h;
@@ -471,4 +471,4 @@ std::unique_ptr<DeviceStream> VbanBackend::open(const DeviceInfo& dev, const Str
     return s;
 }
 
-}  // namespace nt::vban
+}  // namespace ts::vban

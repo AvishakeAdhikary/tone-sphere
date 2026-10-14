@@ -15,7 +15,7 @@
 #include "util/log.h"
 #include "util/platform.h"
 
-namespace nt {
+namespace ts {
 
 namespace {
 
@@ -175,7 +175,7 @@ struct Hotkeys::Impl {
         if (sig != signature) {
             signature = sig;
             bindings = std::move(next);
-            NT_INFO("Shortcuts: %zu active", bindings.size());
+            TS_INFO("Shortcuts: %zu active", bindings.size());
         }
     }
 
@@ -225,12 +225,12 @@ struct Hotkeys::Impl {
                 engine.call("scene.load", {{"id", a.substr(6)}});
             }
         } catch (const std::exception& e) {
-            NT_WARN("Shortcut \"%s\": %s", a.c_str(), e.what());
+            TS_WARN("Shortcut \"%s\": %s", a.c_str(), e.what());
         }
     }
 
     void work() {
-        setThreadName("nt-hotkeys");
+        setThreadName("ts-hotkeys");
         double lastReload = 0;
         while (running) {
             std::string action;
@@ -261,7 +261,7 @@ Hotkeys::~Hotkeys() {
 void Hotkeys::install() {
     Impl::instance() = impl_.get();
     impl_->hook = SetWindowsHookExW(WH_KEYBOARD_LL, &Impl::proc, GetModuleHandleW(nullptr), 0);
-    if (!impl_->hook) NT_WARN("Keyboard shortcuts are unavailable (hook failed)");
+    if (!impl_->hook) TS_WARN("Keyboard shortcuts are unavailable (hook failed)");
 }
 
-}  // namespace nt
+}  // namespace ts

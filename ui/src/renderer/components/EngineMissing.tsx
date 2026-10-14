@@ -12,7 +12,7 @@ export function EngineMissing({ status }: { status: ConnectionStatus }) {
         <p className="muted">
           {busy
             ? 'This only takes a moment.'
-            : 'NexTone keeps working in the background. If this message stays, the engine may have been closed or failed to start.'}
+            : 'ToneSphere keeps working in the background. If this message stays, the engine may have been closed or failed to start.'}
         </p>
         {!busy && (
           <button className="btn primary" onClick={() => void engine.connect()}>

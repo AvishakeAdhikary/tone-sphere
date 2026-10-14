@@ -1,10 +1,10 @@
 {
-  "name": "nextone",
-  "productName": "NexTone",
-  "version": "0.1.0",
-  "description": "NexTone — simple, powerful audio routing for everyone",
+  "name": "tonesphere",
+  "productName": "ToneSphere",
+  "version": "1.0.0",
+  "description": "ToneSphere — simple, powerful audio routing for everyone",
   "license": "GPL-3.0-or-later",
-  "author": "NexTone contributors",
+  "author": "Neural Nexus Studios",
   "private": true,
   "type": "module",
   "main": "dist-electron/main.cjs",
@@ -50,9 +50,9 @@
     "electron@44.7.0": true
   },
   "build": {
-    "appId": "com.nextone.app",
-    "productName": "NexTone",
-    "copyright": "NexTone contributors (GPL-3.0-or-later)",
+    "appId": "com.neuralnexusstudios.tonesphere",
+    "productName": "ToneSphere",
+    "copyright": "Neural Nexus Studios (GPL-3.0-or-later)",
     "directories": {
       "buildResources": "build",
       "output": "release"
@@ -74,34 +74,34 @@
       "target": [
         "nsis"
       ],
-      "executableName": "NexTone",
+      "executableName": "ToneSphere",
       "extraResources": [
         {
-          "to": "engine/nextone-engine.exe",
-          "from": "../build/x64-release/bin/nextone-engine.exe"
+          "to": "engine/tonesphere-engine.exe",
+          "from": "../build/x64-release/bin/tonesphere-engine.exe"
         },
         {
-          "to": "engine/nextone-plugscan.exe",
-          "from": "../build/x64-release/bin/nextone-plugscan.exe"
+          "to": "engine/tonesphere-plugscan.exe",
+          "from": "../build/x64-release/bin/tonesphere-plugscan.exe"
         },
         {
-          "to": "drivers/NexToneASIO64.dll",
-          "from": "../build/x64-release/bin/NexToneASIO64.dll"
+          "to": "drivers/ToneSphereASIO64.dll",
+          "from": "../build/x64-release/bin/ToneSphereASIO64.dll"
         },
         {
-          "to": "drivers/NexToneASIO32.dll",
-          "from": "../build/x86-release/bin/NexToneASIO32.dll"
+          "to": "drivers/ToneSphereASIO32.dll",
+          "from": "../build/x86-release/bin/ToneSphereASIO32.dll"
         },
         {
-          "to": "drivers/nextone-setup.exe",
-          "from": "../build/x64-release/bin/nextone-setup.exe"
+          "to": "drivers/tonesphere-setup.exe",
+          "from": "../build/x64-release/bin/tonesphere-setup.exe"
         },
         {
           "from": "../drivers/win/vad/build/package",
           "to": "drivers/vad",
           "filter": [
-            "nextonevad.*",
-            "NexToneTest.cer"
+            "tonespherevad.*",
+            "ToneSphereTest.cer"
           ]
         }
       ]
@@ -118,21 +118,21 @@
       "license": "../LICENSE",
       "installerIcon": "assets/icon.ico",
       "uninstallerIcon": "assets/icon.ico",
-      "artifactName": "NexTone-Setup-${version}.${ext}"
+      "artifactName": "ToneSphere-Setup-${version}.${ext}"
     },
     "appx": {
-      "applicationId": "NexTone",
-      "identityName": "NexTone.NexTone",
-      "publisher": "CN=NexTone Dev",
-      "publisherDisplayName": "NexTone",
-      "displayName": "NexTone",
+      "applicationId": "ToneSphere",
+      "identityName": "NeuralNexusStudios.ToneSphere",
+      "publisher": "CN=Neural Nexus Studios",
+      "publisherDisplayName": "ToneSphere",
+      "displayName": "ToneSphere",
       "backgroundColor": "transparent",
       "showNameOnTiles": false,
       "languages": [
         "en-US"
       ],
       "customExtensionsPath": "build/appx-extensions.xml",
-      "artifactName": "NexTone-${version}.${ext}"
+      "artifactName": "ToneSphere-${version}.${ext}"
     },
     "linux": {
       "target": [
@@ -140,21 +140,21 @@
       ],
       "icon": "assets/icon.png",
       "category": "Audio",
-      "executableName": "nextone",
+      "executableName": "tonesphere",
       "synopsis": "Route any audio anywhere",
       "extraResources": [
         {
-          "from": "../build/linux-release/bin/nextone-engine",
-          "to": "engine/nextone-engine"
+          "from": "../build/linux-release/bin/tonesphere-engine",
+          "to": "engine/tonesphere-engine"
         },
         {
-          "from": "../build/linux-release/bin/nextone-plugscan",
-          "to": "engine/nextone-plugscan"
+          "from": "../build/linux-release/bin/tonesphere-plugscan",
+          "to": "engine/tonesphere-plugscan"
         }
       ]
     },
     "appImage": {
-      "artifactName": "NexTone-${version}-${arch}.${ext}"
+      "artifactName": "ToneSphere-${version}-${arch}.${ext}"
     }
   }
 }

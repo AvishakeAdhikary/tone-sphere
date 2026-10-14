@@ -1,4 +1,4 @@
-# NexTone audio engine
+# ToneSphere audio engine
 
 # ---- RNNoise (BSD-3) for the noise-suppression effect; v0.1.1 ships its model in-tree.
 FetchContent_Declare(rnnoise
@@ -91,11 +91,11 @@ if(NOT WIN32)
 endif()
 
 # ---- real-time core (platform independent, unit tested)
-add_library(nextone_core STATIC
+add_library(tonesphere_core STATIC
   src/core/resampler.cpp
   src/core/bridge.cpp
 )
-target_include_directories(nextone_core PUBLIC src)
+target_include_directories(tonesphere_core PUBLIC src)
 
 # ---- engine library
 set(ENGINE_SOURCES
@@ -128,46 +128,46 @@ if(WIN32)
     src/backends/win/peak_meters.cpp
     src/backends/win/hotkeys.cpp)
 endif()
-add_library(nextone_engine_lib STATIC ${ENGINE_SOURCES})
-target_link_libraries(nextone_engine_lib PUBLIC nextone_core nlohmann_json::nlohmann_json rnnoise vst3_hosting)
-target_compile_definitions(nextone_engine_lib PUBLIC NEXTONE_WITH_RNNOISE)
+add_library(tonesphere_engine_lib STATIC ${ENGINE_SOURCES})
+target_link_libraries(tonesphere_engine_lib PUBLIC tonesphere_core nlohmann_json::nlohmann_json rnnoise vst3_hosting)
+target_compile_definitions(tonesphere_engine_lib PUBLIC TONESPHERE_WITH_RNNOISE)
 if(WIN32)
-  target_compile_definitions(nextone_engine_lib PUBLIC UNICODE _UNICODE)
-  target_include_directories(nextone_engine_lib PRIVATE ${CMAKE_SOURCE_DIR}/third_party/asiosdk/common)
-  target_link_libraries(nextone_engine_lib PUBLIC winmm avrt ole32 ws2_32 mmdevapi runtimeobject version windowscodecs shell32)
+  target_compile_definitions(tonesphere_engine_lib PUBLIC UNICODE _UNICODE)
+  target_include_directories(tonesphere_engine_lib PRIVATE ${CMAKE_SOURCE_DIR}/third_party/asiosdk/common)
+  target_link_libraries(tonesphere_engine_lib PUBLIC winmm avrt ole32 ws2_32 mmdevapi runtimeobject version windowscodecs shell32)
 else()
   find_package(Threads REQUIRED)
-  target_link_libraries(nextone_engine_lib PUBLIC Threads::Threads)
+  target_link_libraries(tonesphere_engine_lib PUBLIC Threads::Threads)
   if(NOT APPLE)
     find_package(PkgConfig)
     if(PkgConfig_FOUND)
       pkg_check_modules(PIPEWIRE IMPORTED_TARGET libpipewire-0.3)
     endif()
     if(PIPEWIRE_FOUND)
-      target_sources(nextone_engine_lib PRIVATE src/backends/linux/pipewire.cpp)
-      target_link_libraries(nextone_engine_lib PUBLIC PkgConfig::PIPEWIRE)
-      target_compile_definitions(nextone_engine_lib PUBLIC NEXTONE_WITH_PIPEWIRE)
+      target_sources(tonesphere_engine_lib PRIVATE src/backends/linux/pipewire.cpp)
+      target_link_libraries(tonesphere_engine_lib PUBLIC PkgConfig::PIPEWIRE)
+      target_compile_definitions(tonesphere_engine_lib PUBLIC TONESPHERE_WITH_PIPEWIRE)
     else()
       message(WARNING "libpipewire-0.3 not found: building without the PipeWire backend")
     endif()
   endif()
 endif()
 
-add_executable(nextone-engine src/main.cpp)
-target_link_libraries(nextone-engine PRIVATE nextone_engine_lib)
+add_executable(tonesphere-engine src/main.cpp)
+target_link_libraries(tonesphere-engine PRIVATE tonesphere_engine_lib)
 if(WIN32)
   # GUI subsystem (no console window) but keep the standard main() entry point.
-  set_target_properties(nextone-engine PROPERTIES WIN32_EXECUTABLE ON LINK_FLAGS "/ENTRY:mainCRTStartup")
-  target_sources(nextone-engine PRIVATE src/engine.rc)
+  set_target_properties(tonesphere-engine PROPERTIES WIN32_EXECUTABLE ON LINK_FLAGS "/ENTRY:mainCRTStartup")
+  target_sources(tonesphere-engine PRIVATE src/engine.rc)
 endif()
 
 # Out-of-process plugin scanner (a crashing plugin cannot take the engine down while scanning).
-add_executable(nextone-plugscan src/plugins/plugscan_main.cpp)
-target_link_libraries(nextone-plugscan PRIVATE nextone_engine_lib)
+add_executable(tonesphere-plugscan src/plugins/plugscan_main.cpp)
+target_link_libraries(tonesphere-plugscan PRIVATE tonesphere_engine_lib)
 
 # Small VST3 effect used by the automated tests (gain + a native editor window).
 if(WIN32)
-  add_library(nextone_test_gain MODULE
+  add_library(tonesphere_test_gain MODULE
     tests/test_plugin/test_gain.cpp
     ${VST3_PUB}/main/dllmain.cpp
     ${VST3_PUB}/main/pluginfactory.cpp
@@ -177,17 +177,17 @@ if(WIN32)
     ${VST3_PUB}/vst/vstbus.cpp
     ${VST3_PUB}/vst/vstparameters.cpp
     ${VST3_PUB}/common/pluginview.cpp)
-  target_link_libraries(nextone_test_gain PRIVATE vst3_base comctl32)
-  set_target_properties(nextone_test_gain PROPERTIES PREFIX "" SUFFIX ".vst3"
+  target_link_libraries(tonesphere_test_gain PRIVATE vst3_base comctl32)
+  set_target_properties(tonesphere_test_gain PROPERTIES PREFIX "" SUFFIX ".vst3"
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/test-plugins)
 endif()
 
-if(NEXTONE_BUILD_TESTS)
-  add_executable(nextone_core_tests tests/core_tests.cpp)
-  target_link_libraries(nextone_core_tests PRIVATE nextone_core Catch2::Catch2WithMain)
-  add_test(NAME core COMMAND nextone_core_tests)
+if(TONESPHERE_BUILD_TESTS)
+  add_executable(tonesphere_core_tests tests/core_tests.cpp)
+  target_link_libraries(tonesphere_core_tests PRIVATE tonesphere_core Catch2::Catch2WithMain)
+  add_test(NAME core COMMAND tonesphere_core_tests)
 
-  add_executable(nextone_engine_tests tests/engine_tests.cpp)
-  target_link_libraries(nextone_engine_tests PRIVATE nextone_engine_lib Catch2::Catch2WithMain)
-  add_test(NAME engine COMMAND nextone_engine_tests)
+  add_executable(tonesphere_engine_tests tests/engine_tests.cpp)
+  target_link_libraries(tonesphere_engine_tests PRIVATE tonesphere_engine_lib Catch2::Catch2WithMain)
+  add_test(NAME engine COMMAND tonesphere_engine_tests)
 endif()

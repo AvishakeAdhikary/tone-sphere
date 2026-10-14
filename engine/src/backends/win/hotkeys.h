@@ -5,7 +5,7 @@
 #include <memory>
 #include <string>
 
-namespace nt {
+namespace ts {
 
 class Engine;
 
@@ -23,4 +23,4 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
-}  // namespace nt
+}  // namespace ts

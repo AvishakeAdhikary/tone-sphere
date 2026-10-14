@@ -1,5 +1,5 @@
 // End-to-end UI test: launches the real Electron app against the mock engine
-// (or a real engine when NEXTONE_E2E_REAL=1) and exercises the main flows.
+// (or a real engine when TONESPHERE_E2E_REAL=1) and exercises the main flows.
 import { test, expect, _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
 import { spawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
@@ -14,8 +14,8 @@ const shots = path.join(process.cwd(), 'test-results', 'screens');
 
 test.beforeAll(async () => {
   fs.mkdirSync(shots, { recursive: true });
-  const discovery = path.join(os.tmpdir(), `nextone-e2e-${PORT}.json`);
-  if (process.env.NEXTONE_E2E_REAL !== '1') {
+  const discovery = path.join(os.tmpdir(), `tonesphere-e2e-${PORT}.json`);
+  if (process.env.TONESPHERE_E2E_REAL !== '1') {
     mock = spawn(process.execPath, ['mock-engine/server.mjs', '--port', String(PORT)], { stdio: 'inherit' });
     fs.writeFileSync(discovery, JSON.stringify({ port: PORT, token: 'mock', pid: 0, version: 'mock', protocol: 1 }));
     await new Promise((r) => setTimeout(r, 600));
@@ -23,9 +23,9 @@ test.beforeAll(async () => {
   const env: Record<string, string> = { ...(process.env as Record<string, string>) };
   // VS Code terminals set this, which would make Electron run as plain Node.
   delete env.ELECTRON_RUN_AS_NODE;
-  if (process.env.NEXTONE_E2E_REAL !== '1') env.NEXTONE_DISCOVERY = discovery;
-  // Own profile: the tests must not collide with a NexTone the user has open (single-instance lock).
-  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'nextone-e2e-profile-'));
+  if (process.env.TONESPHERE_E2E_REAL !== '1') env.TONESPHERE_DISCOVERY = discovery;
+  // Own profile: the tests must not collide with a ToneSphere the user has open (single-instance lock).
+  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'tonesphere-e2e-profile-'));
   app = await electron.launch({ args: ['.', `--user-data-dir=${profile}`], env });
   page = await app.firstWindow();
   await page.setViewportSize({ width: 1400, height: 880 });
@@ -97,7 +97,7 @@ test('settings dialog opens', async () => {
   await expect(page.locator('.modal.settings', { hasText: '1 plugin found' })).toBeVisible();
   await page.locator('.settings-nav button', { hasText: 'Control' }).click();
   await page.locator('.modal.settings input[role=switch]').first().click(); // state comes back from the engine
-  await expect(page.locator('.modal.settings', { hasText: '/nextone/volume' })).toBeVisible();
+  await expect(page.locator('.modal.settings', { hasText: '/tonesphere/volume' })).toBeVisible();
   await page.screenshot({ path: path.join(shots, '07-control.png') });
   await page.locator('.settings-nav button', { hasText: 'Appearance' }).click();
   await page.locator('.skin-card', { hasText: 'Studio' }).click();

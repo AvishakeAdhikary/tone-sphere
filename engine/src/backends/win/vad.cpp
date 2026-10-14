@@ -1,4 +1,4 @@
-// NexTone virtual audio driver backend (shared-memory rings).
+// ToneSphere virtual audio driver backend (shared-memory rings).
 #include "backends/win/vad.h"
 
 #include <windows.h>
@@ -12,11 +12,11 @@
 #include <thread>
 #include <vector>
 
-#include "../../../../drivers/win/vad/include/nextone_vad_shared.h"
+#include "../../../../drivers/win/vad/include/tonesphere_vad_shared.h"
 #include "util/log.h"
 #include "util/platform.h"
 
-namespace nt {
+namespace ts {
 
 namespace {
 
@@ -25,21 +25,21 @@ constexpr double kPollSec = 0.002;
 
 struct RingMap {
     HANDLE handle = nullptr;
-    NTVAD_RING_HEADER* hdr = nullptr;
+    TSVAD_RING_HEADER* hdr = nullptr;
     uint8_t* data = nullptr;
     bool open(bool mic, int index) {
         wchar_t name[64];
-        swprintf_s(name, L"Global\\NexToneVad%s%d", mic ? L"Mic" : L"Out", index);
+        swprintf_s(name, L"Global\\ToneSphereVad%s%d", mic ? L"Mic" : L"Out", index);
         handle = OpenFileMappingW(FILE_MAP_READ | FILE_MAP_WRITE, FALSE, name);
         if (!handle) return false;
-        void* v = MapViewOfFile(handle, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, NTVAD_SECTION_BYTES);
+        void* v = MapViewOfFile(handle, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, TSVAD_SECTION_BYTES);
         if (!v) {
             close();
             return false;
         }
-        hdr = static_cast<NTVAD_RING_HEADER*>(v);
-        data = static_cast<uint8_t*>(v) + NTVAD_HEADER_BYTES;
-        if (hdr->magic != NTVAD_MAGIC || hdr->version != NTVAD_VERSION || (hdr->dataBytes & (hdr->dataBytes - 1)) != 0) {
+        hdr = static_cast<TSVAD_RING_HEADER*>(v);
+        data = static_cast<uint8_t*>(v) + TSVAD_HEADER_BYTES;
+        if (hdr->magic != TSVAD_MAGIC || hdr->version != TSVAD_VERSION || (hdr->dataBytes & (hdr->dataBytes - 1)) != 0) {
             close();
             return false;
         }
@@ -67,7 +67,7 @@ struct Fmt {
     double rate = 48000;
 };
 
-Fmt readFmt(const NTVAD_RING_HEADER* h) {
+Fmt readFmt(const TSVAD_RING_HEADER* h) {
     Fmt f;
     f.channels = static_cast<int>(h->channels ? h->channels : 2);
     f.bits = static_cast<int>(h->bitsPerSample ? h->bitsPerSample : 16);
@@ -128,7 +128,7 @@ void floatToSample(float x, uint8_t* p, const Fmt& f) {
     }
 }
 
-// Finds the Windows endpoint id for an endpoint with this description (e.g. "NexTone Output 1").
+// Finds the Windows endpoint id for an endpoint with this description (e.g. "ToneSphere Output 1").
 std::string findEndpointId(bool capture, const std::wstring& desc) {
     IMMDeviceEnumerator* en = nullptr;
     if (FAILED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator),
@@ -169,7 +169,7 @@ public:
 
     bool init(std::string& err) {
         if (!ring_.open(mic_, index_)) {
-            err = "NexTone virtual device unavailable";
+            err = "ToneSphere virtual device unavailable";
             return false;
         }
         fmt_ = readFmt(ring_.hdr);
@@ -200,10 +200,10 @@ public:
 
 private:
     void run() {
-        setAudioThreadPriority(mic_ ? "nt-vad-mic" : "nt-vad-out");
+        setAudioThreadPriority(mic_ ? "ts-vad-mic" : "ts-vad-out");
         HANDLE timer = CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
         if (!timer) timer = CreateWaitableTimerW(nullptr, FALSE, nullptr);
-        NTVAD_RING_HEADER* h = ring_.hdr;
+        TSVAD_RING_HEADER* h = ring_.hdr;
         const uint32_t mask = h->dataBytes - 1;
         std::vector<float> tmp;
         double lastFeed = nowSeconds();
@@ -216,7 +216,7 @@ private:
             due.QuadPart = -static_cast<LONGLONG>(kPollSec * 1e7);
             SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE);
             WaitForSingleObject(timer, 50);
-            if (h->magic != NTVAD_MAGIC) {
+            if (h->magic != TSVAD_MAGIC) {
                 // The driver tore the endpoint down (device disabled, driver updated…): our mapping
                 // keeps the memory alive, so it has to be noticed here.
                 error_ = "Device was removed";
@@ -244,7 +244,7 @@ private:
             const int bps = fmt_.bits / 8;
 
             if (!mic_) {
-                // Apps -> ring -> NexTone.
+                // Apps -> ring -> ToneSphere.
                 const int64_t w = h->writePos;
                 int64_t r = h->readPos;
                 int64_t avail = w - r;
@@ -282,7 +282,7 @@ private:
                     lastFeed = now;  // stream active but stalled: don't burst later
                 }
             } else {
-                // NexTone -> ring -> apps recording the virtual microphone.
+                // ToneSphere -> ring -> apps recording the virtual microphone.
                 const int64_t r = h->readPos;
                 int64_t w = h->writePos;
                 // Windows can leave the stream in RUN state after the app stopped recording, without
@@ -378,13 +378,13 @@ std::vector<DeviceInfo> VadBackend::enumerate() {
             if (!m.open(mic != 0, i)) continue;
             DeviceInfo d;
             d.kind = DeviceKind::Vad;
-            d.input = mic == 0;  // outputs are sources for NexTone, mics are destinations
+            d.input = mic == 0;  // outputs are sources for ToneSphere, mics are destinations
             d.bin = mic ? Bin::VirtualIn : Bin::VirtualOut;
             d.nodeId = std::string(mic ? "vad:in:" : "vad:out:") + std::to_string(i);
             std::wstring wname(m.hdr->name, wcsnlen(m.hdr->name, 64));
-            if (wname.empty()) wname = (mic ? L"NexTone Mic " : L"NexTone Output ") + std::to_wstring(i);
+            if (wname.empty()) wname = (mic ? L"ToneSphere Mic " : L"ToneSphere Output ") + std::to_wstring(i);
             d.name = toUtf8(wname);
-            d.subtitle = "NexTone virtual device";
+            d.subtitle = "ToneSphere virtual device";
             const Fmt f = readFmt(m.hdr);
             d.channels = std::clamp(f.channels, 1, 8);
             d.sampleRate = f.rate;
@@ -407,4 +407,4 @@ std::unique_ptr<DeviceStream> VadBackend::open(const DeviceInfo& dev, const Stre
     return s;
 }
 
-}  // namespace nt
+}  // namespace ts

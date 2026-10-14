@@ -28,7 +28,7 @@ static void closeSock(intptr_t s) {
 }
 #endif
 
-namespace nt {
+namespace ts {
 
 struct WsServer::Client {
     intptr_t sock = -1;
@@ -139,7 +139,7 @@ size_t WsServer::clientCount() {
 }
 
 void WsServer::acceptLoop() {
-    setThreadName("nt-ipc-accept");
+    setThreadName("ts-ipc-accept");
     while (running_) {
         sockaddr_in peer{};
         SockLen len = sizeof(peer);
@@ -194,7 +194,7 @@ bool WsServer::handshake(Client& c) {
 }
 
 void WsServer::clientLoop(std::shared_ptr<Client> c) {
-    setThreadName("nt-ipc-client");
+    setThreadName("ts-ipc-client");
     if (handshake(*c)) {
         c->ready = true;
         if (onConnect) onConnect(c);
@@ -303,4 +303,4 @@ void WsServer::broadcastBinary(const void* data, size_t len) {
     for (auto& c : cs) sendFrame(*c, 0x2, data, len);
 }
 
-}  // namespace nt
+}  // namespace ts

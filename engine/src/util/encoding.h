@@ -5,7 +5,7 @@
 #include <string>
 #include <string_view>
 
-namespace nt {
+namespace ts {
 
 std::string base64Encode(const void* data, size_t len);
 std::string base64Encode(std::string_view s);
@@ -13,4 +13,4 @@ std::string base64Encode(std::string_view s);
 std::string base64Decode(std::string_view s);
 std::array<uint8_t, 20> sha1(std::string_view s);
 
-}  // namespace nt
+}  // namespace ts

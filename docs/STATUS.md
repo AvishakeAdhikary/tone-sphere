@@ -1,4 +1,4 @@
-# NexTone build status
+# ToneSphere build status
 
 _Last updated: 2026-10-10._
 
@@ -9,32 +9,32 @@ _Last updated: 2026-10-10._
 | Real-time core: lock-free rings, varispeed resampler, drift-compensated adaptive bridges (with measured device-rate feed-forward up to ±3 %) | ✅ | real AI-04 USB interface running −10,300 ppm (1 % slow) at 44.1 kHz: before, the input underran every ~15 s and grew to 148 ms latency; now locked at −10,195 ppm with 15 ms latency. Unit tests for 1 %-slow capture and render devices; `engine/tests/core_tests.cpp`: SPSC ring stress; 44.1→48 kHz resampling better than −60 dB; ±300 ppm clocks stay locked within ±15 ppm over 10 simulated minutes with 0 dropouts |
 | Engine graph: mixes/buses, crosspoint routing, gain/mute/solo/pan/delay/polarity, meters | ✅ | `engine/tests/engine_tests.cpp` (11 cases) |
 | Built-in effects: noise suppression (RNNoise), gate, EQ, compressor, limiter, auto-duck, delay | ✅ | unit tests: limiter ceiling, gate, 4:1 compression = −15 dB |
-| **VST3 plugins**: out-of-process scan, inserts on any node, plugin windows, state in config and scenes, custom folders, crash containment | ✅ | `tests/integration/plugins.mjs` 7/7 with the bundled *NexTone Test Gain* plugin (see below). Real plugin: Guitar Rig 7 scans in 2 s and inserts in 0.35 s; its window opens; CPU 1.6 %, 0 xruns |
+| **VST3 plugins**: out-of-process scan, inserts on any node, plugin windows, state in config and scenes, custom folders, crash containment | ✅ | `tests/integration/plugins.mjs` 7/7 with the bundled *ToneSphere Test Gain* plugin (see below). Real plugin: Guitar Rig 7 scans in 2 s and inserts in 0.35 s; its window opens; CPU 1.6 %, 0 xruns |
 | Windows audio devices: WASAPI shared/exclusive, IAudioClient3 low latency, hot-plug | ✅ | `tests/integration/host-audio.mjs` 10/10; render starts with 3 periods queued and grows if the device runs dry (counted as xruns) |
 | Per-app capture ("copy") and per-app redirection ("isolate", app microphones) | ✅ capture verified; redirection implemented | host-audio: a playing app appears automatically and its audio reaches a mix |
-| **NexTone virtual audio driver** (4 outputs + 4 mics, test-signed) | ✅ in the Hyper-V VM | `tests/integration/vad-audio.mjs` 14/14 in the VM: app → Output → NexTone → Mic → app, with 0 clicks, gaps or dropouts |
-| **NexTone ASIO driver** (x64 + x86, multi-client) | ✅ | `tests/integration/asio-clients.mjs` 11/11 for 64- and 32-bit hosts: two DAWs at once, exact timing, float32 |
+| **ToneSphere virtual audio driver** (4 outputs + 4 mics, test-signed) | ✅ in the Hyper-V VM | `tests/integration/vad-audio.mjs` 14/14 in the VM: app → Output → ToneSphere → Mic → app, with 0 clicks, gaps or dropouts |
+| **ToneSphere ASIO driver** (x64 + x86, multi-client) | ✅ | `tests/integration/asio-clients.mjs` 11/11 for 64- and 32-bit hosts: two DAWs at once, exact timing, float32 |
 | Engine hosting a real ASIO interface (shared between DAWs) | ✅ | `tests/integration/asio-host.mjs` 8/8 with FlexASIO looped through VB-CABLE |
 | Network audio (VBAN, VoiceMeeter-compatible) | ✅ | codec unit tests + `tests/integration/vban.mjs` 4/4 |
 | Recording (multitrack WAV, 32-bit float, RF64-safe) and the instant-replay buffer | ✅ | `tests/integration/recorder.mjs` 6/6 |
 | Idle meters (OS peak meters for devices and apps that aren't routed) and global hotkeys | ✅ | `tests/integration/meters-hotkeys.mjs` 2/2 |
 | UI (Electron + React): six bins, mixes, drag-to-route, send-to menus, matrix, inspector, effects, plugins, scenes, settings, dark mode | ✅ | `ui/tests/e2e/ui.spec.ts` 7/7 |
-| **Desktop installer** (`NexTone-Setup-<ver>.exe`): app + engine + ASIO driver + virtual driver | ✅ in a pristine VM | `vm/Test-Installer.ps1`: silent install, drivers present, ASIO registered, the app starts the engine, vad-audio 14/14 against the installed build |
-| **Microsoft Store package** (MSIX) | ✅ sideload-tested in a pristine VM | `vm/Test-Msix.ps1`: installs, launches, finds the engine; sign-in startup task starts the engine plus the app in the tray; `nextone-engine.exe` alias and `nextone:` link are registered |
+| **Desktop installer** (`ToneSphere-Setup-<ver>.exe`): app + engine + ASIO driver + virtual driver | ✅ in a pristine VM | `vm/Test-Installer.ps1`: silent install, drivers present, ASIO registered, the app starts the engine, vad-audio 14/14 against the installed build |
+| **Microsoft Store package** (MSIX) | ✅ sideload-tested in a pristine VM | `vm/Test-Msix.ps1`: installs, launches, finds the engine; sign-in startup task starts the engine plus the app in the tray; `tonesphere-engine.exe` alias and `tonesphere:` link are registered |
 | Windows App Certification Kit | ⚠️ 15 tests pass; no real failures found | `vm/Test-Wack.ps1` (see below) |
-| **Linux (PipeWire)**: physical devices + hot-plug, persistent NexTone virtual outputs/mics usable by any app, app capture | ✅ in WSL Ubuntu 24.04, PipeWire 1.0.5 | `tests/integration/linux-pipewire.mjs` 11/11 (×4 runs; one click seen once at stream start in an earlier run). Engine unit tests pass on GCC 13 |
+| **Linux (PipeWire)**: physical devices + hot-plug, persistent ToneSphere virtual outputs/mics usable by any app, app capture | ✅ in WSL Ubuntu 24.04, PipeWire 1.0.5 | `tests/integration/linux-pipewire.mjs` 11/11 (×4 runs; one click seen once at stream start in an earlier run). Engine unit tests pass on GCC 13 |
 | **Linux desktop app** (AppImage) | ✅ launches under WSLg | `scripts/package-linux.sh`: the app starts its bundled engine and connects |
 | Round-trip latency measurement (chirp + cross-correlation, Settings › Audio) | ✅ | unit test: delay found within 0.5 sample, sub-sample refinement, no-signal rejected; `tests/integration/latency.mjs` 6/6 through VB-CABLE (~150 ms, VB-CABLE's own buffer; varies by up to ~20 ms between device restarts) |
-| "Install drivers" button (Settings › Devices, desktop build; one UAC prompt via `nextone-setup install-all`) | ✅ in a pristine VM | `vm/Test-DriverInstall.ps1`: with the engine already running, `install-all` installs both drivers in 4 s and the engine picks up the ASIO driver and all 8 virtual devices by itself |
+| "Install drivers" button (Settings › Devices, desktop build; one UAC prompt via `tonesphere-setup install-all`) | ✅ in a pristine VM | `vm/Test-DriverInstall.ps1`: with the engine already running, `install-all` installs both drivers in 4 s and the engine picks up the ASIO driver and all 8 virtual devices by itself |
 | **Driver soak under Driver Verifier** (1 h, 54 cycles of the full audio test + hot-unplug while streaming) | ✅ no crash | `vm/Test-Soak.ps1`: 0 bugchecks, no dumps; device and engine survived every disable/enable. Audio clean in 45 of 54 iterations. Iteration 1: the engine started before the driver (now fixed: the VAD backend polls for its rings). Iterations 2–4 overlapped host builds. 2–6 clicks in 5 later iterations; iterations 28–54 all clean |
 | OSC remote control | ✅ | unit tests (messages, bundles, junk); `tests/integration/osc.mjs` 5/5 with real UDP packets |
 | MIDI controllers (mappings + learn, Windows) | ⚠️ logic tested only | unit tests for the mapping logic; no MIDI input on this PC, so the winmm input path is untested with hardware |
 | UI fonts | ✅ | Segoe UI Variable for text; JetBrains Mono (bundled, OFL) for numbers, ports and paths |
 | **Portable presets** (import/export routing maps that find devices by name; placeholders for devices not plugged in yet; re-binding when a device returns under a new id) | ✅ | unit tests (matching rules); `tests/integration/presets.mjs` 9/9: import with a missing device, placeholder keeps its connection, portable export, idempotent re-import, `node.forget` |
-| **Guitar Rig live scenario** (`presets/guitar-rig-obs-ai04.nextone.json`) | ✅ core flow in the VM; ⏳ your check with the AI-04 | `vm/Test-GuitarRig.ps1`: the real Guitar Rig 7 (this PC's copy) on NexTone ASIO joins the preset in ~25 s; OBS and speaker stand-ins get its sound; virtual devices unplugged → shown disconnected, connections kept; Guitar Rig closed/reopened → sound returns clean; 0 engine xruns. On this PC the preset matched Line (AI-04), Speakers (Realtek(R) Audio) and CABLE Output at import |
+| **Guitar Rig live scenario** (`presets/guitar-rig-obs-ai04.tonesphere.json`) | ✅ core flow in the VM; ⏳ your check with the AI-04 | `vm/Test-GuitarRig.ps1`: the real Guitar Rig 7 (this PC's copy) on ToneSphere ASIO joins the preset in ~25 s; OBS and speaker stand-ins get its sound; virtual devices unplugged → shown disconnected, connections kept; Guitar Rig closed/reopened → sound returns clean; 0 engine xruns. On this PC the preset matched Line (AI-04), Speakers (Realtek(R) Audio) and CABLE Output at import |
 | **Skins** (Fluent, Midnight, Studio, Neon, Paper; import/export as JSON) | ✅ | UI e2e: picking Studio applies its tokens and forces dark mode; Fluent restores |
 | Virtual devices notice the driver going away while streaming (driver marks rings as gone) | ✅ in the VM | Guitar Rig scenario unplug step |
-| CLI | ✅ | `tools/nextone-ctl.mjs` (also finds a Store-installed engine) |
+| CLI | ✅ | `tools/tonesphere-ctl.mjs` (also finds a Store-installed engine) |
 
 ## How to run
 
@@ -62,14 +62,14 @@ wsl -e bash scripts/package-linux.sh # Linux AppImage → ui\release\
 - **Virtual audio driver signing.** The driver is **test-signed**. It only loads on PCs with
   Windows test signing on; it was verified inside the Hyper-V test VM and never installed on
   the host. Public use needs Microsoft attestation signing, which requires an EV certificate.
-  Without it, NexTone uses Compatibility mode (VB-CABLE etc.) for virtual devices. The ASIO
+  Without it, ToneSphere uses Compatibility mode (VB-CABLE etc.) for virtual devices. The ASIO
   driver is user-mode and works everywhere.
 - **Store submission is yours to do.** Follow `packaging/store/README.md`: identity values
   from Partner Center, listing text, privacy policy, and a GPLv3 source link.
 - **WACK.** Run in a pristine VM, 15 tests pass. The other results are not real failures:
   - **Six metadata tests** can't start in the VM ("platform metadata directory does not
     exist") because only part of the SDK is copied there. They validate WinRT `.winmd`
-    components, and NexTone ships none.
+    components, and ToneSphere ships none.
   - **"Blocked executables" and "Platform appropriate files"** are optional tests. The
     blocked-executable findings are string matches such as "cmd" inside Chromium resources,
     expected for every Electron app.

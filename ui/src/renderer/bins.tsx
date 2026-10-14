@@ -37,7 +37,7 @@ export const BIN_META: Record<Bin, BinMeta> = {
     bin: 'virtual-out',
     title: 'Virtual outputs',
     hint: 'Virtual speakers. Apps play into these, and the sound comes here.',
-    empty: 'No virtual speakers yet. Install the NexTone Driver Pack or enable Compatibility mode.',
+    empty: 'No virtual speakers yet. Install the ToneSphere Driver Pack or enable Compatibility mode.',
     icon: Cable,
     hue: 'violet',
   },
@@ -61,7 +61,7 @@ export const BIN_META: Record<Bin, BinMeta> = {
     bin: 'virtual-in',
     title: 'Virtual inputs',
     hint: 'Virtual microphones. Anything sent here can be recorded by any app.',
-    empty: 'No virtual microphones yet. Install the NexTone Driver Pack or enable Compatibility mode.',
+    empty: 'No virtual microphones yet. Install the ToneSphere Driver Pack or enable Compatibility mode.',
     icon: Cable,
     hue: 'violet',
   },
@@ -114,13 +114,13 @@ export function kindLabel(n: NodeInfo): string {
     case 'wasapi':
       return n.settings.exclusive ? 'WASAPI exclusive' : 'Windows audio';
     case 'vad':
-      return 'NexTone virtual device';
+      return 'ToneSphere virtual device';
     case 'compat':
       return 'Virtual cable (compatibility)';
     case 'app':
       return 'Application';
     case 'asioclient':
-      return 'NexTone ASIO client';
+      return 'ToneSphere ASIO client';
     case 'bus':
       return 'Mix';
     case 'vban':

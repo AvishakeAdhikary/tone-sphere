@@ -1,4 +1,4 @@
-# Creates the NexTone driver-test VM fully unattended (no Windows Setup UI):
+# Creates the ToneSphere driver-test VM fully unattended (no Windows Setup UI):
 #  1. creates a GPT VHDX, applies install.wim from the Windows 11 evaluation ISO with DISM,
 #  2. makes it bootable (bcdboot) and enables TEST SIGNING offline in the VM's BCD,
 #  3. injects unattend.xml (local admin, skip OOBE, autologon),
@@ -6,9 +6,9 @@
 #  5. takes a "clean" checkpoint to revert to after any driver crash.
 # The host is never modified beyond creating the VM. Requires an elevated shell.
 param(
-  [string]$Iso = 'C:\NexToneVM\win11eval.iso',
-  [string]$VmName = 'NexTone-DriverTest',
-  [string]$Dir = 'C:\NexToneVM',
+  [string]$Iso = 'C:\ToneSphereVM\win11eval.iso',
+  [string]$VmName = 'ToneSphere-DriverTest',
+  [string]$Dir = 'C:\ToneSphereVM',
   [int]$DiskGB = 64,
   [long]$MemoryBytes = 6GB,
   [int]$Cpus = 4

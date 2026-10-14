@@ -13,7 +13,7 @@
 
 #include "core/ring_buffer.h"
 
-namespace nt {
+namespace ts {
 
 struct NodeRuntime;
 
@@ -78,4 +78,4 @@ private:
     std::atomic<bool> running_{true};
 };
 
-}  // namespace nt
+}  // namespace ts

@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <mutex>
 #include <random>
 #include <sstream>
 
@@ -21,7 +22,7 @@
 
 namespace fs = std::filesystem;
 
-namespace nt {
+namespace ts {
 
 double nowSeconds() {
 #ifdef _WIN32
@@ -78,22 +79,50 @@ std::string exeDir() {
 #endif
 }
 
+int migrateLegacyData(const std::string& from, const std::string& to) {
+    std::error_code ec;
+    const fs::path src = fs::u8path(from), dst = fs::u8path(to);
+    // Only into a fresh install, and only once: an existing config means ToneSphere has run here.
+    if (!fs::is_directory(src, ec) || fs::exists(dst / "config.json", ec)) return 0;
+    fs::create_directories(dst, ec);
+    int copied = 0;
+    for (const auto& e : fs::directory_iterator(src, ec)) {
+        const std::u8string u8 = e.path().filename().u8string();
+        const std::string name(u8.begin(), u8.end());
+        // Runtime files belong to the old engine (which may still be running); logs aren't worth carrying.
+        if (name == "engine.json" || name == "engine.lock" || name.rfind("plugscan-", 0) == 0 || e.path().extension() == ".log" ||
+            e.path().extension() == ".tmp")
+            continue;
+        std::error_code cec;
+        fs::copy(e.path(), dst / e.path().filename(), fs::copy_options::recursive | fs::copy_options::skip_existing, cec);
+        if (!cec) ++copied;
+    }
+    return copied;
+}
+
 std::string dataDir() {
+    // ToneSphere was called NexTone before: its settings, presets and plugin cache are carried over once.
 #ifdef _WIN32
     std::string base = knownFolder(FOLDERID_LocalAppData);
-    std::string d = base + "\\NexTone";
+    std::string d = base + "\\ToneSphere";
+    const std::string legacy = base + "\\NexTone";
 #elif defined(__APPLE__)
-    std::string d = std::string(getenv("HOME")) + "/Library/Application Support/NexTone";
+    std::string d = std::string(getenv("HOME")) + "/Library/Application Support/ToneSphere";
+    const std::string legacy = std::string(getenv("HOME")) + "/Library/Application Support/NexTone";
 #else
     const char* xdg = getenv("XDG_DATA_HOME");
-    std::string d = xdg ? std::string(xdg) + "/nextone" : std::string(getenv("HOME")) + "/.local/share/nextone";
+    const std::string share = xdg ? std::string(xdg) : std::string(getenv("HOME")) + "/.local/share";
+    std::string d = share + "/tonesphere";
+    const std::string legacy = share + "/nextone";
 #endif
+    static std::once_flag migrated;
+    std::call_once(migrated, [&] { migrateLegacyData(legacy, d); });
     makeDirs(d);
     return d;
 }
 
 std::string discoveryPath() {
-    if (const char* env = getenv("NEXTONE_DISCOVERY")) return env;
+    if (const char* env = getenv("TONESPHERE_DISCOVERY")) return env;
 #if defined(_WIN32) || defined(__APPLE__)
     return dataDir() + (
 #ifdef _WIN32
@@ -104,7 +133,7 @@ std::string discoveryPath() {
                        );
 #else
     const char* rt = getenv("XDG_RUNTIME_DIR");
-    std::string d = rt ? std::string(rt) + "/nextone" : std::string(getenv("HOME")) + "/.local/state/nextone";
+    std::string d = rt ? std::string(rt) + "/tonesphere" : std::string(getenv("HOME")) + "/.local/state/tonesphere";
     makeDirs(d);
     return d + "/engine.json";
 #endif
@@ -113,9 +142,9 @@ std::string discoveryPath() {
 std::string defaultRecordFolder() {
 #ifdef _WIN32
     std::string m = knownFolder(FOLDERID_Music);
-    return (m.empty() ? dataDir() : m) + "\\NexTone";
+    return (m.empty() ? dataDir() : m) + "\\ToneSphere";
 #else
-    return std::string(getenv("HOME")) + "/Music/NexTone";
+    return std::string(getenv("HOME")) + "/Music/ToneSphere";
 #endif
 }
 
@@ -191,4 +220,4 @@ void setThreadName(const char* name) {
 #endif
 }
 
-}  // namespace nt
+}  // namespace ts

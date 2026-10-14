@@ -1,6 +1,6 @@
 // Engine hosting a real ASIO driver (FlexASIO configured as a silent VB-CABLE loopback).
 // 1) engine tone -> ASIO outputs -> (loopback) -> ASIO inputs -> mix meter
-// 2) DAW A (NexTone ASIO) -> ASIO outputs -> loopback -> ASIO inputs -> DAW B (NexTone ASIO)
+// 2) DAW A (ToneSphere ASIO) -> ASIO outputs -> loopback -> ASIO inputs -> DAW B (ToneSphere ASIO)
 //   node tests/integration/asio-host.mjs [driver] [seconds]
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -12,7 +12,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '.
 const host = path.join(root, 'build', 'x64-release', 'bin', 'asio-test-host.exe');
 const DRIVER = process.argv[2] ?? 'FlexASIO';
 const SECS = Number(process.argv[3] ?? 10);
-const disc = JSON.parse(fs.readFileSync(path.join(process.env.LOCALAPPDATA ?? os.homedir(), 'NexTone', 'engine.json'), 'utf8'));
+const disc = JSON.parse(fs.readFileSync(path.join(process.env.LOCALAPPDATA ?? os.homedir(), 'ToneSphere', 'engine.json'), 'utf8'));
 const ws = new WebSocket(`ws://127.0.0.1:${disc.port}/?token=${disc.token}`);
 ws.binaryType = 'arraybuffer';
 let state = null, meters = null, id = 1;
@@ -86,10 +86,10 @@ async function main() {
   check('hosted ASIO: no dropouts', (ain.xruns ?? 0) === 0 && (aout.xruns ?? 0) === 0, { in: ain.diag, out: aout.diag });
   await clear();
 
-  // 2) DAW A -> NexTone ASIO -> hosted interface -> loopback -> hosted interface -> NexTone ASIO -> DAW B
-  const a = runHost(['run', 'NexTone ASIO', String(SECS + 4), '440', '-6', '256']);
+  // 2) DAW A -> ToneSphere ASIO -> hosted interface -> loopback -> hosted interface -> ToneSphere ASIO -> DAW B
+  const a = runHost(['run', 'ToneSphere ASIO', String(SECS + 4), '440', '-6', '256']);
   await sleep(700);
-  const b = runHost(['run', 'NexTone ASIO', String(SECS + 3), '0', '-120', '256']);
+  const b = runHost(['run', 'ToneSphere ASIO', String(SECS + 3), '0', '-120', '256']);
   let dawA, dawB;
   for (let i = 0; i < 40 && !(dawA && dawB); i++) {
     await sleep(100);

@@ -1,5 +1,5 @@
 #pragma once
-// The NexTone engine: owns the routing model, devices, clock and the published audio Program.
+// The ToneSphere engine: owns the routing model, devices, clock and the published audio Program.
 // All public methods are thread-safe (serialised by an internal mutex) and are called from
 // the IPC thread; the audio path never takes that mutex.
 #include <atomic>
@@ -19,7 +19,7 @@
 #include "core/graph.h"
 #include "core/recorder.h"
 
-namespace nt {
+namespace ts {
 
 using json = nlohmann::json;
 
@@ -92,7 +92,7 @@ struct NodeModel {
 
     std::shared_ptr<NodeRuntime> rt;
     std::unique_ptr<DeviceStream> stream;
-    bool streamInput = true;  // the open stream captures into NexTone
+    bool streamInput = true;  // the open stream captures into ToneSphere
     std::shared_ptr<CaptureBridge> cap;
     std::shared_ptr<RenderBridge> ren;
     std::string streamError;
@@ -241,4 +241,4 @@ private:
     bool vadPresent_ = false;
 };
 
-}  // namespace nt
+}  // namespace ts

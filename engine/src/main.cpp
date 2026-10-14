@@ -1,5 +1,5 @@
-// nextone-engine: the always-running NexTone audio engine.
-//   nextone-engine [--background] [--port N] [--console]
+// tonesphere-engine: the always-running ToneSphere audio engine.
+//   tonesphere-engine [--background] [--port N] [--console]
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -33,7 +33,7 @@
 #endif
 
 using nlohmann::json;
-using namespace nt;
+using namespace ts;
 
 namespace {
 
@@ -68,7 +68,7 @@ LRESULT CALLBACK hiddenProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
     static Engine* engine = nullptr;
     if (msg == WM_CREATE) engine = static_cast<Engine*>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams);
     if (msg == WM_POWERBROADCAST && (wp == PBT_APMRESUMEAUTOMATIC || wp == PBT_APMRESUMESUSPEND) && engine) {
-        NT_INFO("System resumed: re-opening devices");
+        TS_INFO("System resumed: re-opening devices");
         // Never block the main thread on the engine (plugins run work on it while holding the engine lock).
         std::thread([e = engine] {
             try {
@@ -108,9 +108,9 @@ int main(int argc, char** argv) {
 
 #ifdef _WIN32
     // One engine per user session.
-    HANDLE single = CreateMutexW(nullptr, TRUE, L"Local\\NexToneEngine");
+    HANDLE single = CreateMutexW(nullptr, TRUE, L"Local\\ToneSphereEngine");
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
-        std::fprintf(stderr, "NexTone engine is already running\n");
+        std::fprintf(stderr, "ToneSphere engine is already running\n");
         return 0;
     }
     if (console && !GetConsoleWindow()) {
@@ -138,7 +138,7 @@ int main(int argc, char** argv) {
         dir = dir.substr(0, dir.find_last_of(L'\\'));  // ...\app\resources\engine
         dir = dir.substr(0, dir.find_last_of(L'\\'));  // ...\app\resources
         dir = dir.substr(0, dir.find_last_of(L'\\'));  // ...\app
-        std::wstring cmd = L"\"" + dir + L"\\NexTone.exe\" --hidden";
+        std::wstring cmd = L"\"" + dir + L"\\ToneSphere.exe\" --hidden";
         STARTUPINFOW si{sizeof(si)};
         PROCESS_INFORMATION pi{};
         if (CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi)) {
@@ -154,7 +154,7 @@ int main(int argc, char** argv) {
         makeDirs(disc.substr(0, disc.find_last_of('/')));
         const int lockFd = ::open(lockPath.c_str(), O_CREAT | O_RDWR | O_CLOEXEC, 0600);
         if (lockFd < 0 || ::flock(lockFd, LOCK_EX | LOCK_NB) != 0) {
-            std::fprintf(stderr, "NexTone engine is already running\n");
+            std::fprintf(stderr, "ToneSphere engine is already running\n");
             return 0;
         }
         // The descriptor stays open (and locked) for the life of the process.
@@ -164,7 +164,7 @@ int main(int argc, char** argv) {
 #endif
 
     log::init(dataDir() + "/engine.log", console);
-    NT_INFO("NexTone engine starting (pid %d)", currentPid());
+    TS_INFO("ToneSphere engine starting (pid %d)", currentPid());
 
     Engine engine;
     WsServer server;
@@ -214,7 +214,7 @@ int main(int argc, char** argv) {
     const std::string token = randomHex(16);
     const int actualPort = server.start(token, port);
     if (!actualPort) {
-        NT_ERROR("Cannot open the local control port");
+        TS_ERROR("Cannot open the local control port");
         return 1;
     }
     const json discovery = {{"port", actualPort},
@@ -223,11 +223,11 @@ int main(int argc, char** argv) {
                             {"version", engine.version()},
                             {"protocol", 1}};
     writeFileAtomic(discoveryPath(), discovery.dump(2));
-    NT_INFO("Control port 127.0.0.1:%d", actualPort);
+    TS_INFO("Control port 127.0.0.1:%d", actualPort);
 
     // State broadcaster (<= 20 Hz) and meter broadcaster (~30 Hz).
     std::thread stateThread([&] {
-        setThreadName("nt-ipc-state");
+        setThreadName("ts-ipc-state");
         ComScope com;
         while (!g_quit) {
             std::unique_lock lk(stateMu);
@@ -242,7 +242,7 @@ int main(int argc, char** argv) {
         }
     });
     std::thread meterThread([&] {
-        setThreadName("nt-ipc-meters");
+        setThreadName("ts-ipc-meters");
         std::vector<float> vals;
         std::vector<uint8_t> frame;
         while (!g_quit) {
@@ -250,7 +250,7 @@ int main(int argc, char** argv) {
             if (!server.clientCount()) continue;
             engine.pollExternalMeters();
             const uint32_t layout = engine.meters(vals);
-            const uint32_t magic = 0x314D544E, count = static_cast<uint32_t>(vals.size());
+            const uint32_t magic = 0x314D5354, count = static_cast<uint32_t>(vals.size());
             frame.resize(12 + vals.size() * 4);
             std::memcpy(frame.data(), &magic, 4);
             std::memcpy(frame.data() + 4, &layout, 4);
@@ -264,9 +264,9 @@ int main(int argc, char** argv) {
     WNDCLASSW wc{};
     wc.lpfnWndProc = hiddenProc;
     wc.hInstance = GetModuleHandleW(nullptr);
-    wc.lpszClassName = L"NexToneEngineHidden";
+    wc.lpszClassName = L"ToneSphereEngineHidden";
     RegisterClassW(&wc);
-    HWND hidden = CreateWindowExW(0, wc.lpszClassName, L"NexTone Engine", 0, 0, 0, 0, 0, nullptr, nullptr, wc.hInstance, &engine);
+    HWND hidden = CreateWindowExW(0, wc.lpszClassName, L"ToneSphere Engine", 0, 0, 0, 0, 0, nullptr, nullptr, wc.hInstance, &engine);
     Hotkeys hotkeys(engine);
     hotkeys.install();  // needs this thread's message loop
     MSG msg;
@@ -280,7 +280,7 @@ int main(int argc, char** argv) {
     while (!g_quit) std::this_thread::sleep_for(std::chrono::milliseconds(200));
 #endif
 
-    NT_INFO("Shutting down");
+    TS_INFO("Shutting down");
     g_quit = true;
     stateCv.notify_all();
     stateThread.join();

@@ -1,11 +1,11 @@
-// Mock NexTone engine: speaks the real protocol with simulated devices and meters.
+// Mock ToneSphere engine: speaks the real protocol with simulated devices and meters.
 // Used for UI development and automated UI tests. Run: node mock-engine/server.mjs [--port 47999]
 import { WebSocketServer } from 'ws';
 import crypto from 'node:crypto';
 
 const portArg = process.argv.indexOf('--port');
 const PORT = portArg > 0 ? Number(process.argv[portArg + 1]) : 47999;
-const TOKEN = process.env.NEXTONE_MOCK_TOKEN ?? 'mock';
+const TOKEN = process.env.TONESPHERE_MOCK_TOKEN ?? 'mock';
 
 const uid = () => crypto.randomBytes(4).toString('hex');
 let layoutVersion = 1;
@@ -37,7 +37,7 @@ function node(id, bin, kind, name, channels, extra = {}) {
 }
 
 const state = {
-  version: '0.1.0-mock',
+  version: '1.0.0-mock',
   protocol: 1,
   layoutVersion,
   settings: {
@@ -49,7 +49,7 @@ const state = {
     startMinimized: true,
     hotkeys: { 'mute-mic': 'Ctrl+Shift+M' },
     replayBufferSeconds: 60,
-    recordFolder: 'C:\\Users\\you\\Music\\NexTone',
+    recordFolder: 'C:\\Users\\you\\Music\\ToneSphere',
     theme: 'system',
     advancedMode: false,
   pluginFolders: [],
@@ -99,7 +99,7 @@ const state = {
   scenes: [{ id: 'sc1', name: 'Streaming', hotkey: 'Ctrl+1' }],
   activeScene: 'sc1',
   plugins: [{ id: 'vst3:demo', name: 'Demo EQ', vendor: 'Example', category: 'Fx|EQ', path: 'C:\\Program Files\\Common Files\\VST3\\Demo.vst3' }],
-  recorder: { recording: false, files: [], folder: 'C:\\Users\\you\\Music\\NexTone', replaySeconds: 60 },
+  recorder: { recording: false, files: [], folder: 'C:\\Users\\you\\Music\\ToneSphere', replaySeconds: 60 },
 };
 
 function relayout() {
@@ -293,7 +293,7 @@ const handlers = {
   },
   'recorder.stop': () => {
     state.recorder.recording = false;
-    const f = `${state.recorder.folder}\\NexTone-${new Date().toISOString().replace(/[:.]/g, '-')}.wav`;
+    const f = `${state.recorder.folder}\\ToneSphere-${new Date().toISOString().replace(/[:.]/g, '-')}.wav`;
     state.recorder.files.push(f);
     return { files: [f] };
   },
@@ -302,7 +302,7 @@ const handlers = {
   'midi.devices': () => [],
   'node.forget': ({ id }) => { state.nodes = state.nodes.filter((n) => n.id !== id); state.routes = state.routes.filter((r) => r.from !== id && r.to !== id); },
   'preset.import': ({ preset }) => ({ sceneId: 'sc_mock', name: preset?.name ?? 'Preset', connections: (preset?.routes ?? []).length, waiting: [], skipped: 0 }),
-  'preset.export': ({ name }) => ({ format: 'nextone-preset', version: 1, name, devices: [], mixes: [], routes: [] }),
+  'preset.export': ({ name }) => ({ format: 'tonesphere-preset', version: 1, name, devices: [], mixes: [], routes: [] }),
   'midi.learn': () => { throw new Error('No MIDI control moved.'); },
   'latency.measure': () => ({ latencyMs: 7.4, samples: 355.2, sampleRate: 48000, confidence: 0.98 }),
 };
@@ -384,7 +384,7 @@ setInterval(() => {
   }
   const count = state.nodes.reduce((a, n) => a + n.channels * 2, 0);
   const buf = Buffer.alloc(12 + count * 4);
-  buf.writeUInt32LE(0x314d544e, 0);
+  buf.writeUInt32LE(0x314d5354, 0);
   buf.writeUInt32LE(state.layoutVersion, 4);
   buf.writeUInt32LE(count, 8);
   for (const n of state.nodes) {
@@ -398,4 +398,4 @@ setInterval(() => {
   for (const c of clients) c.send(buf);
 }, 33);
 
-console.log(`NexTone mock engine on ws://127.0.0.1:${PORT}/?token=${TOKEN}`);
+console.log(`ToneSphere mock engine on ws://127.0.0.1:${PORT}/?token=${TOKEN}`);

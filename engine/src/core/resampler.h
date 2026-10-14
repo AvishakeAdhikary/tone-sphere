@@ -6,7 +6,7 @@
 #include <cstddef>
 #include <vector>
 
-namespace nt {
+namespace ts {
 
 class VarispeedResampler {
 public:
@@ -49,4 +49,4 @@ private:
     double pos_ = 0.0;  // read position (input frames) relative to fifo start
 };
 
-}  // namespace nt
+}  // namespace ts

@@ -1,34 +1,34 @@
 /*++
-    NexTone Virtual Audio Driver - shared-memory rings.
+    ToneSphere Virtual Audio Driver - shared-memory rings.
 
     Each endpoint gets a named, page-file backed section that the engine opens with
-    OpenFileMapping("Global\NexToneVad..."). The driver maps the same section into system
+    OpenFileMapping("Global\ToneSphereVad..."). The driver maps the same section into system
     space and locks its pages so the WaveRT position DPC can copy audio at DISPATCH_LEVEL.
 --*/
 #include <ntifs.h>
 #include <ntstrsafe.h>
 
-#include "nextone_ring.h"
-#include "../include/nextone_vad_shared.h"
+#include "tonesphere_ring.h"
+#include "../include/tonesphere_vad_shared.h"
 
-#define NTRING_POOLTAG 'gRtN'
+#define TSRING_POOLTAG 'gRsT'
 
-struct NTVAD_RING {
+struct TSVAD_RING {
     HANDLE section;
     PVOID view;
     SIZE_T viewSize;
     PMDL mdl;
     BOOLEAN locked;
-    NTVAD_RING_HEADER* hdr;
+    TSVAD_RING_HEADER* hdr;
     UCHAR* data;
     ULONG mask;
 };
 
-static NTVAD_RING g_Out[NT_OUTPUTS];
-static NTVAD_RING g_Mic[NT_MICS];
+static TSVAD_RING g_Out[TS_OUTPUTS];
+static TSVAD_RING g_Mic[TS_MICS];
 static BOOLEAN g_Created = FALSE;
 
-static void DestroyRing(NTVAD_RING* r) {
+static void DestroyRing(TSVAD_RING* r) {
     if (r->hdr) {
         // Tell engines that still map this ring (their handles keep the section alive) that the
         // endpoint is gone; a new instance of the driver re-initialises the header.
@@ -52,7 +52,7 @@ static NTSTATUS BuildSecurity(PSECURITY_DESCRIPTOR sd, PACL* outAcl) {
     if (!NT_SUCCESS(st)) return st;
     const ULONG aclSize = sizeof(ACL) + 3 * (sizeof(ACCESS_ALLOWED_ACE) - sizeof(ULONG)) + RtlLengthSid(SeExports->SeWorldSid) +
                           RtlLengthSid(SeExports->SeLocalSystemSid) + RtlLengthSid(SeExports->SeAliasAdminsSid);
-    PACL acl = (PACL)ExAllocatePool2(POOL_FLAG_PAGED, aclSize, NTRING_POOLTAG);
+    PACL acl = (PACL)ExAllocatePool2(POOL_FLAG_PAGED, aclSize, TSRING_POOLTAG);
     if (!acl) return STATUS_INSUFFICIENT_RESOURCES;
     st = RtlCreateAcl(acl, aclSize, ACL_REVISION);
     if (NT_SUCCESS(st)) st = RtlAddAccessAllowedAce(acl, ACL_REVISION, SECTION_ALL_ACCESS, SeExports->SeLocalSystemSid);
@@ -61,19 +61,19 @@ static NTSTATUS BuildSecurity(PSECURITY_DESCRIPTOR sd, PACL* outAcl) {
         st = RtlAddAccessAllowedAce(acl, ACL_REVISION, SECTION_MAP_READ | SECTION_MAP_WRITE | SECTION_QUERY, SeExports->SeWorldSid);
     if (NT_SUCCESS(st)) st = RtlSetDaclSecurityDescriptor(sd, TRUE, acl, FALSE);
     if (!NT_SUCCESS(st)) {
-        ExFreePoolWithTag(acl, NTRING_POOLTAG);
+        ExFreePoolWithTag(acl, TSRING_POOLTAG);
         return st;
     }
     *outAcl = acl;
     return STATUS_SUCCESS;
 }
 
-static NTSTATUS CreateRing(NTVAD_RING* r, BOOLEAN capture, ULONG index /* 1-based */) {
+static NTSTATUS CreateRing(TSVAD_RING* r, BOOLEAN capture, ULONG index /* 1-based */) {
     RtlZeroMemory(r, sizeof(*r));
     WCHAR nameBuf[64];
     UNICODE_STRING name;
     RtlInitEmptyUnicodeString(&name, nameBuf, sizeof(nameBuf));
-    NTSTATUS st = RtlUnicodeStringPrintf(&name, capture ? L"\\BaseNamedObjects\\NexToneVadMic%u" : L"\\BaseNamedObjects\\NexToneVadOut%u", index);
+    NTSTATUS st = RtlUnicodeStringPrintf(&name, capture ? L"\\BaseNamedObjects\\ToneSphereVadMic%u" : L"\\BaseNamedObjects\\ToneSphereVadOut%u", index);
     if (!NT_SUCCESS(st)) return st;
 
     SECURITY_DESCRIPTOR sd;
@@ -84,9 +84,9 @@ static NTSTATUS CreateRing(NTVAD_RING* r, BOOLEAN capture, ULONG index /* 1-base
     OBJECT_ATTRIBUTES oa;
     InitializeObjectAttributes(&oa, &name, OBJ_KERNEL_HANDLE | OBJ_OPENIF, NULL, &sd);
     LARGE_INTEGER size;
-    size.QuadPart = NTVAD_SECTION_BYTES;
+    size.QuadPart = TSVAD_SECTION_BYTES;
     st = ZwCreateSection(&r->section, SECTION_ALL_ACCESS, &oa, &size, PAGE_READWRITE, SEC_COMMIT, NULL);
-    ExFreePoolWithTag(acl, NTRING_POOLTAG);
+    ExFreePoolWithTag(acl, TSRING_POOLTAG);
     if (!NT_SUCCESS(st)) return st;
 
     PVOID sectionObject = NULL;
@@ -105,7 +105,7 @@ static NTSTATUS CreateRing(NTVAD_RING* r, BOOLEAN capture, ULONG index /* 1-base
     }
 
     // Lock the pages: the position DPC touches them at DISPATCH_LEVEL.
-    r->mdl = IoAllocateMdl(r->view, (ULONG)NTVAD_SECTION_BYTES, FALSE, FALSE, NULL);
+    r->mdl = IoAllocateMdl(r->view, (ULONG)TSVAD_SECTION_BYTES, FALSE, FALSE, NULL);
     if (!r->mdl) {
         DestroyRing(r);
         return STATUS_INSUFFICIENT_RESOURCES;
@@ -118,39 +118,39 @@ static NTSTATUS CreateRing(NTVAD_RING* r, BOOLEAN capture, ULONG index /* 1-base
         return STATUS_INSUFFICIENT_RESOURCES;
     }
 
-    r->hdr = (NTVAD_RING_HEADER*)r->view;
-    r->data = (UCHAR*)r->view + NTVAD_HEADER_BYTES;
-    r->mask = NTVAD_DATA_BYTES - 1;
-    NTVAD_RING_HEADER* h = r->hdr;
-    if (h->magic != NTVAD_MAGIC) {  // first creation (OBJ_OPENIF may reopen an existing section)
-        RtlZeroMemory(h, NTVAD_HEADER_BYTES);
-        h->magic = NTVAD_MAGIC;
-        h->version = NTVAD_VERSION;
+    r->hdr = (TSVAD_RING_HEADER*)r->view;
+    r->data = (UCHAR*)r->view + TSVAD_HEADER_BYTES;
+    r->mask = TSVAD_DATA_BYTES - 1;
+    TSVAD_RING_HEADER* h = r->hdr;
+    if (h->magic != TSVAD_MAGIC) {  // first creation (OBJ_OPENIF may reopen an existing section)
+        RtlZeroMemory(h, TSVAD_HEADER_BYTES);
+        h->magic = TSVAD_MAGIC;
+        h->version = TSVAD_VERSION;
         h->sampleRate = 48000;
         h->channels = 2;
         h->bitsPerSample = 16;
         h->validBits = 16;
         h->blockAlign = 4;
     }
-    h->direction = capture ? NTVAD_DIR_CAPTURE : NTVAD_DIR_RENDER;
+    h->direction = capture ? TSVAD_DIR_CAPTURE : TSVAD_DIR_RENDER;
     h->index = index;
-    h->dataBytes = NTVAD_DATA_BYTES;
+    h->dataBytes = TSVAD_DATA_BYTES;
     h->streamActive = 0;
     UNICODE_STRING disp;
     RtlInitEmptyUnicodeString(&disp, h->name, sizeof(h->name) - sizeof(WCHAR));
-    RtlUnicodeStringPrintf(&disp, capture ? L"NexTone Mic %u" : L"NexTone Output %u", index);
+    RtlUnicodeStringPrintf(&disp, capture ? L"ToneSphere Mic %u" : L"ToneSphere Output %u", index);
     return STATUS_SUCCESS;
 }
 
-extern "C" NTSTATUS NtRingsCreateAll() {
+extern "C" NTSTATUS TsRingsCreateAll() {
     PAGED_CODE();
     if (g_Created) return STATUS_SUCCESS;
     NTSTATUS result = STATUS_SUCCESS;
-    for (ULONG i = 0; i < NT_OUTPUTS; ++i) {
+    for (ULONG i = 0; i < TS_OUTPUTS; ++i) {
         NTSTATUS st = CreateRing(&g_Out[i], FALSE, i + 1);
         if (!NT_SUCCESS(st)) result = st;
     }
-    for (ULONG i = 0; i < NT_MICS; ++i) {
+    for (ULONG i = 0; i < TS_MICS; ++i) {
         NTSTATUS st = CreateRing(&g_Mic[i], TRUE, i + 1);
         if (!NT_SUCCESS(st)) result = st;
     }
@@ -158,23 +158,23 @@ extern "C" NTSTATUS NtRingsCreateAll() {
     return result;
 }
 
-extern "C" void NtRingsDestroyAll() {
+extern "C" void TsRingsDestroyAll() {
     PAGED_CODE();
     if (!g_Created) return;
-    for (ULONG i = 0; i < NT_OUTPUTS; ++i) DestroyRing(&g_Out[i]);
-    for (ULONG i = 0; i < NT_MICS; ++i) DestroyRing(&g_Mic[i]);
+    for (ULONG i = 0; i < TS_OUTPUTS; ++i) DestroyRing(&g_Out[i]);
+    for (ULONG i = 0; i < TS_MICS; ++i) DestroyRing(&g_Mic[i]);
     g_Created = FALSE;
 }
 
-extern "C" NTVAD_RING* NtRingGet(BOOLEAN capture, ULONG index) {
-    if (capture) return index < NT_MICS && g_Mic[index].hdr ? &g_Mic[index] : NULL;
-    return index < NT_OUTPUTS && g_Out[index].hdr ? &g_Out[index] : NULL;
+extern "C" TSVAD_RING* TsRingGet(BOOLEAN capture, ULONG index) {
+    if (capture) return index < TS_MICS && g_Mic[index].hdr ? &g_Mic[index] : NULL;
+    return index < TS_OUTPUTS && g_Out[index].hdr ? &g_Out[index] : NULL;
 }
 
-extern "C" void NtRingSetFormat(NTVAD_RING* r, ULONG sampleRate, ULONG channels, ULONG bitsPerSample, ULONG validBits, BOOLEAN isFloat,
+extern "C" void TsRingSetFormat(TSVAD_RING* r, ULONG sampleRate, ULONG channels, ULONG bitsPerSample, ULONG validBits, BOOLEAN isFloat,
                                 ULONG blockAlign) {
     if (!r || !r->hdr) return;
-    NTVAD_RING_HEADER* h = r->hdr;
+    TSVAD_RING_HEADER* h = r->hdr;
     h->sampleRate = sampleRate;
     h->channels = channels;
     h->bitsPerSample = bitsPerSample;
@@ -185,35 +185,35 @@ extern "C" void NtRingSetFormat(NTVAD_RING* r, ULONG sampleRate, ULONG channels,
     InterlockedIncrement(&h->formatGeneration);
 }
 
-extern "C" void NtRingSetActive(NTVAD_RING* r, BOOLEAN active) {
+extern "C" void TsRingSetActive(TSVAD_RING* r, BOOLEAN active) {
     if (!r || !r->hdr) return;
     if (active) r->hdr->driverBytes = 0;
     InterlockedExchange(&r->hdr->streamActive, active ? 1 : 0);
 }
 
-extern "C" void NtRingProduce(NTVAD_RING* r, const UCHAR* src, ULONG bytes) {
+extern "C" void TsRingProduce(TSVAD_RING* r, const UCHAR* src, ULONG bytes) {
     if (!r || !r->hdr || bytes == 0) return;
-    NTVAD_RING_HEADER* h = r->hdr;
+    TSVAD_RING_HEADER* h = r->hdr;
     h->driverBytes += bytes;
     const LONG64 w = h->writePos;
     const LONG64 rd = InterlockedCompareExchange64(&h->readPos, 0, 0);  // atomic read
     const LONG64 used = w - rd;
-    if (used < 0 || used > (LONG64)NTVAD_DATA_BYTES) {
+    if (used < 0 || used > (LONG64)TSVAD_DATA_BYTES) {
         // Engine never attached / reset: start over at the current position.
         InterlockedExchange64(&h->readPos, w);
-    } else if ((LONG64)NTVAD_DATA_BYTES - used < (LONG64)bytes) {
+    } else if ((LONG64)TSVAD_DATA_BYTES - used < (LONG64)bytes) {
         InterlockedIncrement64(&h->overflows);  // engine not consuming: drop
         return;
     }
     ULONG off = (ULONG)(w & r->mask);
-    ULONG first = min(bytes, NTVAD_DATA_BYTES - off);
+    ULONG first = min(bytes, TSVAD_DATA_BYTES - off);
     RtlCopyMemory(r->data + off, src, first);
     if (bytes > first) RtlCopyMemory(r->data, src + first, bytes - first);
     KeMemoryBarrier();
     InterlockedExchange64(&h->writePos, w + bytes);
 }
 
-extern "C" void NtRingConsume(NTVAD_RING* r, UCHAR* dst, ULONG bytes, BOOLEAN isFloat, ULONG bitsPerSample) {
+extern "C" void TsRingConsume(TSVAD_RING* r, UCHAR* dst, ULONG bytes, BOOLEAN isFloat, ULONG bitsPerSample) {
     UNREFERENCED_PARAMETER(isFloat);
     UNREFERENCED_PARAMETER(bitsPerSample);
     if (bytes == 0) return;
@@ -221,12 +221,12 @@ extern "C" void NtRingConsume(NTVAD_RING* r, UCHAR* dst, ULONG bytes, BOOLEAN is
         RtlZeroMemory(dst, bytes);  // all supported formats are signed PCM/float: 0 == silence
         return;
     }
-    NTVAD_RING_HEADER* h = r->hdr;
+    TSVAD_RING_HEADER* h = r->hdr;
     h->driverBytes += bytes;
     const LONG64 rd = h->readPos;
     const LONG64 w = InterlockedCompareExchange64(&h->writePos, 0, 0);
     LONG64 avail = w - rd;
-    if (avail < 0 || avail > (LONG64)NTVAD_DATA_BYTES) {
+    if (avail < 0 || avail > (LONG64)TSVAD_DATA_BYTES) {
         // Producer restarted: resynchronise to its position.
         InterlockedExchange64(&h->readPos, w);
         avail = 0;
@@ -237,7 +237,7 @@ extern "C" void NtRingConsume(NTVAD_RING* r, UCHAR* dst, ULONG bytes, BOOLEAN is
     take -= take % align;
     if (take) {
         ULONG off = (ULONG)(rd & r->mask);
-        ULONG first = min(take, NTVAD_DATA_BYTES - off);
+        ULONG first = min(take, TSVAD_DATA_BYTES - off);
         RtlCopyMemory(dst, r->data + off, first);
         if (take > first) RtlCopyMemory(dst + first, r->data, take - first);
         KeMemoryBarrier();

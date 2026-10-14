@@ -6,7 +6,7 @@
 #include "util/log.h"
 #include "util/platform.h"
 
-namespace nt {
+namespace ts {
 
 Bin binFromString(const std::string& s) {
     if (s == "physical-in") return Bin::PhysicalIn;
@@ -152,14 +152,14 @@ void Engine::saveConfigLocked() {
 void Engine::loadConfig() {
     std::string text;
     if (!readFile(configPath(), text)) {
-        NT_INFO("No configuration yet; starting fresh");
+        TS_INFO("No configuration yet; starting fresh");
         return;
     }
     json j;
     try {
         j = json::parse(text);
     } catch (const std::exception& e) {
-        NT_ERROR("Configuration is damaged (%s); keeping a backup and starting fresh", e.what());
+        TS_ERROR("Configuration is damaged (%s); keeping a backup and starting fresh", e.what());
         writeFileAtomic(configPath() + ".damaged", text);
         return;
     }
@@ -212,7 +212,7 @@ void Engine::loadConfig() {
     for (const json& sj : j.value("scenes", json::array()))
         scenes_.push_back({sj.value("id", newId("sc")), sj.value("name", "Scene"), sj.value("hotkey", ""), sj.value("snapshot", json::object())});
     activeScene_ = j.value("activeScene", "");
-    NT_INFO("Loaded configuration: %zu nodes, %zu routes, %zu scenes", nodes_.size(), routes_.size(), scenes_.size());
+    TS_INFO("Loaded configuration: %zu nodes, %zu routes, %zu scenes", nodes_.size(), routes_.size(), scenes_.size());
 }
 
 json Engine::snapshotLocked() const {
@@ -267,4 +267,4 @@ void Engine::restoreSnapshotLocked(const json& s) {
     for (const json& rj : s.value("routes", json::array())) routes_.push_back(routeFrom(rj));
 }
 
-}  // namespace nt
+}  // namespace ts

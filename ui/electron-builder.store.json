@@ -1,21 +1,21 @@
 {
   "extends": null,
-  "appId": "com.nextone.app",
-  "productName": "NexTone",
+  "appId": "com.neuralnexusstudios.tonesphere",
+  "productName": "ToneSphere",
   "directories": { "output": "release-store", "buildResources": "build" },
   "files": ["dist/**", "dist-electron/**", "assets/**", "package.json"],
   "extraResources": [
-    { "from": "../build/x64-release/bin/nextone-engine.exe", "to": "engine/nextone-engine.exe" },
-    { "from": "../build/x64-release/bin/nextone-plugscan.exe", "to": "engine/nextone-plugscan.exe" },
+    { "from": "../build/x64-release/bin/tonesphere-engine.exe", "to": "engine/tonesphere-engine.exe" },
+    { "from": "../build/x64-release/bin/tonesphere-plugscan.exe", "to": "engine/tonesphere-plugscan.exe" },
     { "from": "../LICENSE", "to": "LICENSE.txt" }
   ],
-  "win": { "icon": "assets/icon.ico", "target": ["appx"], "executableName": "NexTone" },
+  "win": { "icon": "assets/icon.ico", "target": ["appx"], "executableName": "ToneSphere" },
   "appx": {
-    "applicationId": "NexTone",
-    "identityName": "NexTone.NexTone",
-    "publisher": "CN=NexTone Dev",
-    "publisherDisplayName": "NexTone",
-    "displayName": "NexTone",
+    "applicationId": "ToneSphere",
+    "identityName": "NeuralNexusStudios.ToneSphere",
+    "publisher": "CN=Neural Nexus Studios",
+    "publisherDisplayName": "ToneSphere",
+    "displayName": "ToneSphere",
     "backgroundColor": "transparent",
     "showNameOnTiles": false,
     "languages": ["en-US"],
@@ -23,6 +23,6 @@
     "customManifestPath": "build/appxmanifest.xml",
     "minVersion": "10.0.19041.0",
     "maxVersionTested": "10.0.26100.0",
-    "artifactName": "NexTone-${version}.${ext}"
+    "artifactName": "ToneSphere-${version}.${ext}"
   }
 }

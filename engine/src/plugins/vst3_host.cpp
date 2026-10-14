@@ -33,7 +33,7 @@ using nlohmann::json;
 using namespace Steinberg;
 using namespace Steinberg::Vst;
 
-namespace nt {
+namespace ts {
 
 namespace {
 
@@ -215,12 +215,12 @@ public:
             deactivate();
             negotiateBuses(channels);
             ProcessSetup setup{kRealtime, kSample32, maxBlock, sampleRate};
-            if (processor_->setupProcessing(setup) != kResultOk) NT_WARN("Plugin %s rejected the processing setup", name().c_str());
+            if (processor_->setupProcessing(setup) != kResultOk) TS_WARN("Plugin %s rejected the processing setup", name().c_str());
             data_.unprepare();
             data_.prepare(*component_, maxBlock, kSample32);
             data_.processMode = kRealtime;
             if (component_->setActive(true) != kResultOk) {
-                NT_WARN("Plugin %s could not be activated", name().c_str());
+                TS_WARN("Plugin %s could not be activated", name().c_str());
                 return;
             }
             processor_->setProcessing(true);
@@ -394,13 +394,13 @@ tresult PLUGIN_API Handler::performEdit(ParamID id, ParamValue v) {
     return kResultOk;
 }
 tresult PLUGIN_API Handler::restartComponent(int32 flags) {
-    if (flags & (kIoChanged | kLatencyChanged)) NT_INFO("Plugin %s requested a restart (flags 0x%x)", fx_.name().c_str(), flags);
+    if (flags & (kIoChanged | kLatencyChanged)) TS_INFO("Plugin %s requested a restart (flags 0x%x)", fx_.name().c_str(), flags);
     return kResultOk;
 }
 
 #ifdef _WIN32
 bool EditorWindow::open(const std::wstring& title) {
-    static const wchar_t* kClass = L"NexTonePluginWindow";
+    static const wchar_t* kClass = L"ToneSpherePluginWindow";
     static bool registered = [] {
         WNDCLASSEXW wc{sizeof(wc)};
         wc.lpfnWndProc = proc;
@@ -442,7 +442,7 @@ void EditorWindow::raise() {
     if (!hwnd_) return;
     if (IsIconic(hwnd_)) ShowWindow(hwnd_, SW_RESTORE);
     // The engine is a background process, so plain SetForegroundWindow is usually refused:
-    // briefly make the window topmost so it appears above the NexTone window.
+    // briefly make the window topmost so it appears above the ToneSphere window.
     SetWindowPos(hwnd_, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
     SetWindowPos(hwnd_, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
     SetForegroundWindow(hwnd_);
@@ -724,7 +724,7 @@ void PluginManager::scanAsync() {
 }
 
 void PluginManager::scanThread() {
-    setThreadName("nt-plugscan");
+    setThreadName("ts-plugscan");
     std::vector<std::string> extra;
     json modules;
     {
@@ -742,10 +742,10 @@ void PluginManager::scanThread() {
             next[p] = modules[p];
             continue;
         }
-        NT_INFO("Scanning plugin %s", p.c_str());
+        TS_INFO("Scanning plugin %s", p.c_str());
         json r = runScanner(scannerExe_, p);
         r["mtime"] = mt;
-        if (!r.value("ok", false)) NT_WARN("Plugin %s: %s", p.c_str(), r.value("error", "error").c_str());
+        if (!r.value("ok", false)) TS_WARN("Plugin %s: %s", p.c_str(), r.value("error", "error").c_str());
         next[p] = r;
         ++scanned;
     }
@@ -755,7 +755,7 @@ void PluginManager::scanThread() {
         rebuildListLocked();
         writeFileAtomic(cacheFile_, cache_.dump(1));
     }
-    NT_INFO("Plugin scan finished: %zu modules (%d scanned)", paths.size(), scanned);
+    TS_INFO("Plugin scan finished: %zu modules (%d scanned)", paths.size(), scanned);
     scanning_ = false;
     if (onChanged) onChanged();
 }
@@ -767,7 +767,7 @@ void PluginManager::rebuildListLocked() {
         if (!m.value("ok", false)) continue;
         for (auto& c : m.value("classes", json::array())) {
             const std::string sub = c.value("subCategories", "");
-            // NexTone inserts process audio: skip instruments/generators without an Fx role.
+            // ToneSphere inserts process audio: skip instruments/generators without an Fx role.
             if (sub.find("Instrument") != std::string::npos && sub.find("Fx") == std::string::npos) continue;
             const std::string id = c.value("id", "");
             if (id.empty() || seen[id]) continue;
@@ -801,4 +801,4 @@ std::shared_ptr<Fx> PluginManager::create(const std::string& pluginId) {
     return createVst3Fx(path, pluginId);
 }
 
-}  // namespace nt
+}  // namespace ts

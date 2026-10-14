@@ -1,7 +1,7 @@
-// nextone-plugscan: loads VST3 modules in a separate process for the engine.
-//   nextone-plugscan <module.vst3>                      # JSON report of the module's effects
-//   nextone-plugscan --list [extra folders...]          # modules found in the VST3 folders
-//   nextone-plugscan --probe <module.vst3> <classId>    # instantiate + process a test signal
+// tonesphere-plugscan: loads VST3 modules in a separate process for the engine.
+//   tonesphere-plugscan <module.vst3>                      # JSON report of the module's effects
+//   tonesphere-plugscan --list [extra folders...]          # modules found in the VST3 folders
+//   tonesphere-plugscan --probe <module.vst3> <classId>    # instantiate + process a test signal
 // The JSON report is printed on its own last line (plugins sometimes print to stdout too).
 #include <cmath>
 #include <cstdio>
@@ -20,7 +20,7 @@
 #endif
 
 using nlohmann::json;
-using namespace nt;
+using namespace ts;
 
 namespace {
 
@@ -89,7 +89,7 @@ int main(int argc, char** argv) {
     (void)argc;
     (void)argv;
     if (args.empty()) {
-        std::fprintf(stderr, "usage: nextone-plugscan <module.vst3> | --list [folders...] | --probe <module> <classId>\n");
+        std::fprintf(stderr, "usage: tonesphere-plugscan <module.vst3> | --list [folders...] | --probe <module> <classId>\n");
         return 2;
     }
     try {

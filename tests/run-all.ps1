@@ -1,18 +1,18 @@
-# Runs every automated NexTone test that is safe on the host PC (no kernel driver needed).
+# Runs every automated ToneSphere test that is safe on the host PC (no kernel driver needed).
 #   .\tests\run-all.ps1            # unit + integration
 #   .\tests\run-all.ps1 -SkipBuild
 # Note: the suites change the engine's routing (the user's configuration): don't run them while
-# relying on a setup in NexTone.
+# relying on a setup in ToneSphere.
 # Integration suites use VB-CABLE (+ FlexASIO configured on it) as a silent loopback.
 param([switch]$SkipBuild)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
-Get-Process nextone-engine -ErrorAction SilentlyContinue | Stop-Process -Force
+Get-Process tonesphere-engine -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Milliseconds 500
 if (-not $SkipBuild) { .\scripts\build.ps1 -Test }
 
-$engine = Start-Process .\build\x64-release\bin\nextone-engine.exe -PassThru
+$engine = Start-Process .\build\x64-release\bin\tonesphere-engine.exe -PassThru
 Start-Sleep -Seconds 3
 $suites = @(
   @('host-audio', 'tests\integration\host-audio.mjs', '--soak', '10'),

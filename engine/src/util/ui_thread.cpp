@@ -10,7 +10,7 @@
 #include <windows.h>
 #endif
 
-namespace nt::ui {
+namespace ts::ui {
 
 namespace {
 std::atomic<bool> g_running{false};
@@ -51,7 +51,7 @@ void init() {
     WNDCLASSW wc{};
     wc.lpfnWndProc = proc;
     wc.hInstance = GetModuleHandleW(nullptr);
-    wc.lpszClassName = L"NexToneUiThread";
+    wc.lpszClassName = L"ToneSphereUiThread";
     RegisterClassW(&wc);
     g_wnd = CreateWindowExW(0, wc.lpszClassName, L"", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr, wc.hInstance, nullptr);
     g_running = g_wnd != nullptr;
@@ -101,4 +101,4 @@ void run(const std::function<void()>& fn) {
 #endif
 }
 
-}  // namespace nt::ui
+}  // namespace ts::ui

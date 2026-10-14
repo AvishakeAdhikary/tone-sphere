@@ -1,9 +1,9 @@
 // Linux (PipeWire) end-to-end test, run from Windows against WSL Ubuntu:
-//   node tests/integration/linux-pipewire.mjs [build dir in WSL, default ~/nt-build]
+//   node tests/integration/linux-pipewire.mjs [build dir in WSL, default ~/ts-build]
 // Starts PipeWire + WirePlumber (headless) and the Linux engine inside WSL, then checks:
-//  - NexTone's virtual devices are real PipeWire nodes other apps can use
-//  - tone -> "NexTone Mic 1" -> recorded by a PipeWire app (pw-record)
-//  - a PipeWire app (pw-play) -> "NexTone Output 1" -> NexTone mix
+//  - ToneSphere's virtual devices are real PipeWire nodes other apps can use
+//  - tone -> "ToneSphere Mic 1" -> recorded by a PipeWire app (pw-record)
+//  - a PipeWire app (pw-play) -> "ToneSphere Output 1" -> ToneSphere mix
 //  - tone -> a sink device (null sink) -> its monitor recorded by pw-record
 //  - an app's playback stream shows up in Application outputs and can be captured
 //  - removing a device is handled (node becomes unavailable, engine keeps running)
@@ -12,8 +12,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const buildDir = process.argv[2] ?? '~/nt-build';
-const tmpWin = fs.mkdtempSync(path.join(os.tmpdir(), 'nt-linux-'));
+const buildDir = process.argv[2] ?? '~/ts-build';
+const tmpWin = fs.mkdtempSync(path.join(os.tmpdir(), 'ts-linux-'));
 const tmpWsl = execFileSync('wsl', ['-e', 'wslpath', '-a', tmpWin], { encoding: 'utf8' }).trim();
 const wsl = (cmd, opts = {}) => execFileSync('wsl', ['-e', 'bash', '-lc', cmd], { encoding: 'utf8', ...opts });
 const wslBg = (cmd) => spawn('wsl', ['-e', 'bash', '-lc', cmd], { stdio: 'ignore' });
@@ -95,13 +95,13 @@ async function levelDb(id, ms = 1200) {
 
 async function main() {
   // PipeWire session (headless) + engine inside WSL.
-  wsl('pgrep -x pipewire >/dev/null || (setsid pipewire >/tmp/pw.log 2>&1 &); sleep 1; pgrep -x wireplumber >/dev/null || (setsid wireplumber >/tmp/wp.log 2>&1 &); sleep 2; pkill -x nextone-engine; sleep 1; rm -f $XDG_RUNTIME_DIR/nextone/engine.json; true');
-  wsl(`pw-cli destroy nt-test-speakers >/dev/null 2>&1; true`);
-  wslBg(`setsid ${buildDir}/bin/nextone-engine >/tmp/engine.out 2>&1`);
+  wsl('pgrep -x pipewire >/dev/null || (setsid pipewire >/tmp/pw.log 2>&1 &); sleep 1; pgrep -x wireplumber >/dev/null || (setsid wireplumber >/tmp/wp.log 2>&1 &); sleep 2; pkill -x tonesphere-engine; sleep 1; rm -f $XDG_RUNTIME_DIR/tonesphere/engine.json; true');
+  wsl(`pw-cli destroy ts-test-speakers >/dev/null 2>&1; true`);
+  wslBg(`setsid ${buildDir}/bin/tonesphere-engine >/tmp/engine.out 2>&1`);
   let disc = null;
   for (let i = 0; i < 40 && !disc; i++) {
     await sleep(250);
-    try { disc = JSON.parse(wsl('cat $XDG_RUNTIME_DIR/nextone/engine.json 2>/dev/null')); } catch {}
+    try { disc = JSON.parse(wsl('cat $XDG_RUNTIME_DIR/tonesphere/engine.json 2>/dev/null')); } catch {}
   }
   if (!disc) throw new Error('engine did not start in WSL');
   // WSL forwards new localhost ports to Windows after a short delay: retry the connection.
@@ -125,24 +125,24 @@ async function main() {
   // 1) Virtual devices are PipeWire nodes.
   const status = wsl('wpctl status');
   const vout = node((n) => n.id === 'pw:vout:1'), vmic = node((n) => n.id === 'pw:vmic:1');
-  check('virtual devices exist for other apps', !!vout && !!vmic && /NexTone Output 1/.test(status) && /NexTone Mic 1/.test(status), {
+  check('virtual devices exist for other apps', !!vout && !!vmic && /ToneSphere Output 1/.test(status) && /ToneSphere Mic 1/.test(status), {
     vout: vout?.bin, vmic: vmic?.bin,
   });
 
-  // 2) Mic path: tone -> NexTone Mic 1 -> pw-record.
+  // 2) Mic path: tone -> ToneSphere Mic 1 -> pw-record.
   await call('tone.set', { enabled: true, freq: 1000, levelDb: -12, target: vmic.id });
   await sleep(1500);
-  wsl(`timeout 5 pw-record --target nextone.mic.1 --rate 48000 --channels 2 --format f32 ${tmpWsl}/mic.wav; true`);
+  wsl(`timeout 5 pw-record --target tonesphere.mic.1 --rate 48000 --channels 2 --format f32 ${tmpWsl}/mic.wav; true`);
   const mic = analyseWav(path.join(tmpWin, 'mic.wav'));
   check('mic path: an app records the tone', Math.abs(mic.freq - 1000) < 5 && Math.abs(mic.peakDb + 12) < 0.3, mic);
   check('mic path: clean (no clicks or gaps)', mic.clicks === 0 && mic.gaps === 0, mic);
   for (const r of [...state.routes]) await call('route.disconnect', { id: r.id });
 
-  // 3) Output path: pw-play -> NexTone Output 1 -> mix.
+  // 3) Output path: pw-play -> ToneSphere Output 1 -> mix.
   writeSineWav(path.join(tmpWin, 'sine440.wav'), 440, -6, 40); // outlasts the output + app checks
   const bus = await call('bus.create', { name: 'Linux test', channels: 2 });
   await call('route.connect', { from: vout.id, to: bus.id });
-  const player = wslBg(`pw-play --target nextone.output.1 ${tmpWsl}/sine440.wav`);
+  const player = wslBg(`pw-play --target tonesphere.output.1 ${tmpWsl}/sine440.wav`);
   await sleep(1500);
   const levels = [];
   for (let i = 0; i < 16; i++) { await sleep(250); levels.push(await levelDb(bus.id, 0)); }
@@ -166,18 +166,18 @@ async function main() {
   await call('bus.delete', { id: bus.id });
 
   // 4) Physical output: tone -> a sink device -> its monitor.
-  wsl(`pw-cli create-node adapter '{ factory.name=support.null-audio-sink node.name=nt-test-speakers node.description="Test speakers" media.class=Audio/Sink object.linger=true audio.position=[FL FR] }' >/dev/null`);
+  wsl(`pw-cli create-node adapter '{ factory.name=support.null-audio-sink node.name=ts-test-speakers node.description="Test speakers" media.class=Audio/Sink object.linger=true audio.position=[FL FR] }' >/dev/null`);
   let spk = null;
-  for (let i = 0; i < 20 && !spk; i++) { await sleep(250); spk = node((n) => n.id === 'pw:out:nt-test-speakers' && n.state !== 'unavailable'); }
+  for (let i = 0; i < 20 && !spk; i++) { await sleep(250); spk = node((n) => n.id === 'pw:out:ts-test-speakers' && n.state !== 'unavailable'); }
   check('a new sink appears in Physical outputs (hot-plug)', !!spk && spk.bin === 'physical-out', { spk: spk?.name, bin: spk?.bin });
   if (spk) {
     await call('tone.set', { enabled: true, freq: 1000, levelDb: -12, target: spk.id });
     await sleep(1500);
-    wsl(`timeout 5 pw-record --target nt-test-speakers -P '{ stream.capture.sink=true }' --rate 48000 --channels 2 --format f32 ${tmpWsl}/spk.wav; true`);
+    wsl(`timeout 5 pw-record --target ts-test-speakers -P '{ stream.capture.sink=true }' --rate 48000 --channels 2 --format f32 ${tmpWsl}/spk.wav; true`);
     const out = analyseWav(path.join(tmpWin, 'spk.wav'));
     check('physical output: tone plays on the device', Math.abs(out.freq - 1000) < 5 && Math.abs(out.peakDb + 12) < 0.3 && out.gaps === 0, out);
     // 6) Unplug: the device goes away, the engine keeps running.
-    wsl('pw-cli destroy nt-test-speakers >/dev/null 2>&1; true');
+    wsl('pw-cli destroy ts-test-speakers >/dev/null 2>&1; true');
     let gone = null;
     for (let i = 0; i < 20; i++) { await sleep(250); gone = node((n) => n.id === spk.id); if (!gone || gone.state === 'unavailable') break; }
     const alive = await call('engine.getState').then(() => true, () => false);
@@ -190,7 +190,7 @@ async function main() {
 main()
   .catch((e) => check('harness', false, e.message))
   .finally(() => {
-    try { wsl('pkill -x nextone-engine; pkill -x pw-play; true'); } catch {}
+    try { wsl('pkill -x tonesphere-engine; pkill -x pw-play; true'); } catch {}
     const failed = results.filter((r) => !r.ok).length;
     console.log(`\n${results.length - failed}/${results.length} passed`);
     ws?.close();

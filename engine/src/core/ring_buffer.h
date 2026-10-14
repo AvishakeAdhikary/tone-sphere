@@ -7,7 +7,7 @@
 #include <cstring>
 #include <vector>
 
-namespace nt {
+namespace ts {
 
 class FrameRing {
 public:
@@ -101,4 +101,4 @@ private:
     alignas(64) std::atomic<uint64_t> read_{0};
 };
 
-}  // namespace nt
+}  // namespace ts

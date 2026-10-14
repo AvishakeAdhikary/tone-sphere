@@ -1,4 +1,4 @@
-# Configures and builds NexTone (engine, ASIO driver, tools) with MSVC + Ninja.
+# Configures and builds ToneSphere (engine, ASIO driver, tools) with MSVC + Ninja.
 #   .\scripts\build.ps1                 # Release x64
 #   .\scripts\build.ps1 -Config Debug
 #   .\scripts\build.ps1 -Arch x86       # 32-bit (ASIO driver for 32-bit DAWs)
@@ -26,7 +26,7 @@ cmd /c "`"$vcvars`" $target >nul && set" | ForEach-Object {
 Remove-Item env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
 
 $tests = if ($Arch -eq 'x64') { 'ON' } else { 'OFF' }
-cmake -S $root -B $build -G Ninja "-DCMAKE_BUILD_TYPE=$Config" "-DNEXTONE_BUILD_TESTS=$tests"
+cmake -S $root -B $build -G Ninja "-DCMAKE_BUILD_TYPE=$Config" "-DTONESPHERE_BUILD_TESTS=$tests"
 if ($LASTEXITCODE) { throw 'CMake configure failed' }
 cmake --build $build --parallel
 if ($LASTEXITCODE) { throw 'Build failed' }

@@ -14,7 +14,7 @@
 #include "backends/win/asio_host.h"
 #endif
 
-namespace nt {
+namespace ts {
 
 Bin binFromString(const std::string& s);
 
@@ -83,7 +83,7 @@ json Engine::call(const std::string& method, const json& params) {
         if (p.contains("theme")) settings_.theme = p["theme"].get<std::string>();
         if (p.contains("advancedMode")) settings_.advancedMode = p["advancedMode"].get<bool>();
         if (restartAudio) {
-            NT_INFO("Restarting audio engine");
+            TS_INFO("Restarting audio engine");
             stopClock();
             for (auto& [id, n] : nodes_) {
                 closeStreamLocked(n);
@@ -200,7 +200,7 @@ json Engine::call(const std::string& method, const json& params) {
         r.xps = defaultCrosspoints(*a, *b, p.value("mode", "auto"));
         routes_.push_back(r);
         rebuildLocked();
-        NT_INFO("Connected %s -> %s", a->name.c_str(), b->name.c_str());
+        TS_INFO("Connected %s -> %s", a->name.c_str(), b->name.c_str());
         return json{{"id", r.id}, {"from", from}, {"to", to}, {"gainDb", 0}, {"muted", false}, {"enabled", true}};
     }
     if (method == "route.disconnect") {
@@ -382,7 +382,7 @@ json Engine::call(const std::string& method, const json& params) {
         if (!p.contains("preset")) fail("No preset given");
         return importPresetLocked(p["preset"]);
     }
-    if (method == "preset.export") return exportPresetLocked(p.value("name", "My NexTone setup"), p.value("description", ""));
+    if (method == "preset.export") return exportPresetLocked(p.value("name", "My ToneSphere setup"), p.value("description", ""));
     if (method == "scene.load") {
         const std::string id = str(p, "id");
         for (auto& sc : scenes_) {
@@ -485,4 +485,4 @@ json Engine::call(const std::string& method, const json& params) {
     fail("Unknown method: " + method);
 }
 
-}  // namespace nt
+}  // namespace ts

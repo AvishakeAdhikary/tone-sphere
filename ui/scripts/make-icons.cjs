@@ -1,4 +1,4 @@
-// Renders the NexTone logo (SVG) to all icon sizes with Electron and writes:
+// Renders the ToneSphere logo (SVG) to all icon sizes with Electron and writes:
 //   assets/icon.png (512), assets/icon.ico (16-256), assets/tray.png (32), assets/tray@2x.png
 //   build/appx/*.png (Store/MSIX tile assets)
 // Run: npx electron scripts/make-icons.cjs

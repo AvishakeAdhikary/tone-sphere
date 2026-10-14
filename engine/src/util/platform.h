@@ -3,18 +3,21 @@
 #include <cstdint>
 #include <string>
 
-namespace nt {
+namespace ts {
 
 /// Monotonic seconds (QueryPerformanceCounter / CLOCK_MONOTONIC).
 double nowSeconds();
 
-/// Per-user data directory (created on demand): %LOCALAPPDATA%\NexTone, ~/.local/share/nextone, ...
+/// Per-user data directory (created on demand): %LOCALAPPDATA%\ToneSphere, ~/.local/share/tonesphere, ...
 std::string dataDir();
+/// Copies a legacy data folder (from when ToneSphere was called NexTone) into `to`, once: only when
+/// `to` has no config.json yet. Skips runtime files (engine.json, locks, logs). Returns entries copied.
+int migrateLegacyData(const std::string& from, const std::string& to);
 /// Folder containing the running executable.
 std::string exeDir();
 /// Discovery file path (see shared/protocol/PROTOCOL.md).
 std::string discoveryPath();
-/// Default recordings folder (Music\NexTone).
+/// Default recordings folder (Music\ToneSphere).
 std::string defaultRecordFolder();
 
 /// Random hex string with `bytes` bytes of entropy.
@@ -37,4 +40,4 @@ void setAudioThreadPriority(const char* name);
 /// Names the current thread for debuggers.
 void setThreadName(const char* name);
 
-}  // namespace nt
+}  // namespace ts

@@ -4,6 +4,8 @@
 
 #include <cmath>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <vector>
 
 #include "core/graph.h"
@@ -12,8 +14,9 @@
 #include "core/presets.h"
 #include "dsp/fx.h"
 #include "util/encoding.h"
+#include "util/platform.h"
 
-using namespace nt;
+using namespace ts;
 using Catch::Matchers::WithinAbs;
 
 namespace {
@@ -217,14 +220,14 @@ TEST_CASE("Base64 round-trips binary plugin state", "[util]") {
     for (int i = 0; i < 1000; ++i) bin += static_cast<char>((i * 37 + 11) & 0xFF);
     for (size_t n : {size_t(0), size_t(1), size_t(2), size_t(3), size_t(999), size_t(1000)}) {
         const std::string part = bin.substr(0, n);
-        REQUIRE(nt::base64Decode(nt::base64Encode(part)) == part);
+        REQUIRE(ts::base64Decode(ts::base64Encode(part)) == part);
     }
-    REQUIRE(nt::base64Decode("TmV4VG9uZQ==") == "NexTone");
+    REQUIRE(ts::base64Decode("VG9uZVNwaGVyZQ==") == "ToneSphere");
 }
 
 TEST_CASE("Latency estimate finds a delayed, noisy chirp", "[latency]") {
     const double sr = 48000;
-    const auto chirp = nt::makeLatencyChirp(sr);
+    const auto chirp = ts::makeLatencyChirp(sr);
     const size_t emitAt = 4800;
     std::vector<float> cap(52800, 0.0f);
     uint32_t seed = 1;
@@ -233,14 +236,14 @@ TEST_CASE("Latency estimate finds a delayed, noisy chirp", "[latency]") {
         v = 0.02f * (static_cast<float>(seed >> 8) / 16777216.0f - 0.5f);  // noise
     }
     for (size_t k = 0; k < chirp.size(); ++k) cap[emitAt + 1234 + k] += 0.3f * chirp[k];
-    const auto e = nt::estimateLatency(cap, chirp, emitAt);
+    const auto e = ts::estimateLatency(cap, chirp, emitAt);
     REQUIRE_THAT(e.samples, Catch::Matchers::WithinAbs(1234.0, 0.5));
     REQUIRE(e.confidence > 0.8);
 
     // Half-sample delay (linear interpolation of the chirp): refined below one sample.
     std::vector<float> cap2(52800, 0.0f);
     for (size_t k = 0; k + 1 < chirp.size(); ++k) cap2[emitAt + 500 + k + 1] += 0.5f * (chirp[k] + chirp[k + 1]);
-    const auto e2 = nt::estimateLatency(cap2, chirp, emitAt);
+    const auto e2 = ts::estimateLatency(cap2, chirp, emitAt);
     REQUIRE_THAT(e2.samples, Catch::Matchers::WithinAbs(500.5, 0.3));
 
     // Nothing came back: low confidence.
@@ -249,7 +252,7 @@ TEST_CASE("Latency estimate finds a delayed, noisy chirp", "[latency]") {
         seed = seed * 1664525u + 1013904223u;
         v = 0.02f * (static_cast<float>(seed >> 8) / 16777216.0f - 0.5f);
     }
-    REQUIRE(nt::estimateLatency(silence, chirp, emitAt).confidence < 0.3);
+    REQUIRE(ts::estimateLatency(silence, chirp, emitAt).confidence < 0.3);
 }
 namespace {
 // Minimal OSC encoder for the tests.
@@ -267,28 +270,28 @@ void oscF(std::vector<uint8_t>& b, float f) {
 
 TEST_CASE("OSC messages and bundles map to remote actions", "[remote]") {
     std::vector<uint8_t> m;
-    oscStr(m, "/nextone/volume");
+    oscStr(m, "/tonesphere/volume");
     oscStr(m, ",sf");
     oscStr(m, "Stream mix");
     oscF(m, 0.5f);
-    std::vector<std::pair<std::string, std::vector<nt::OscArg>>> msgs;
-    REQUIRE(nt::parseOscPacket(m.data(), m.size(), msgs));
+    std::vector<std::pair<std::string, std::vector<ts::OscArg>>> msgs;
+    REQUIRE(ts::parseOscPacket(m.data(), m.size(), msgs));
     REQUIRE(msgs.size() == 1);
-    auto a = nt::oscToAction(msgs[0].first, msgs[0].second);
+    auto a = ts::oscToAction(msgs[0].first, msgs[0].second);
     REQUIRE(a);
     REQUIRE(a->action == "volume");
     REQUIRE(a->target == "Stream mix");
     REQUIRE_THAT(*a->value, Catch::Matchers::WithinAbs(0.5, 1e-6));
-    REQUIRE_THAT(nt::faderToDb(0.5f), Catch::Matchers::WithinAbs(-27.0, 1e-4));
-    REQUIRE(nt::faderToDb(0.0f) == -90.0f);
-    REQUIRE_THAT(nt::faderToDb(1.0f), Catch::Matchers::WithinAbs(6.0, 1e-4));
+    REQUIRE_THAT(ts::faderToDb(0.5f), Catch::Matchers::WithinAbs(-27.0, 1e-4));
+    REQUIRE(ts::faderToDb(0.0f) == -90.0f);
+    REQUIRE_THAT(ts::faderToDb(1.0f), Catch::Matchers::WithinAbs(6.0, 1e-4));
 
     // Bundle with a toggle (no value) and a scene change.
     std::vector<uint8_t> e1, e2, b;
-    oscStr(e1, "/nextone/mute");
+    oscStr(e1, "/tonesphere/mute");
     oscStr(e1, ",s");
     oscStr(e1, "Microphone");
-    oscStr(e2, "/nextone/scene");
+    oscStr(e2, "/tonesphere/scene");
     oscStr(e2, ",s");
     oscStr(e2, "Gaming");
     oscStr(b, "#bundle");
@@ -299,18 +302,18 @@ TEST_CASE("OSC messages and bundles map to remote actions", "[remote]") {
         b.insert(b.end(), e->begin(), e->end());
     }
     msgs.clear();
-    REQUIRE(nt::parseOscPacket(b.data(), b.size(), msgs));
+    REQUIRE(ts::parseOscPacket(b.data(), b.size(), msgs));
     REQUIRE(msgs.size() == 2);
-    auto mute = nt::oscToAction(msgs[0].first, msgs[0].second);
+    auto mute = ts::oscToAction(msgs[0].first, msgs[0].second);
     REQUIRE((mute && mute->action == "mute" && !mute->value));
-    auto scene = nt::oscToAction(msgs[1].first, msgs[1].second);
+    auto scene = ts::oscToAction(msgs[1].first, msgs[1].second);
     REQUIRE((scene && scene->action == "scene" && scene->target == "Gaming"));
 
     // Garbage and foreign addresses are ignored.
     const uint8_t junk[] = {1, 2, 3};
     msgs.clear();
-    REQUIRE_FALSE(nt::parseOscPacket(junk, sizeof(junk), msgs));
-    REQUIRE_FALSE(nt::oscToAction("/other/volume", {}));
+    REQUIRE_FALSE(ts::parseOscPacket(junk, sizeof(junk), msgs));
+    REQUIRE_FALSE(ts::oscToAction("/other/volume", {}));
 }
 
 TEST_CASE("MIDI controller messages map to remote actions", "[remote]") {
@@ -320,32 +323,72 @@ TEST_CASE("MIDI controller messages map to remote actions", "[remote]") {
         {"type":"note","channel":0,"number":60,"action":"solo","target":"Music"},
         {"type":"cc","channel":0,"number":30,"action":"scene","target":"Gaming"}
     ])");
-    auto v = nt::midiToAction(maps, 0xB0, 7, 127);  // CC7 on channel 1
+    auto v = ts::midiToAction(maps, 0xB0, 7, 127);  // CC7 on channel 1
     REQUIRE((v && v->action == "volume" && *v->value == 1.0f));
-    REQUIRE_FALSE(nt::midiToAction(maps, 0xB1, 7, 127));  // channel 2: not mapped
-    auto m = nt::midiToAction(maps, 0xB5, 20, 10);         // any channel, switch "off"
+    REQUIRE_FALSE(ts::midiToAction(maps, 0xB1, 7, 127));  // channel 2: not mapped
+    auto m = ts::midiToAction(maps, 0xB5, 20, 10);         // any channel, switch "off"
     REQUIRE((m && m->action == "mute" && *m->value == 0.0f));
-    auto s = nt::midiToAction(maps, 0x90, 60, 100);        // note on toggles
+    auto s = ts::midiToAction(maps, 0x90, 60, 100);        // note on toggles
     REQUIRE((s && s->action == "solo" && !s->value));
-    REQUIRE_FALSE(nt::midiToAction(maps, 0x90, 60, 0));     // note on with velocity 0 = note off
-    REQUIRE_FALSE(nt::midiToAction(maps, 0xB0, 30, 0));     // scene triggers only on press
-    REQUIRE(nt::midiToAction(maps, 0xB0, 30, 127));
+    REQUIRE_FALSE(ts::midiToAction(maps, 0x90, 60, 0));     // note on with velocity 0 = note off
+    REQUIRE_FALSE(ts::midiToAction(maps, 0xB0, 30, 0));     // scene triggers only on press
+    REQUIRE(ts::midiToAction(maps, 0xB0, 30, 127));
 }
 TEST_CASE("Preset device rules match devices by bin, kind and name", "[presets]") {
     const auto rule = nlohmann::json::parse(R"json({"bin":"physical-in","kind":"wasapi","match":["Line (AI-04)","AI-04"]})json");
-    // Windows names endpoints "Line (AI-04)": NexTone shows name "Line", subtitle "AI-04".
-    const int exact = nt::presetMatchScore(rule, "physical-in", "wasapi", "Line", "AI-04");
-    const int loose = nt::presetMatchScore(rule, "physical-in", "wasapi", "Microphone", "AI-04 USB");
+    // Windows names endpoints "Line (AI-04)": ToneSphere shows name "Line", subtitle "AI-04".
+    const int exact = ts::presetMatchScore(rule, "physical-in", "wasapi", "Line", "AI-04");
+    const int loose = ts::presetMatchScore(rule, "physical-in", "wasapi", "Microphone", "AI-04 USB");
     REQUIRE(exact > loose);
     REQUIRE(loose > 0);
-    REQUIRE(nt::presetMatchScore(rule, "physical-out", "wasapi", "Line", "AI-04") == 0);  // wrong direction
-    REQUIRE(nt::presetMatchScore(rule, "physical-in", "asio", "Line", "AI-04") == 0);     // wrong kind
-    REQUIRE(nt::presetMatchScore(rule, "physical-in", "wasapi", "Microphone Array", "Intel Smart Sound") == 0);
-    REQUIRE(nt::presetMatchScore(rule, "physical-in", "wasapi", "LINE", "ai-04") == exact);  // case-insensitive
+    REQUIRE(ts::presetMatchScore(rule, "physical-out", "wasapi", "Line", "AI-04") == 0);  // wrong direction
+    REQUIRE(ts::presetMatchScore(rule, "physical-in", "asio", "Line", "AI-04") == 0);     // wrong kind
+    REQUIRE(ts::presetMatchScore(rule, "physical-in", "wasapi", "Microphone Array", "Intel Smart Sound") == 0);
+    REQUIRE(ts::presetMatchScore(rule, "physical-in", "wasapi", "LINE", "ai-04") == exact);  // case-insensitive
     // Earlier patterns win over later ones.
     const auto two = nlohmann::json::parse(R"json({"bin":"physical-out","match":["Speakers (Realtek(R) Audio)","Speakers"]})json");
-    REQUIRE(nt::presetMatchScore(two, "physical-out", "wasapi", "Speakers", "Realtek(R) Audio") >
-            nt::presetMatchScore(two, "physical-out", "wasapi", "Speakers", "AI-04"));
-    REQUIRE(nt::deviceLabel("Line", "AI-04") == "Line (AI-04)");
-    REQUIRE(nt::deviceLabel("Stream mix", "") == "Stream mix");
+    REQUIRE(ts::presetMatchScore(two, "physical-out", "wasapi", "Speakers", "Realtek(R) Audio") >
+            ts::presetMatchScore(two, "physical-out", "wasapi", "Speakers", "AI-04"));
+    REQUIRE(ts::deviceLabel("Line", "AI-04") == "Line (AI-04)");
+    REQUIRE(ts::deviceLabel("Stream mix", "") == "Stream mix");
+}
+TEST_CASE("OSC addresses from before the rename (/nextone/) still work", "[remote]") {
+    std::vector<ts::OscArg> args(1);
+    args[0].type = 's';
+    args[0].str = "Gaming";
+    auto a = ts::oscToAction("/nextone/scene", args);
+    REQUIRE(a);
+    REQUIRE(a->action == "scene");
+    REQUIRE(a->target == "Gaming");
+    REQUIRE_FALSE(ts::oscToAction("/other/scene", args));
+    REQUIRE_FALSE(ts::oscToAction("/tonesphere/", args));
+}
+
+TEST_CASE("Settings from the NexTone data folder migrate once into a fresh ToneSphere folder", "[platform]") {
+    namespace fs = std::filesystem;
+    const fs::path root = fs::temp_directory_path() / ("ts-migrate-" + ts::randomHex(4));
+    const fs::path from = root / "NexTone", to = root / "ToneSphere";
+    fs::create_directories(from / "presets");
+    auto write = [](const fs::path& p, const char* s) { std::ofstream(p, std::ios::binary) << s; };
+    write(from / "config.json", "{\"old\":1}");
+    write(from / "plugins.json", "[]");
+    write(from / "engine.json", "{}");  // the old engine's discovery file: never copied
+    write(from / "engine.log", "log");
+    write(from / "presets" / "a.json", "{}");
+
+    REQUIRE(ts::migrateLegacyData(from.string(), to.string()) == 3);
+    REQUIRE(fs::exists(to / "config.json"));
+    REQUIRE(fs::exists(to / "plugins.json"));
+    REQUIRE(fs::exists(to / "presets" / "a.json"));
+    REQUIRE_FALSE(fs::exists(to / "engine.json"));
+    REQUIRE_FALSE(fs::exists(to / "engine.log"));
+
+    // Once ToneSphere has its own config, nothing is copied again (or overwritten).
+    write(to / "config.json", "{\"new\":1}");
+    write(from / "extra.json", "{}");
+    REQUIRE(ts::migrateLegacyData(from.string(), to.string()) == 0);
+    REQUIRE_FALSE(fs::exists(to / "extra.json"));
+    // A missing legacy folder is not an error.
+    REQUIRE(ts::migrateLegacyData((root / "missing").string(), (root / "x").string()) == 0);
+    fs::remove_all(root);
 }

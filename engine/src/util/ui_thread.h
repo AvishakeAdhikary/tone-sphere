@@ -4,7 +4,7 @@
 // The main thread must never wait for the engine mutex, or run() could deadlock.
 #include <functional>
 
-namespace nt::ui {
+namespace ts::ui {
 
 /// Call once on the main thread before its message loop starts.
 void init();
@@ -16,4 +16,4 @@ void run(const std::function<void()>& fn);
 /// True on the main thread.
 bool isMainThread();
 
-}  // namespace nt::ui
+}  // namespace ts::ui

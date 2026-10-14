@@ -1,12 +1,12 @@
 #pragma once
-// Levels for devices/apps NexTone isn't streaming from, read from Windows' own peak meters
+// Levels for devices/apps ToneSphere isn't streaming from, read from Windows' own peak meters
 // (IAudioMeterInformation on endpoints and audio sessions). Lets users see their microphone
 // or an app move before anything is routed.
 #include <memory>
 #include <string>
 #include <vector>
 
-namespace nt {
+namespace ts {
 
 struct MeterBank;
 
@@ -31,4 +31,4 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
-}  // namespace nt
+}  // namespace ts

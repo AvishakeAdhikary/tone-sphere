@@ -5,7 +5,7 @@
 #include <ctime>
 #include <mutex>
 
-namespace nt::log {
+namespace ts::log {
 
 namespace {
 std::mutex g_mutex;
@@ -82,4 +82,4 @@ void write(Level level, const char* fmt, ...) {
     if (sink) sink(level, msg);
 }
 
-}  // namespace nt::log
+}  // namespace ts::log

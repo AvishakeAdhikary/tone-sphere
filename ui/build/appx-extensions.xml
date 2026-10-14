@@ -1,17 +1,17 @@
 <!-- Extra MSIX extensions for the Store build: start at sign-in (the engine, which then opens
      the app in the tray), a command alias so the
-     NexTone ASIO driver (outside the package) can start the engine, and a nextone: link
+     ToneSphere ASIO driver (outside the package) can start the engine, and a tonesphere: link
      that opens the app (used by the ASIO driver's control panel button). -->
-<desktop:Extension Category="windows.startupTask" Executable="app\resources\engine\nextone-engine.exe" EntryPoint="Windows.FullTrustApplication">
-  <desktop:StartupTask TaskId="NexToneStartup" Enabled="true" DisplayName="NexTone" />
+<desktop:Extension Category="windows.startupTask" Executable="app\resources\engine\tonesphere-engine.exe" EntryPoint="Windows.FullTrustApplication">
+  <desktop:StartupTask TaskId="ToneSphereStartup" Enabled="true" DisplayName="ToneSphere" />
 </desktop:Extension>
-<uap3:Extension Category="windows.appExecutionAlias" Executable="app\resources\engine\nextone-engine.exe" EntryPoint="Windows.FullTrustApplication">
+<uap3:Extension Category="windows.appExecutionAlias" Executable="app\resources\engine\tonesphere-engine.exe" EntryPoint="Windows.FullTrustApplication">
   <uap3:AppExecutionAlias>
-    <desktop:ExecutionAlias Alias="nextone-engine.exe" />
+    <desktop:ExecutionAlias Alias="tonesphere-engine.exe" />
   </uap3:AppExecutionAlias>
 </uap3:Extension>
 <uap:Extension Category="windows.protocol">
-  <uap:Protocol Name="nextone">
-    <uap:DisplayName>NexTone</uap:DisplayName>
+  <uap:Protocol Name="tonesphere">
+    <uap:DisplayName>ToneSphere</uap:DisplayName>
   </uap:Protocol>
 </uap:Extension>

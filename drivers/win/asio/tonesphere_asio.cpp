@@ -1,11 +1,12 @@
-// NexTone ASIO driver: lets any ASIO host (DAW) exchange audio with the NexTone engine.
-// Several hosts can use it at once; each appears in NexTone as an application with
+// ToneSphere ASIO driver: lets any ASIO host (DAW) exchange audio with the ToneSphere engine.
+// Several hosts can use it at once; each appears in ToneSphere as an application with
 // outputs ("what the DAW plays") and inputs ("what the DAW records").
 //
 // The driver runs its own high-resolution clock thread at the host's buffer size and
-// exchanges audio through lock-free rings in shared memory (see nextone_asio_shared.h).
-// The NexTone engine compensates any clock difference, so no hardware is required.
+// exchanges audio through lock-free rings in shared memory (see tonesphere_asio_shared.h).
+// The ToneSphere engine compensates any clock difference, so no hardware is required.
 #include <windows.h>
+#include "version.h"
 #include <avrt.h>
 #include <objbase.h>
 #include <olectl.h>
@@ -24,11 +25,11 @@
 #include "asiosys.h"
 #include "asio.h"
 #include "iasiodrv.h"
-#include "nextone_asio_shared.h"
+#include "tonesphere_asio_shared.h"
 
-// {5A2C7E10-8B0D-4D1E-9F31-6E0B2A7C4D11}
-static const CLSID CLSID_NexToneAsio = {0x5a2c7e10, 0x8b0d, 0x4d1e, {0x9f, 0x31, 0x6e, 0x0b, 0x2a, 0x7c, 0x4d, 0x11}};
-static const char* kDriverName = "NexTone ASIO";
+// {05358F36-792A-4BC6-8C9F-944AD781D1DC}
+static const CLSID CLSID_ToneSphereAsio = {0x05358f36, 0x792a, 0x4bc6, {0x8c, 0x9f, 0x94, 0x4a, 0xd7, 0x81, 0xd1, 0xdc}};
+static const char* kDriverName = "ToneSphere ASIO";
 static HMODULE g_module = nullptr;
 static std::atomic<long> g_objects{0};
 static std::atomic<long> g_locks{0};
@@ -57,14 +58,14 @@ std::wstring processFileName() {
     return slash == std::wstring::npos ? p : p.substr(slash + 1);
 }
 
-// Tries to start the NexTone engine: the path written by the desktop installer, else the
-// Store app's execution alias (%LOCALAPPDATA%\Microsoft\WindowsApps\nextone-engine.exe).
+// Tries to start the ToneSphere engine: the path written by the desktop installer, else the
+// Store app's execution alias (%LOCALAPPDATA%\Microsoft\WindowsApps\tonesphere-engine.exe).
 void tryLaunchEngine() {
     wchar_t path[MAX_PATH] = {};
     DWORD size = sizeof(path);
-    if (RegGetValueW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\NexTone", L"EnginePath", RRF_RT_REG_SZ | RRF_SUBKEY_WOW6464KEY, nullptr, path, &size) !=
+    if (RegGetValueW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\ToneSphere", L"EnginePath", RRF_RT_REG_SZ | RRF_SUBKEY_WOW6464KEY, nullptr, path, &size) !=
         ERROR_SUCCESS) {
-        const DWORD n = ExpandEnvironmentStringsW(L"%LOCALAPPDATA%\\Microsoft\\WindowsApps\\nextone-engine.exe", path, MAX_PATH);
+        const DWORD n = ExpandEnvironmentStringsW(L"%LOCALAPPDATA%\\Microsoft\\WindowsApps\\tonesphere-engine.exe", path, MAX_PATH);
         if (n == 0 || n > MAX_PATH || GetFileAttributesW(path) == INVALID_FILE_ATTRIBUTES) return;
     }
     STARTUPINFOW si{sizeof(si)};
@@ -78,10 +79,10 @@ void tryLaunchEngine() {
 
 }  // namespace
 
-class NexToneAsio final : public IASIO {
+class ToneSphereAsio final : public IASIO {
 public:
-    NexToneAsio() { ++g_objects; }
-    ~NexToneAsio() {
+    ToneSphereAsio() { ++g_objects; }
+    ~ToneSphereAsio() {
         stop();
         disposeBuffers();
         releaseSlot();
@@ -90,7 +91,7 @@ public:
 
     // ---- IUnknown (ASIO hosts query with the CLSID as IID)
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppv) override {
-        if (riid == IID_IUnknown || riid == CLSID_NexToneAsio) {
+        if (riid == IID_IUnknown || riid == CLSID_ToneSphereAsio) {
             *ppv = static_cast<IASIO*>(this);
             AddRef();
             return S_OK;
@@ -114,20 +115,20 @@ public:
             for (int i = 0; i < 40 && !openServer(); ++i) Sleep(100);
         }
         if (!server_) {
-            setError("The NexTone audio engine is not running. Start NexTone and try again.");
+            setError("The ToneSphere audio engine is not running. Start ToneSphere and try again.");
             return ASIOFalse;
         }
-        inputs_ = std::clamp(server_->inputChannels, 1, NTASIO_MAX_CHANNELS);
-        outputs_ = std::clamp(server_->outputChannels, 1, NTASIO_MAX_CHANNELS);
+        inputs_ = std::clamp(server_->inputChannels, 1, TSASIO_MAX_CHANNELS);
+        outputs_ = std::clamp(server_->outputChannels, 1, TSASIO_MAX_CHANNELS);
         sampleRate_ = server_->engineSampleRate > 0 ? server_->engineSampleRate : 48000.0;
         if (!claimSlot()) {
-            setError("Too many programs are using NexTone ASIO at the same time.");
+            setError("Too many programs are using ToneSphere ASIO at the same time.");
             return ASIOFalse;
         }
         return ASIOTrue;
     }
     void getDriverName(char* name) override { std::snprintf(name, 32, "%s", kDriverName); }
-    long getDriverVersion() override { return 1; }
+    long getDriverVersion() override { return TONESPHERE_VERSION_MAJOR * 10000 + TONESPHERE_VERSION_MINOR * 100 + TONESPHERE_VERSION_PATCH; }
     void getErrorMessage(char* s) override { std::snprintf(s, 124, "%s", error_.c_str()); }
 
     ASIOError start() override {
@@ -197,7 +198,7 @@ public:
         clocks[0].associatedChannel = -1;
         clocks[0].associatedGroup = -1;
         clocks[0].isCurrentSource = ASIOTrue;
-        std::snprintf(clocks[0].name, 32, "NexTone engine");
+        std::snprintf(clocks[0].name, 32, "ToneSphere engine");
         *num = 1;
         return ASE_OK;
     }
@@ -220,7 +221,7 @@ public:
             if (b.isInput == info->isInput && b.channelNum == info->channel) info->isActive = ASIOTrue;
         info->channelGroup = 0;
         info->type = ASIOSTFloat32LSB;
-        std::snprintf(info->name, 32, "NexTone %s %ld", in ? "In" : "Out", info->channel + 1);
+        std::snprintf(info->name, 32, "ToneSphere %s %ld", in ? "In" : "Out", info->channel + 1);
         return ASE_OK;
     }
     ASIOError createBuffers(ASIOBufferInfo* infos, long num, long bufferSize, ASIOCallbacks* cb) override {
@@ -244,7 +245,7 @@ public:
         timeInfo_ = cb->asioMessage && cb->asioMessage(kAsioSelectorSupported, kAsioSupportsTimeInfo, nullptr, nullptr) == 1 &&
                     cb->asioMessage(kAsioSupportsTimeInfo, 0, nullptr, nullptr) == 1;
         if (!openClientRegion()) {
-            setError("Cannot share audio with the NexTone engine.");
+            setError("Cannot share audio with the ToneSphere engine.");
             return ASE_HWMalfunction;
         }
         client_->bufferSize = bufferSize;
@@ -263,14 +264,14 @@ public:
     ASIOError controlPanel() override {
         wchar_t path[MAX_PATH] = {};
         DWORD size = sizeof(path);
-        if (RegGetValueW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\NexTone", L"UiPath", RRF_RT_REG_SZ | RRF_SUBKEY_WOW6464KEY, nullptr, path, &size) ==
+        if (RegGetValueW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\ToneSphere", L"UiPath", RRF_RT_REG_SZ | RRF_SUBKEY_WOW6464KEY, nullptr, path, &size) ==
             ERROR_SUCCESS) {
             ShellExecuteW(nullptr, L"open", path, nullptr, nullptr, SW_SHOWNORMAL);
             return ASE_OK;
         }
-        // Store build: the package registers the nextone: protocol.
-        if (reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", L"nextone:", nullptr, nullptr, SW_SHOWNORMAL)) > 32) return ASE_OK;
-        MessageBoxW(nullptr, L"Open the NexTone app to route this program's audio.", L"NexTone ASIO", MB_OK | MB_ICONINFORMATION);
+        // Store build: the package registers the tonesphere: protocol.
+        if (reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", L"tonesphere:", nullptr, nullptr, SW_SHOWNORMAL)) > 32) return ASE_OK;
+        MessageBoxW(nullptr, L"Open the ToneSphere app to route this program's audio.", L"ToneSphere ASIO", MB_OK | MB_ICONINFORMATION);
         return ASE_OK;
     }
     ASIOError future(long selector, void*) override {
@@ -296,10 +297,10 @@ private:
     void setError(const char* s) { error_ = s; }
 
     bool openServer() {
-        HANDLE h = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, NTASIO_SERVER_NAME);
+        HANDLE h = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, TSASIO_SERVER_NAME);
         if (!h) return false;
-        auto* s = static_cast<NTASIO_SERVER*>(MapViewOfFile(h, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(NTASIO_SERVER)));
-        if (!s || s->magic != NTASIO_MAGIC || s->version != NTASIO_VERSION) {
+        auto* s = static_cast<TSASIO_SERVER*>(MapViewOfFile(h, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(TSASIO_SERVER)));
+        if (!s || s->magic != TSASIO_MAGIC || s->version != TSASIO_VERSION) {
             if (s) UnmapViewOfFile(s);
             CloseHandle(h);
             return false;
@@ -310,11 +311,11 @@ private:
     }
 
     bool claimSlot() {
-        for (int i = 0; i < NTASIO_MAX_CLIENTS; ++i) {
-            if (InterlockedCompareExchange(reinterpret_cast<volatile LONG*>(&server_->slots[i].state), NTASIO_CLAIMED, NTASIO_FREE) ==
-                NTASIO_FREE) {
+        for (int i = 0; i < TSASIO_MAX_CLIENTS; ++i) {
+            if (InterlockedCompareExchange(reinterpret_cast<volatile LONG*>(&server_->slots[i].state), TSASIO_CLAIMED, TSASIO_FREE) ==
+                TSASIO_FREE) {
                 slot_ = i;
-                NTASIO_SLOT& s = server_->slots[i];
+                TSASIO_SLOT& s = server_->slots[i];
                 s.pid = GetCurrentProcessId();
                 const std::wstring exe = processFileName();
                 wcsncpy_s(s.exe, exe.c_str(), _TRUNCATE);
@@ -331,26 +332,26 @@ private:
     bool openClientRegion() {
         if (client_) return true;
         wchar_t name[96];
-        swprintf_s(name, NTASIO_CLIENT_NAME_FMT, static_cast<unsigned>(GetCurrentProcessId()), static_cast<unsigned>(slot_));
+        swprintf_s(name, TSASIO_CLIENT_NAME_FMT, static_cast<unsigned>(GetCurrentProcessId()), static_cast<unsigned>(slot_));
         const size_t bytes = ntasio_client_bytes(inputs_, outputs_);
         clientMap_ = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, static_cast<DWORD>(static_cast<uint64_t>(bytes) >> 32),
                                         static_cast<DWORD>(bytes & 0xffffffff), name);
         if (!clientMap_) return false;
-        client_ = static_cast<NTASIO_CLIENT*>(MapViewOfFile(clientMap_, FILE_MAP_ALL_ACCESS, 0, 0, bytes));
+        client_ = static_cast<TSASIO_CLIENT*>(MapViewOfFile(clientMap_, FILE_MAP_ALL_ACCESS, 0, 0, bytes));
         if (!client_) return false;
-        std::memset(client_, 0, sizeof(NTASIO_CLIENT));
-        client_->magic = NTASIO_MAGIC;
-        client_->version = NTASIO_VERSION;
+        std::memset(client_, 0, sizeof(TSASIO_CLIENT));
+        client_->magic = TSASIO_MAGIC;
+        client_->version = TSASIO_VERSION;
         client_->inputs = inputs_;
         client_->outputs = outputs_;
         client_->sampleRate = sampleRate_;
         MemoryBarrier();
-        InterlockedExchange(reinterpret_cast<volatile LONG*>(&server_->slots[slot_].state), NTASIO_ACTIVE);
+        InterlockedExchange(reinterpret_cast<volatile LONG*>(&server_->slots[slot_].state), TSASIO_ACTIVE);
         return true;
     }
 
     void releaseSlot() {
-        if (server_ && slot_ >= 0) InterlockedExchange(reinterpret_cast<volatile LONG*>(&server_->slots[slot_].state), NTASIO_FREE);
+        if (server_ && slot_ >= 0) InterlockedExchange(reinterpret_cast<volatile LONG*>(&server_->slots[slot_].state), TSASIO_FREE);
         slot_ = -1;
         if (client_) UnmapViewOfFile(client_);
         if (clientMap_) CloseHandle(clientMap_);
@@ -365,15 +366,15 @@ private:
     // Moves one buffer of audio and calls the host.
     void process(long index) {
         const long n = bufferSize_;
-        NTASIO_CLIENT* c = client_;
-        // NexTone -> host inputs
+        TSASIO_CLIENT* c = client_;
+        // ToneSphere -> host inputs
         if (c) {
-            NTASIO_RING& r = c->fromEngine;
+            TSASIO_RING& r = c->fromEngine;
             const float* data = ntasio_from_engine(c);
             int64_t rd = r.readPos;
             const int64_t avail = r.writePos - rd;
-            const bool ok = avail >= n && avail <= static_cast<int64_t>(NTASIO_RING_FRAMES);
-            if (!ok && avail > static_cast<int64_t>(NTASIO_RING_FRAMES)) rd = r.writePos - n;  // resync
+            const bool ok = avail >= n && avail <= static_cast<int64_t>(TSASIO_RING_FRAMES);
+            if (!ok && avail > static_cast<int64_t>(TSASIO_RING_FRAMES)) rd = r.writePos - n;  // resync
             for (auto& b : buffers_) {
                 if (!b.isInput) continue;
                 float* dst = static_cast<float*>(b.buffers[index]);
@@ -382,7 +383,7 @@ private:
                     continue;
                 }
                 for (long i = 0; i < n; ++i)
-                    dst[i] = data[((rd + i) & (NTASIO_RING_FRAMES - 1)) * c->inputs + b.channelNum];
+                    dst[i] = data[((rd + i) & (TSASIO_RING_FRAMES - 1)) * c->inputs + b.channelNum];
             }
             if (ok) r.readPos = rd + n;
             else InterlockedIncrement64(&r.underflows);
@@ -410,20 +411,20 @@ private:
         }
         samplePos_ += n;
 
-        // host outputs -> NexTone
+        // host outputs -> ToneSphere
         if (c) {
-            NTASIO_RING& r = c->toEngine;
+            TSASIO_RING& r = c->toEngine;
             float* data = ntasio_to_engine(c);
             const int64_t w = r.writePos;
             const int64_t used = w - r.readPos;
-            if (used < 0 || used + n > static_cast<int64_t>(NTASIO_RING_FRAMES)) {
+            if (used < 0 || used + n > static_cast<int64_t>(TSASIO_RING_FRAMES)) {
                 InterlockedIncrement64(&r.overflows);  // engine not consuming
             } else {
                 for (int ch = 0; ch < c->outputs; ++ch) {
                     const float* src = nullptr;
                     for (auto& b : buffers_)
                         if (!b.isInput && b.channelNum == ch) src = static_cast<const float*>(b.buffers[index]);
-                    for (long i = 0; i < n; ++i) data[((w + i) & (NTASIO_RING_FRAMES - 1)) * c->outputs + ch] = src ? src[i] : 0.0f;
+                    for (long i = 0; i < n; ++i) data[((w + i) & (TSASIO_RING_FRAMES - 1)) * c->outputs + ch] = src ? src[i] : 0.0f;
                 }
                 MemoryBarrier();
                 r.writePos = w + n;
@@ -467,9 +468,9 @@ private:
     std::atomic<ULONG> ref_{1};
     std::string error_;
     HANDLE serverMap_ = nullptr;
-    NTASIO_SERVER* server_ = nullptr;
+    TSASIO_SERVER* server_ = nullptr;
     HANDLE clientMap_ = nullptr;
-    NTASIO_CLIENT* client_ = nullptr;
+    TSASIO_CLIENT* client_ = nullptr;
     int slot_ = -1;
     long inputs_ = 8, outputs_ = 8;
     double sampleRate_ = 48000.0;
@@ -500,7 +501,7 @@ public:
     ULONG STDMETHODCALLTYPE Release() override { return 1; }
     HRESULT STDMETHODCALLTYPE CreateInstance(IUnknown* outer, REFIID riid, void** ppv) override {
         if (outer) return CLASS_E_NOAGGREGATION;
-        auto* d = new (std::nothrow) NexToneAsio();
+        auto* d = new (std::nothrow) ToneSphereAsio();
         if (!d) return E_OUTOFMEMORY;
         const HRESULT hr = d->QueryInterface(riid, ppv);
         d->Release();
@@ -515,12 +516,12 @@ static Factory g_factory;
 
 static std::wstring clsidString() {
     wchar_t buf[64];
-    StringFromGUID2(CLSID_NexToneAsio, buf, 64);
+    StringFromGUID2(CLSID_ToneSphereAsio, buf, 64);
     return buf;
 }
 
 extern "C" HRESULT __stdcall DllGetClassObject(REFCLSID clsid, REFIID riid, void** ppv) {
-    if (clsid != CLSID_NexToneAsio) return CLASS_E_CLASSNOTAVAILABLE;
+    if (clsid != CLSID_ToneSphereAsio) return CLASS_E_CLASSNOTAVAILABLE;
     return g_factory.QueryInterface(riid, ppv);
 }
 
@@ -537,10 +538,10 @@ extern "C" HRESULT __stdcall DllRegisterServer() {
     const wchar_t* tm = L"Apartment";
     RegSetValueExW(h, L"ThreadingModel", 0, REG_SZ, reinterpret_cast<const BYTE*>(tm), static_cast<DWORD>((wcslen(tm) + 1) * 2));
     RegCloseKey(h);
-    if (RegCreateKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\ASIO\\NexTone ASIO", 0, nullptr, 0, KEY_WRITE, nullptr, &h, nullptr) != ERROR_SUCCESS)
+    if (RegCreateKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\ASIO\\ToneSphere ASIO", 0, nullptr, 0, KEY_WRITE, nullptr, &h, nullptr) != ERROR_SUCCESS)
         return SELFREG_E_CLASS;
     RegSetValueExW(h, L"CLSID", 0, REG_SZ, reinterpret_cast<const BYTE*>(clsid.c_str()), static_cast<DWORD>((clsid.size() + 1) * 2));
-    const wchar_t* desc = L"NexTone ASIO";
+    const wchar_t* desc = L"ToneSphere ASIO";
     RegSetValueExW(h, L"Description", 0, REG_SZ, reinterpret_cast<const BYTE*>(desc), static_cast<DWORD>((wcslen(desc) + 1) * 2));
     RegCloseKey(h);
     return S_OK;
@@ -549,7 +550,7 @@ extern "C" HRESULT __stdcall DllRegisterServer() {
 extern "C" HRESULT __stdcall DllUnregisterServer() {
     const std::wstring clsid = clsidString();
     RegDeleteTreeW(HKEY_CLASSES_ROOT, (L"CLSID\\" + clsid).c_str());
-    RegDeleteTreeW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\ASIO\\NexTone ASIO");
+    RegDeleteTreeW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\ASIO\\ToneSphere ASIO");
     return S_OK;
 }
 

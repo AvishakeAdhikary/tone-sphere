@@ -2,7 +2,7 @@
 // RBJ "Audio EQ Cookbook" biquads, transposed direct form II.
 #include <cmath>
 
-namespace nt {
+namespace ts {
 
 struct Biquad {
     double b0 = 1, b1 = 0, b2 = 0, a1 = 0, a2 = 0;
@@ -50,4 +50,4 @@ private:
     }
 };
 
-}  // namespace nt
+}  // namespace ts

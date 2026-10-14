@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const disc = JSON.parse(fs.readFileSync(path.join(process.env.LOCALAPPDATA ?? os.homedir(), 'NexTone', 'engine.json'), 'utf8'));
+const disc = JSON.parse(fs.readFileSync(path.join(process.env.LOCALAPPDATA ?? os.homedir(), 'ToneSphere', 'engine.json'), 'utf8'));
 const ws = new WebSocket(`ws://127.0.0.1:${disc.port}/?token=${disc.token}`);
 let state = null, id = 1;
 const pending = new Map();
@@ -33,7 +33,7 @@ const check = (name, ok, detail) => {
 };
 
 const PRESET = {
-  format: 'nextone-preset',
+  format: 'tonesphere-preset',
   version: 1,
   name: 'Preset test',
   devices: [
@@ -67,7 +67,7 @@ async function main() {
   check('preset kept as the active scene', scene && state.activeScene === scene.id, { scene: scene?.name });
 
   const exported = await call('preset.export', { name: 'Round trip' });
-  const ok = exported.format === 'nextone-preset' && exported.devices.length === 2 && exported.mixes.some((m) => m.name === 'Preset test mix') && exported.routes.length === 2;
+  const ok = exported.format === 'tonesphere-preset' && exported.devices.length === 2 && exported.mixes.some((m) => m.name === 'Preset test mix') && exported.routes.length === 2;
   const ghostRef = exported.devices.find((d) => d.label === 'Imaginary Speaker 9000');
   check('export describes devices portably (no machine ids)', ok && ghostRef?.match?.includes('Imaginary Speaker 9000') && !JSON.stringify(exported).includes('{0.0.'), {
     devices: exported.devices.map((d) => ({ label: d.label, match: d.match })),
@@ -87,7 +87,7 @@ async function main() {
   } catch (e) {
     refused = e.message;
   }
-  check('non-presets are refused clearly', /isn't a NexTone preset/.test(refused), { refused });
+  check('non-presets are refused clearly', /isn't a ToneSphere preset/.test(refused), { refused });
 
   await call('node.forget', { id: ghosts[0].id });
   await sleep(300);

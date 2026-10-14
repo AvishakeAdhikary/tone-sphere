@@ -2,7 +2,7 @@
 // can run in a plain browser against the mock engine (used by tests and design work).
 import type { EngineDiscovery } from '@shared/protocol';
 
-export interface NexToneBridge {
+export interface ToneSphereBridge {
   discover(): Promise<EngineDiscovery | null>;
   platform(): Promise<{ platform: string; version: string; arch: string; store?: boolean }>;
   openStartupSettings(): Promise<void>;
@@ -21,13 +21,13 @@ export interface NexToneBridge {
 
 declare global {
   interface Window {
-    nextone?: NexToneBridge;
+    tonesphere?: ToneSphereBridge;
   }
 }
 
 const MOCK_PORT = 47999;
 
-const browserFallback: NexToneBridge = {
+const browserFallback: ToneSphereBridge = {
   async discover() {
     const q = new URLSearchParams(location.search);
     const port = Number(q.get('port') ?? MOCK_PORT);
@@ -59,5 +59,5 @@ const browserFallback: NexToneBridge = {
   },
 };
 
-export const bridge: NexToneBridge = window.nextone ?? browserFallback;
-export const inElectron = !!window.nextone;
+export const bridge: ToneSphereBridge = window.tonesphere ?? browserFallback;
+export const inElectron = !!window.tonesphere;

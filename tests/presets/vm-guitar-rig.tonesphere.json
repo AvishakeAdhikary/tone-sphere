@@ -1,0 +1,19 @@
+{
+  "format": "tonesphere-preset",
+  "version": 1,
+  "name": "Guitar Rig live (VM stand-ins)",
+  "description": "Test copy of presets/guitar-rig-obs-ai04.tonesphere.json for the Hyper-V VM, which has no audio hardware: ToneSphere Output 1 stands in for the AI-04 input, ToneSphere Mic 1 for OBS (VB-CABLE) and ToneSphere Mic 2 for the laptop speakers.",
+  "devices": [
+    { "key": "guitar", "label": "Guitar stand-in (ToneSphere Output 1)", "bin": "virtual-out", "kind": "vad", "match": ["ToneSphere Output 1"], "channels": 2 },
+    { "key": "rig-in", "label": "Guitar Rig 7 input (ToneSphere ASIO)", "bin": "app-in", "kind": "asioclient", "exe": "guitar rig 7.exe", "channels": 2 },
+    { "key": "rig-out", "label": "Guitar Rig 7 output (ToneSphere ASIO)", "bin": "app-out", "kind": "asioclient", "exe": "guitar rig 7.exe", "channels": 2 },
+    { "key": "speakers", "label": "Speakers stand-in (ToneSphere Mic 2)", "bin": "virtual-in", "kind": "vad", "match": ["ToneSphere Mic 2"], "channels": 2 },
+    { "key": "obs", "label": "OBS stand-in (ToneSphere Mic 1)", "bin": "virtual-in", "kind": "vad", "match": ["ToneSphere Mic 1"], "channels": 2 }
+  ],
+  "mixes": [],
+  "routes": [
+    { "from": "guitar", "to": "rig-in", "channels": [[0, 0, 0], [0, 1, 0]] },
+    { "from": "rig-out", "to": "speakers", "channels": [[0, 0, 0], [1, 1, 0]] },
+    { "from": "rig-out", "to": "obs", "channels": [[0, 0, 0], [1, 1, 0]] }
+  ]
+}

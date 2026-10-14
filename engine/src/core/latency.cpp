@@ -9,7 +9,7 @@
 #include "core/engine.h"
 #include "util/log.h"
 
-namespace nt {
+namespace ts {
 
 std::vector<float> makeLatencyChirp(double sampleRate) {
     const size_t n = static_cast<size_t>(sampleRate * 0.010);
@@ -68,9 +68,9 @@ json Engine::measureLatency(const json& p) {
         NodeModel* o = findNode(outId);
         NodeModel* i = findNode(inId);
         if (!o || !i) throw std::runtime_error("Choose an output and an input to measure");
-        if (!binIsDest(o->bin) || o->bin == Bin::Bus) throw std::runtime_error("The output must be a device or app NexTone plays into");
+        if (!binIsDest(o->bin) || o->bin == Bin::Bus) throw std::runtime_error("The output must be a device or app ToneSphere plays into");
         if (!binIsSource(i->bin) || i->bin == Bin::Bus || i->id == "tone")
-            throw std::runtime_error("The input must be a device or app NexTone records from");
+            throw std::runtime_error("The input must be a device or app ToneSphere records from");
         if (!o->present || !i->present) throw std::runtime_error("Both devices must be connected");
         forcedOpen_.insert(outId);
         forcedOpen_.insert(inId);
@@ -107,10 +107,10 @@ json Engine::measureLatency(const json& p) {
     }
     cleanup();
     const LatencyEstimate e = estimateLatency(probe->captured, probe->stimulus, probe->emitAt);
-    NT_INFO("Latency %s -> %s: %.2f ms (confidence %.2f)", outId.c_str(), inId.c_str(), e.samples / sr * 1000.0, e.confidence);
+    TS_INFO("Latency %s -> %s: %.2f ms (confidence %.2f)", outId.c_str(), inId.c_str(), e.samples / sr * 1000.0, e.confidence);
     if (e.confidence < 0.3)
         throw std::runtime_error("The test signal didn't come back. Connect the output to the input (cable or loopback) and try again.");
     return {{"latencyMs", e.samples / sr * 1000.0}, {"samples", e.samples}, {"sampleRate", sr}, {"confidence", e.confidence}};
 }
 
-}  // namespace nt
+}  // namespace ts

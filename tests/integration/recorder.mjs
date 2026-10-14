@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const disc = JSON.parse(fs.readFileSync(path.join(process.env.LOCALAPPDATA ?? os.homedir(), 'NexTone', 'engine.json'), 'utf8'));
+const disc = JSON.parse(fs.readFileSync(path.join(process.env.LOCALAPPDATA ?? os.homedir(), 'ToneSphere', 'engine.json'), 'utf8'));
 const ws = new WebSocket(`ws://127.0.0.1:${disc.port}/?token=${disc.token}`);
 let state = null, id = 1;
 const pending = new Map();
@@ -51,7 +51,7 @@ function readWav(file) {
 async function main() {
   await new Promise((r, j) => ((ws.onopen = r), (ws.onerror = () => j(new Error('engine not running')))));
   while (!state) await sleep(20);
-  const folder = path.join(os.tmpdir(), `nextone-rec-${Date.now()}`);
+  const folder = path.join(os.tmpdir(), `tonesphere-rec-${Date.now()}`);
   await call('engine.setSettings', { recordFolder: folder, replayBufferSeconds: 30 });
   const bus = await call('bus.create', { name: 'Rec test', channels: 2 });
   await call('tone.set', { enabled: true, freq: 1000, levelDb: -12, target: bus.id });

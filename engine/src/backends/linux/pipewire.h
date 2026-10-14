@@ -1,9 +1,9 @@
 #pragma once
 // PipeWire backend (Linux).
 //  - Physical inputs/outputs: every Audio/Source and Audio/Sink node in the graph.
-//  - Virtual outputs/inputs: NexTone creates its own nodes that stay visible to other apps:
-//      "NexTone Output N" (Audio/Sink: apps play into it, NexTone records it)
-//      "NexTone Mic N"    (Audio/Source/Virtual: NexTone plays into it, apps record it)
+//  - Virtual outputs/inputs: ToneSphere creates its own nodes that stay visible to other apps:
+//      "ToneSphere Output N" (Audio/Sink: apps play into it, ToneSphere records it)
+//      "ToneSphere Mic N"    (Audio/Source/Virtual: ToneSphere plays into it, apps record it)
 //  - Application outputs: playback streams of other apps (captured as a copy).
 // Streams exchange float32 audio with the engine's bridges from PipeWire's real-time thread.
 #include <memory>
@@ -12,7 +12,7 @@
 
 #include "backends/device.h"
 
-namespace nt {
+namespace ts {
 
 class PipeWireBackend final : public Backend {
 public:
@@ -31,4 +31,4 @@ private:
     std::shared_ptr<Impl> impl_;
 };
 
-}  // namespace nt
+}  // namespace ts

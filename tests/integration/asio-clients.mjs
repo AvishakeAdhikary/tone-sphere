@@ -1,4 +1,4 @@
-// Multi-client NexTone ASIO test: two ASIO hosts at once; host A's tone is routed by the
+// Multi-client ToneSphere ASIO test: two ASIO hosts at once; host A's tone is routed by the
 // engine into host B's inputs. Verifies timing, level, frequency and clicks.
 //   node tests/integration/asio-clients.mjs [seconds]
 import { spawn } from 'node:child_process';
@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const host = process.env.ASIO_TEST_HOST ?? path.join(root, 'build', 'x64-release', 'bin', 'asio-test-host.exe');
 const SECS = Number(process.argv[2] ?? 12);
-const disc = JSON.parse(fs.readFileSync(path.join(process.env.LOCALAPPDATA ?? os.homedir(), 'NexTone', 'engine.json'), 'utf8'));
+const disc = JSON.parse(fs.readFileSync(path.join(process.env.LOCALAPPDATA ?? os.homedir(), 'ToneSphere', 'engine.json'), 'utf8'));
 const ws = new WebSocket(`ws://127.0.0.1:${disc.port}/?token=${disc.token}`);
 let state = null, id = 1;
 const pending = new Map();
@@ -48,9 +48,9 @@ async function main() {
   while (!state) await sleep(20);
   for (const r of [...state.routes]) await call('route.disconnect', { id: r.id });
 
-  const a = runHost(['run', 'NexTone ASIO', String(SECS), '1000', '-12', '256']);
+  const a = runHost(['run', 'ToneSphere ASIO', String(SECS), '1000', '-12', '256']);
   await sleep(700);
-  const b = runHost(['run', 'NexTone ASIO', String(SECS - 1), '0', '-120', '128']);
+  const b = runHost(['run', 'ToneSphere ASIO', String(SECS - 1), '0', '-120', '128']);
   // Wait for both clients to show up, then route A's outputs into B's inputs.
   let aOut, bIn;
   for (let i = 0; i < 40 && !(aOut && bIn); i++) {
@@ -58,7 +58,7 @@ async function main() {
     aOut = state.nodes.find((n) => n.id === 'asioclient:out:asio-test-host.exe');
     bIn = state.nodes.find((n) => n.id === 'asioclient:in:asio-test-host.exe#2');
   }
-  check('both ASIO clients appear in NexTone', !!aOut && !!bIn, state.nodes.filter((n) => n.kind === 'asioclient').map((n) => n.name));
+  check('both ASIO clients appear in ToneSphere', !!aOut && !!bIn, state.nodes.filter((n) => n.kind === 'asioclient').map((n) => n.name));
   if (aOut && bIn) await call('route.connect', { from: aOut.id, to: bIn.id });
   const [ra, rb] = (await Promise.all([a, b])).map((s) => JSON.parse(s));
   console.log('host A', JSON.stringify(ra));
@@ -71,9 +71,9 @@ async function main() {
     });
     check(`host ${nm}: float32 samples`, r.sampleType === 19, r.sampleType);
   }
-  check('A -> NexTone -> B: frequency', Math.abs(rb.inFreqHz - 1000) < 5, rb.inFreqHz);
-  check('A -> NexTone -> B: level', Math.abs(rb.inPeakDb + 12) < 0.5, rb.inPeakDb);
-  check('A -> NexTone -> B: no clicks', rb.inClicks === 0, rb.inClicks);
+  check('A -> ToneSphere -> B: frequency', Math.abs(rb.inFreqHz - 1000) < 5, rb.inFreqHz);
+  check('A -> ToneSphere -> B: level', Math.abs(rb.inPeakDb + 12) < 0.5, rb.inPeakDb);
+  check('A -> ToneSphere -> B: no clicks', rb.inClicks === 0, rb.inClicks);
   await sleep(1500);
   // Clients still referenced by a connection stay listed as unavailable (routes survive a DAW restart).
   const left = state.nodes.filter((n) => n.kind === 'asioclient');

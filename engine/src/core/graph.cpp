@@ -6,7 +6,7 @@
 
 #include "util/platform.h"
 
-namespace nt {
+namespace ts {
 
 const char* binName(Bin b) {
     switch (b) {
@@ -220,4 +220,4 @@ void processProgram(Program& p, int frames, double nowSec) {
     }
 }
 
-}  // namespace nt
+}  // namespace ts

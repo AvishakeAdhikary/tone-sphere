@@ -11,15 +11,15 @@
 #include "backends/win/app_audio.h"
 #endif
 
-namespace nt {
+namespace ts {
 
 namespace {
 
-// The NexTone ASIO driver is registered by the desktop installer (nextone-setup).
+// The ToneSphere ASIO driver is registered by the desktop installer (tonesphere-setup).
 bool asioDriverInstalled() {
 #ifdef _WIN32
     HKEY k;
-    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\ASIO\\NexTone ASIO", 0, KEY_READ | KEY_WOW64_64KEY, &k) != ERROR_SUCCESS) return false;
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\ASIO\\ToneSphere ASIO", 0, KEY_READ | KEY_WOW64_64KEY, &k) != ERROR_SUCCESS) return false;
     RegCloseKey(k);
     return true;
 #else
@@ -62,14 +62,14 @@ json Engine::nodeJsonLocked(const NodeModel& n) const {
         state = "unavailable";
         status = isApp ? "Not running" : n.kind == DeviceKind::Vban ? "Not connected" : "Disconnected";
         if (n.kind == DeviceKind::AsioClient) {
-            // The app may well be running, just not on the NexTone ASIO driver (e.g. its own WASAPI device).
+            // The app may well be running, just not on the ToneSphere ASIO driver (e.g. its own WASAPI device).
             const std::string exe = n.id.substr(n.id.find(':', n.id.find(':') + 1) + 1);
             const auto app = nodes_.find("app:out:" + exe);
             status = app != nodes_.end() && app->second.present
-                         ? "Running, but not on NexTone ASIO: choose the ASIO driver “NexTone ASIO” in its audio settings"
-                         : "Waiting: open the app with its audio device set to “NexTone ASIO”";
+                         ? "Running, but not on ToneSphere ASIO: choose the ASIO driver “ToneSphere ASIO” in its audio settings"
+                         : "Waiting: open the app with its audio device set to “ToneSphere ASIO”";
         } else if (n.id.rfind("ph:", 0) == 0) {
-            status = "Not connected yet: plug it in and NexTone connects it";
+            status = "Not connected yet: plug it in and ToneSphere connects it";
         }
     } else if (!n.userEnabled) {
         state = "idle";
@@ -118,7 +118,7 @@ json Engine::nodeJsonLocked(const NodeModel& n) const {
               {"settings", settings}};
     if (!n.subtitle.empty()) j["subtitle"] = n.subtitle;
     if (!status.empty()) j["statusText"] = status;
-    // An app that uses the NexTone ASIO driver appears through its ASIO ports; its plain app card
+    // An app that uses the ToneSphere ASIO driver appears through its ASIO ports; its plain app card
     // would only capture silence and is easily mistaken for them, so hide it unless it's in use.
     if (isApp && n.present) {
         const std::string exe = n.id.substr(n.id.find(':', n.id.find(':') + 1) + 1);
@@ -221,4 +221,4 @@ json Engine::state() {
     return j;
 }
 
-}  // namespace nt
+}  // namespace ts

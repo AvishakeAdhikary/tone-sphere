@@ -15,7 +15,7 @@
 #include "core/resampler.h"
 #include "core/ring_buffer.h"
 
-namespace nt {
+namespace ts {
 
 struct BridgeConfig {
     size_t channels = 2;
@@ -216,4 +216,4 @@ private:
     std::atomic<bool> restart_{false};
 };
 
-}  // namespace nt
+}  // namespace ts
