@@ -1,5 +1,6 @@
 // tonesphere-engine: the always-running ToneSphere audio engine.
 //   tonesphere-engine [--background] [--port N] [--console]
+//   tonesphere-engine --crash-test    (writes a crash report and exits: tests the crash handler)
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -18,8 +19,10 @@
 #include "backends/win/hotkeys.h"
 #endif
 #include "ipc/ws_server.h"
+#include "util/crash.h"
 #include "util/log.h"
 #include "util/platform.h"
+#include "version.h"
 #include "util/ui_thread.h"
 
 #ifdef _WIN32
@@ -99,11 +102,21 @@ struct ComScope {
 }  // namespace
 
 int main(int argc, char** argv) {
-    bool console = false;
+    bool console = false, crashTest = false;
     int port = 0;
     for (int i = 1; i < argc; ++i) {
         if (!std::strcmp(argv[i], "--console")) console = true;
         else if (!std::strcmp(argv[i], "--port") && i + 1 < argc) port = std::atoi(argv[++i]);
+        else if (!std::strcmp(argv[i], "--crash-test")) crashTest = true;
+    }
+    // A fault anywhere leaves a report for the app to show on its next start.
+    installCrashHandler(dataDir() + "/crashes", TONESPHERE_VERSION);
+    if (crashTest) {
+        std::thread([] {
+            volatile int* p = nullptr;
+            *p = 42;  // deliberate access violation, on a worker thread like a real fault would be
+        }).join();
+        return 3;  // not reached
     }
 
 #ifdef _WIN32
@@ -187,23 +200,30 @@ int main(int argc, char** argv) {
         json ev = {{"event", "state"}, {"data", engine.state()}};
         server.sendText(c, ev.dump(-1, ' ', false, json::error_handler_t::replace));
     };
-    server.onMessage = [&](const std::shared_ptr<WsServer::Client>& c, const std::string& text) {
+    // One JSON-RPC request -> its response, for WebSocket clients and for HTTP POST /rpc (scripts).
+    auto handle = [&](const std::string& text) -> std::string {
         static thread_local ComScope com;
         json req;
         try {
             req = json::parse(text);
         } catch (...) {
-            return;
+            return json{{"id", nullptr}, {"error", {{"code", -32700}, {"message", "The request isn't valid JSON"}}}}.dump();
         }
-        json resp = {{"id", req.value("id", 0)}};
+        json resp = {{"id", req.is_object() ? req.value("id", json(0)) : json(0)}};
         try {
+            if (!req.is_object()) throw std::runtime_error("The request must be a JSON object");
             json result = engine.call(req.value("method", ""), req.contains("params") ? req["params"] : json::object());
             resp["result"] = result;
         } catch (const std::exception& e) {
             resp["error"] = {{"code", -32000}, {"message", e.what()}};
         }
-        server.sendText(c, resp.dump(-1, ' ', false, json::error_handler_t::replace));
+        return resp.dump(-1, ' ', false, json::error_handler_t::replace);
     };
+    server.onMessage = [&](const std::shared_ptr<WsServer::Client>& c, const std::string& text) {
+        const std::string resp = handle(text);
+        if (resp.find("\"code\":-32700") == std::string::npos) server.sendText(c, resp);
+    };
+    server.onHttpRpc = handle;
 
     engine.start();
     // OSC + MIDI control (off until configured); destroyed before the engine stops.

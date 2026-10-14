@@ -27,6 +27,13 @@ test.beforeAll(async () => {
   // VS Code terminals set this, which would make Electron run as plain Node.
   delete env.ELECTRON_RUN_AS_NODE;
   if (process.env.TONESPHERE_E2E_REAL !== '1') env.TONESPHERE_DISCOVERY = discovery;
+  // An engine crash report from "an hour ago" in a throwaway data folder: the app must mention it.
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tonesphere-e2e-data-'));
+  fs.mkdirSync(path.join(dataDir, 'crashes'));
+  fs.writeFileSync(path.join(dataDir, 'crashes', 'crash-20261014-120000.txt'), 'ToneSphere engine 1.0.0 stopped unexpectedly.');
+  const hourAgo = new Date(Date.now() - 3600_000);
+  fs.utimesSync(path.join(dataDir, 'crashes', 'crash-20261014-120000.txt'), hourAgo, hourAgo);
+  env.TONESPHERE_DATA_DIR = dataDir;
   // Own profile: the tests must not collide with a ToneSphere the user has open (single-instance lock).
   profile = fs.mkdtempSync(path.join(os.tmpdir(), 'tonesphere-e2e-profile-'));
   launchEnv = env;
@@ -230,4 +237,56 @@ test('an instrument plugin gets an on-screen keyboard that plays notes', async (
   await item.locator('.toggle-row input[role=switch]').click();
   await expect.poll(async () => JSON.stringify((await mockState()).settings && (((await mockState()).settings as Record<string, unknown>).midiInstrument as { nodeId: string })?.nodeId)).toBe('"bus:stream"');
   await page.keyboard.press('Escape');
+});
+
+test('a crash report from the last run is mentioned once', async () => {
+  const notice = page.locator('.crash-notice');
+  await expect(notice).toBeVisible();
+  await expect(notice).toContainText('stopped unexpectedly');
+  await expect(notice.locator('button', { hasText: 'Show crash report' })).toBeVisible();
+  await notice.locator('button[aria-label="Dismiss"]').click();
+  await expect(notice).toHaveCount(0);
+  await page.reload();
+  await page.waitForSelector('.node-card', { timeout: 20_000 });
+  await expect(page.locator('.crash-notice')).toHaveCount(0); // seen: not shown again
+});
+
+test('"hear my instrument" connects input 1 of the interface to both ears of the headphones', async () => {
+  await page.locator('button[aria-label="Hear my instrument or microphone"]').click();
+  const dlg = page.locator('.modal.wizard');
+  await expect(dlg).toBeVisible();
+  // It guesses the audio interface (ASIO) and the headphones.
+  await expect(dlg.locator('label.field', { hasText: 'Plugged into' }).locator('select')).toHaveValue('asio:in:FlexASIO');
+  await expect(dlg.locator('label.field', { hasText: 'Listen on' }).locator('select')).toHaveValue('wasapi:out:headphones');
+  await expect(dlg.locator('label.field', { hasText: 'Input' }).last().locator('select')).toHaveValue('0');
+  await page.screenshot({ path: path.join(shots, '11-wizard.png') });
+  await dlg.locator('button', { hasText: 'Start listening' }).click();
+  await expect(dlg).toHaveCount(0);
+  const st = (await mockState()) as { routes: Array<{ from: string; to: string; gainDb: number; crosspoints: Array<{ f: number; t: number }> }> };
+  const r = st.routes.find((x) => x.from === 'asio:in:FlexASIO' && x.to === 'wasapi:out:headphones');
+  expect(r?.gainDb).toBe(-12);
+  expect(r?.crosspoints.map((c) => `${c.f}->${c.t}`).sort()).toEqual(['0->0', '0->1']);
+});
+
+test('window shortcuts switch views and open dialogs, but not while typing', async () => {
+  await page.locator('body').click({ position: { x: 5, y: 300 } });
+  await page.keyboard.press('Control+2');
+  await expect(page.locator('table.matrix')).toBeVisible();
+  await page.keyboard.press('Control+1');
+  await expect(page.locator('.node-card').first()).toBeVisible();
+  await page.keyboard.press('Control+,');
+  await expect(page.locator('.modal.settings')).toBeVisible();
+  // In a text field, Ctrl+2 is left alone.
+  await page.locator('.settings-nav button', { hasText: 'Plugins' }).click();
+  const input = page.locator('.modal.settings input[type=text]').first();
+  if (await input.count()) {
+    await input.focus();
+    await page.keyboard.press('Control+2');
+    await expect(page.locator('.modal.settings')).toBeVisible();
+  }
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Control+m');
+  await expect(page.locator('.modal.wizard')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.modal.wizard')).toHaveCount(0);
 });

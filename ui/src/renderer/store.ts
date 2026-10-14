@@ -23,12 +23,14 @@ interface Store {
   hoverNode: string | null;
   dragFrom: string | null;
   settingsOpen: boolean;
+  wizardOpen: boolean;
   toasts: Toast[];
   setView(v: View): void;
   select(s: Selection): void;
   setHover(id: string | null): void;
   setDragFrom(id: string | null): void;
   setSettingsOpen(o: boolean): void;
+  setWizardOpen(o: boolean): void;
   toast(level: Toast['level'], message: string): void;
   dismissToast(id: number): void;
 }
@@ -43,6 +45,7 @@ export const useStore = create<Store>((set) => ({
   hoverNode: null,
   dragFrom: null,
   settingsOpen: false,
+  wizardOpen: false,
   toasts: [],
   setView: (view) => {
     try {
@@ -56,6 +59,7 @@ export const useStore = create<Store>((set) => ({
   setHover: (hoverNode) => set({ hoverNode }),
   setDragFrom: (dragFrom) => set({ dragFrom }),
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
+  setWizardOpen: (wizardOpen) => set({ wizardOpen }),
   toast: (level, message) => {
     const id = toastId++;
     set((s) => ({ toasts: [...s.toasts.slice(-3), { id, level, message }] }));

@@ -1,4 +1,4 @@
-import { Circle, LayoutGrid, Settings, Square, Workflow } from 'lucide-react';
+import { Circle, Headphones, LayoutGrid, Settings, Square, Workflow } from 'lucide-react';
 import { act, engine, useStore } from '../store';
 import { SceneMenu } from './SceneMenu';
 import logo from '../assets/logo.png';
@@ -91,6 +91,15 @@ export function TitleBar() {
         </button>
       )}
 
+      <button
+        className="icon-btn no-drag"
+        onClick={() => useStore.getState().setWizardOpen(true)}
+        title="Hear my instrument or microphone"
+        aria-label="Hear my instrument or microphone"
+        disabled={!state}
+      >
+        <Headphones size={17} />
+      </button>
       <button
         className="icon-btn no-drag"
         onClick={() => setSettingsOpen(true)}

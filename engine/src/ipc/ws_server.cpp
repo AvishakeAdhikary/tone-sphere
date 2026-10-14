@@ -182,6 +182,10 @@ bool WsServer::handshake(Client& c) {
     if (const size_t amp = tok.find('&'); amp != std::string::npos) tok.resize(amp);
     const std::string key = headerValue(req, "sec-websocket-key");
     const std::string origin = headerValue(req, "origin");
+    if (req.rfind("POST ", 0) == 0 && target.rfind("/rpc", 0) == 0) {
+        serveHttpRpc(c, req, tok);
+        return false;  // one request per connection
+    }
     if (tok != token_ || key.empty()) {
         const char* deny = "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
         sendAll(c.sock, deny, std::strlen(deny));
@@ -191,6 +195,35 @@ bool WsServer::handshake(Client& c) {
     const std::string accept = base64Encode(digest.data(), digest.size());
     const std::string resp = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: " + accept + "\r\n\r\n";
     return sendAll(c.sock, resp.data(), resp.size());
+}
+
+// HTTP JSON-RPC for scripts (curl, PowerShell): same token as the WebSocket. Requests from web
+// pages (they send an Origin header) are refused, so a website can't drive the engine.
+void WsServer::serveHttpRpc(Client& c, const std::string& req, std::string tok) {
+    auto reply = [&](const char* status, const std::string& body) {
+        const std::string head = std::string("HTTP/1.1 ") + status + "\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(body.size()) +
+                                 "\r\nConnection: close\r\n\r\n";
+        sendAll(c.sock, head.data(), head.size());
+        sendAll(c.sock, body.data(), body.size());
+    };
+    const std::string auth = headerValue(req, "authorization");
+    if (auth.rfind("Bearer ", 0) == 0) tok = auth.substr(7);
+    if (tok != token_ || !headerValue(req, "origin").empty()) {
+        reply("403 Forbidden", "{\"error\":{\"code\":-32001,\"message\":\"Missing or wrong token\"}}");
+        return;
+    }
+    const size_t len = static_cast<size_t>(std::strtoull(headerValue(req, "content-length").c_str(), nullptr, 10));
+    if (len == 0 || len > (1u << 20)) {
+        reply("400 Bad Request", "{\"error\":{\"code\":-32600,\"message\":\"Send one JSON-RPC request (at most 1 MB)\"}}");
+        return;
+    }
+    std::string body = c.pending.substr(0, std::min(len, c.pending.size()));
+    if (body.size() < len) {
+        const size_t have = body.size();
+        body.resize(len);
+        if (!recvAll(c.sock, body.data() + have, len - have)) return;
+    }
+    reply("200 OK", onHttpRpc ? onHttpRpc(body) : std::string("{}"));
 }
 
 void WsServer::clientLoop(std::shared_ptr<Client> c) {

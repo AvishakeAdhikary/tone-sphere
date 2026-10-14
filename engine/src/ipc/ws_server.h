@@ -1,6 +1,7 @@
 #pragma once
 // Minimal WebSocket server (RFC 6455) bound to 127.0.0.1, token-protected.
-// Text frames carry JSON-RPC; binary frames carry meter data.
+// Text frames carry JSON-RPC; binary frames carry meter data. Scripts can also send one JSON-RPC
+// request per HTTP POST /rpc (token in "Authorization: Bearer <token>" or ?token=).
 #include <atomic>
 #include <cstdint>
 #include <functional>
@@ -32,11 +33,14 @@ public:
 
     MessageHandler onMessage;
     ConnectHandler onConnect;
+    /// HTTP POST /rpc: request body -> response body (JSON). Runs on the client's thread.
+    std::function<std::string(const std::string&)> onHttpRpc;
 
 private:
     void acceptLoop();
     void clientLoop(std::shared_ptr<Client> c);
     bool handshake(Client& c);
+    void serveHttpRpc(Client& c, const std::string& req, std::string tok);
     void sendFrame(Client& c, uint8_t opcode, const void* data, size_t len);
 
     std::string token_;

@@ -101,6 +101,11 @@ int migrateLegacyData(const std::string& from, const std::string& to) {
 }
 
 std::string dataDir() {
+    // Tests and portable setups can point the engine at another folder.
+    if (const char* over = getenv("TONESPHERE_DATA_DIR"); over && *over) {
+        makeDirs(over);
+        return over;
+    }
     // ToneSphere was called NexTone before: its settings, presets and plugin cache are carried over once.
 #ifdef _WIN32
     std::string base = knownFolder(FOLDERID_LocalAppData);

@@ -48,6 +48,14 @@ function discoveryPath(): string {
     : path.join(os.homedir(), '.local', 'state', 'tonesphere', 'engine.json');
 }
 
+// The engine's data folder (settings, logs, crash reports): see engine/src/util/platform.cpp.
+function dataDir(): string {
+  if (process.env.TONESPHERE_DATA_DIR) return process.env.TONESPHERE_DATA_DIR;
+  if (isWin) return path.join(process.env.LOCALAPPDATA ?? path.join(os.homedir(), 'AppData', 'Local'), 'ToneSphere');
+  if (isMac) return path.join(os.homedir(), 'Library', 'Application Support', 'ToneSphere');
+  return path.join(process.env.XDG_DATA_HOME ?? path.join(os.homedir(), '.local', 'share'), 'tonesphere');
+}
+
 function readDiscovery(): Discovery | null {
   try {
     const d = JSON.parse(fs.readFileSync(discoveryPath(), 'utf8')) as Discovery;
@@ -350,6 +358,24 @@ ipcMain.handle('tonesphere:save-file', async (_e, title: string, defaultName: st
   if (r.canceled || !r.filePath) return null;
   fs.writeFileSync(r.filePath, text, 'utf8');
   return r.filePath;
+});
+// Crash reports the engine left behind (newest first), for the notice on the next start.
+ipcMain.handle('tonesphere:crash-reports', () => {
+  const dir = path.join(dataDir(), 'crashes');
+  try {
+    return fs
+      .readdirSync(dir)
+      .filter((f) => /^crash-.*\.txt$/.test(f))
+      .map((name) => ({ name, time: fs.statSync(path.join(dir, name)).mtimeMs }))
+      .sort((a, b) => b.time - a.time)
+      .slice(0, 10);
+  } catch {
+    return [];
+  }
+});
+ipcMain.handle('tonesphere:open-crash-folder', async () => {
+  const dir = path.join(dataDir(), 'crashes');
+  if (fs.existsSync(dir)) await shell.openPath(dir);
 });
 ipcMain.handle('tonesphere:set-login-item', (_e, enabled: boolean) => {
   app.setLoginItemSettings({ openAtLogin: !!enabled, args: ['--hidden'] });

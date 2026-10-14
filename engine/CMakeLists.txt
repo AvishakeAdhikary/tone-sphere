@@ -114,6 +114,7 @@ set(ENGINE_SOURCES
   src/ipc/ws_server.cpp
   src/util/log.cpp
   src/util/platform.cpp
+  src/util/crash.cpp
   src/util/encoding.cpp
   src/util/ui_thread.cpp
   src/net/vban.cpp

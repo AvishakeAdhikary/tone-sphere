@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Bookmark, Check, ChevronDown, Download, Plus, Trash2, Upload } from 'lucide-react';
 import { act, engine, useStore } from '../store';
-import { bridge } from '../engine/bridge';
+import { exportPresetFile, importPresetFile } from '../presetFiles';
 
 /** Scenes = saved routing snapshots (ASIO Link Pro's "Profiles", but unlimited). */
 export function SceneMenu() {
@@ -26,37 +26,10 @@ export function SceneMenu() {
     setName('');
   };
 
-  const toast = useStore.getState().toast;
   const importPreset = async () => {
-    try {
-      const f = await bridge.openFile('Import a ToneSphere preset', ['json']);
-      if (!f) return;
-      let preset: unknown;
-      try {
-        preset = JSON.parse(f.text);
-      } catch {
-        throw new Error("This file isn't a ToneSphere preset (it isn't valid JSON).");
-      }
-      const r = await engine.call('preset.import', { preset });
-      setOpen(false);
-      toast('info', `Preset “${r.name}” is active: ${r.connections} connection${r.connections === 1 ? '' : 's'}.`);
-      if (r.waiting.length)
-        toast('info', `Waiting for: ${r.waiting.join(', ')}. They connect automatically as soon as they appear.`);
-    } catch (e) {
-      toast('error', (e as Error).message);
-    }
+    if (await importPresetFile()) setOpen(false);
   };
-  const exportPreset = async () => {
-    const name = active?.name ?? 'My ToneSphere setup';
-    try {
-      const p = await engine.call('preset.export', { name });
-      const file = `${name.replace(/[^\w -]+/g, '').trim() || 'preset'}.tonesphere.json`;
-      const path = await bridge.saveFile('Export preset', file, JSON.stringify(p, null, 2) + '\n', ['json']);
-      if (path) toast('info', `Saved ${path}`);
-    } catch (e) {
-      toast('error', (e as Error).message);
-    }
-  };
+  const exportPreset = () => exportPresetFile();
 
   return (
     <div className="menu-anchor no-drag" ref={ref}>

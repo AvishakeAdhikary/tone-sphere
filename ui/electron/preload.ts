@@ -10,6 +10,8 @@ const api = {
   openSoundSettings: () => ipcRenderer.invoke('tonesphere:open-sound-settings'),
   openStartupSettings: () => ipcRenderer.invoke('tonesphere:open-startup-settings'),
   installDrivers: (opts?: { vbcable?: boolean }) => ipcRenderer.invoke('tonesphere:install-drivers', opts),
+  crashReports: () => ipcRenderer.invoke('tonesphere:crash-reports'),
+  openCrashFolder: () => ipcRenderer.invoke('tonesphere:open-crash-folder'),
   onInstallProgress: (cb: (text: string) => void) => {
     const listener = (_e: unknown, text: string) => cb(text);
     ipcRenderer.on('tonesphere:install-progress', listener);

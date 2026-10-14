@@ -6,6 +6,9 @@ import { Inspector } from './components/Inspector';
 import { SettingsDialog } from './components/SettingsDialog';
 import { Toasts } from './components/Toasts';
 import { EngineMissing } from './components/EngineMissing';
+import { CrashNotice } from './components/CrashNotice';
+import { MonitorWizard } from './components/MonitorWizard';
+import { exportPresetFile, importPresetFile } from './presetFiles';
 import { act, engine, useStore } from './store';
 import { bridge } from './engine/bridge';
 import { setMeterLayout } from './engine/meterLoop';
@@ -17,6 +20,7 @@ export function App() {
   const view = useStore((s) => s.view);
   const selection = useStore((s) => s.selection);
   const settingsOpen = useStore((s) => s.settingsOpen);
+  const wizardOpen = useStore((s) => s.wizardOpen);
 
   useEffect(() => {
     if (state) setMeterLayout(state.layoutVersion);
@@ -54,10 +58,34 @@ export function App() {
     [],
   );
 
-  // Escape clears the selection / closes the inspector.
+  // Escape clears the selection / closes the inspector. Window shortcuts (from the old ToneSphere):
+  // Ctrl+S export a preset, Ctrl+O import one, Ctrl+, settings, Ctrl+M hear my input,
+  // Ctrl+1 / Ctrl+2 routing / matrix view, F5 rescan devices, Ctrl+Shift+M mute every output.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') useStore.getState().select(null);
+      const st = useStore.getState();
+      if (e.key === 'Escape') st.select(null);
+      const el = e.target as HTMLElement | null;
+      // Never steal keys from text fields, lists or the on-screen keyboard.
+      if (el?.closest('input, textarea, select, [contenteditable="true"], .keyboard')) return;
+      if (!st.state || st.status !== 'connected') return;
+      const ctrl = e.ctrlKey || e.metaKey;
+      const key = e.key.toLowerCase();
+      let done = true;
+      if (ctrl && !e.shiftKey && key === 's') void exportPresetFile();
+      else if (ctrl && !e.shiftKey && key === 'o') void importPresetFile();
+      else if (ctrl && key === ',') st.setSettingsOpen(true);
+      else if (ctrl && !e.shiftKey && key === 'm') st.setWizardOpen(true);
+      else if (ctrl && key === '1') st.setView('simple');
+      else if (ctrl && key === '2') st.setView('matrix');
+      else if (e.key === 'F5' && !ctrl) {
+        void act(engine.call('devices.refresh'));
+        st.toast('info', 'Looking for devices…');
+      } else if (ctrl && e.shiftKey && key === 'm') {
+        for (const n of st.state.nodes) if (n.bin === 'physical-out' && !n.muted) void act(engine.call('node.update', { id: n.id, muted: true }));
+        st.toast('info', 'All outputs muted.');
+      } else done = false;
+      if (done) e.preventDefault();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -80,7 +108,9 @@ export function App() {
           <EngineMissing status={status} />
         )}
       </div>
+      {ready && <CrashNotice />}
       {settingsOpen && ready && <SettingsDialog />}
+      {wizardOpen && ready && <MonitorWizard />}
       <Toasts />
     </div>
   );

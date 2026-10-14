@@ -26,6 +26,8 @@ $suites = @(
   @('latency', 'tests\integration\latency.mjs'),
   @('osc', 'tests\integration\osc.mjs'),
   @('presets', 'tests\integration\presets.mjs'),
+  @('http-rpc', 'tests\integration\http-rpc.mjs'),
+  @('crash-report', 'tests\integration\crash-report.mjs'),
   @('vbcable-signature', 'tests\integration\vbcable-signature.mjs')
 )
 $summary = @()

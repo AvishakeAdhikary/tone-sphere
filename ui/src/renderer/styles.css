@@ -1839,3 +1839,50 @@ details[open].insp-section summary h3::after {
 .toggle-row.compact {
   padding: 4px 2px;
 }
+
+/* Crash notice and the "hear my input" wizard */
+.crash-notice {
+  position: fixed;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(760px, calc(100vw - 32px));
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--surface, #fff);
+  color: var(--text, inherit);
+  border: 1px solid var(--warn, #c98a00);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+.crash-notice svg {
+  color: var(--warn, #c98a00);
+  flex: none;
+}
+.crash-notice .btn {
+  white-space: nowrap;
+}
+.modal.wizard {
+  position: relative;
+  width: min(520px, calc(100vw - 32px));
+  padding: 20px 22px;
+  display: grid;
+  gap: 10px;
+}
+.modal.wizard h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+.modal.wizard .icon-btn.close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+}
+.field-row.end {
+  justify-content: flex-end;
+}
