@@ -1,4 +1,4 @@
-// node --test scripts/
+// node --test scripts/release-version.test.mjs
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';

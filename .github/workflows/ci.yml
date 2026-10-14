@@ -46,7 +46,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
       - name: Release script tests
-        run: node --test scripts/
+        run: node --test scripts/release-version.test.mjs
       - id: v
         name: Next version
         run: |

@@ -45,7 +45,7 @@ otherwise.
 | **Linux** engine (PipeWire) | ✅ in WSL Ubuntu 24.04 | build + unit tests 3/3; runs and answers without a PipeWire server; `linux-pipewire.mjs` 11/11 before the rename |
 | **Linux AppImage** | ✅ | `scripts/package-linux.sh` + `.github/scripts/smoke-linux.sh`: the AppImage's engine starts and answers (1.0.0) |
 | Test VM | ✅ | `vm/New-TestVM.ps1` rebuilt from the Windows 11 Enterprise evaluation (26H2); the `clean` checkpoint is now taken after first sign-in's pending restart (it used to reboot the VM a minute into every test) |
-| Single version source, release script | ✅ | `node --test scripts/` 6/6: first release v1.0.0 after the Python v0.2.1, then patch bumps |
+| Single version source, release script | ✅ | `node --test scripts/release-version.test.mjs` 6/6: first release v1.0.0 after the Python v0.2.1, then patch bumps |
 | CI workflow | ✅ lints (actionlint); ⏳ first run on GitHub | `.github/workflows/ci.yml`, `pages.yml` |
 | Secrets | ✅ | gitleaks over the whole merged history (120 commits): no findings. The VM password is generated per machine outside the repository |
 
