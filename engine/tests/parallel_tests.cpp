@@ -240,3 +240,20 @@ TEST_CASE("The DSP pool runs every item exactly once, block after block", "[para
         if (round % 2000 == 0) std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
 }
+
+// A worker thread can start after jobs, or the shutdown, were already published (busy or small
+// machines, CI runners). It must neither wait forever nor stall the caller: these used to hang
+// on one or two cores.
+TEST_CASE("The DSP pool shuts down and finishes jobs whenever its threads get to run", "[parallel]") {
+    for (int i = 0; i < 300; ++i) {
+        DspPool pool(4);  // destroyed at once: most workers haven't run yet
+    }
+    std::atomic<int> sum{0};
+    auto fn = [](void* c, int i) { static_cast<std::atomic<int>*>(c)->fetch_add(i + 1, std::memory_order_relaxed); };
+    for (int i = 0; i < 300; ++i) {
+        DspPool pool(4);
+        sum.store(0);
+        pool.parallelFor(16, fn, &sum, 4);  // published before the workers start
+        REQUIRE(sum.load() == 136);
+    }
+}

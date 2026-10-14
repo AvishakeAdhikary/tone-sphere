@@ -163,7 +163,7 @@ jobs:
         run: |
           cmake -S . -B build/linux-release -G Ninja -DCMAKE_BUILD_TYPE=Release -DTONESPHERE_BUILD_TESTS=ON
           cmake --build build/linux-release -j"$(nproc)"
-          ctest --test-dir build/linux-release --output-on-failure
+          ctest --test-dir build/linux-release --output-on-failure --timeout 600
       - name: Unit tests under ThreadSanitizer (multi-core DSP, rings, bridges)
         run: |
           cmake -S . -B build/tsan -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DTONESPHERE_BUILD_TESTS=ON -DTONESPHERE_LTO=OFF \

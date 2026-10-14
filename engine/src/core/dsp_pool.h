@@ -31,7 +31,7 @@ public:
     void parallelFor(int count, Fn fn, void* ctx, int helpers);
 
 private:
-    void workerLoop(int index);
+    void workerLoop(int index, uint32_t startEpoch);
     // Claims and runs items of job `epoch` until none are left.
     void work(uint32_t epoch);
 

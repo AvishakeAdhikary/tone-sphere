@@ -8,5 +8,5 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 build="${1:-$HOME/ts-build}"
 cmake -S "$root" -B "$build" -G Ninja -DCMAKE_BUILD_TYPE=Release -DTONESPHERE_BUILD_TESTS=ON
 cmake --build "$build" -j"$(nproc)"
-ctest --test-dir "$build" --output-on-failure
+ctest --test-dir "$build" --output-on-failure --timeout 600
 echo "Build output: $build/bin"

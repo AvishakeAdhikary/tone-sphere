@@ -34,7 +34,7 @@ if ($LASTEXITCODE) { throw 'CMake configure failed' }
 cmake --build $build --parallel
 if ($LASTEXITCODE) { throw 'Build failed' }
 if ($Test) {
-  ctest --test-dir $build --output-on-failure
+  ctest --test-dir $build --output-on-failure --timeout 600
   if ($LASTEXITCODE) { throw 'Tests failed' }
 }
 Write-Host "Build output: $build\bin"
