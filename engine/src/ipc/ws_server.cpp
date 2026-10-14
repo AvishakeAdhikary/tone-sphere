@@ -36,6 +36,7 @@ struct WsServer::Client {
     std::thread thread;
     std::atomic<bool> alive{true};
     std::atomic<bool> ready{false};  // handshake done: may receive frames
+    std::atomic<bool> meters{true};  // wants binary meter frames (meters.subscribe)
     std::string pending;  // bytes read beyond the HTTP handshake
 };
 
@@ -333,7 +334,15 @@ void WsServer::broadcastBinary(const void* data, size_t len) {
         std::lock_guard lock(clientsMu_);
         cs = clients_;
     }
-    for (auto& c : cs) sendFrame(*c, 0x2, data, len);
+    for (auto& c : cs)
+        if (c->meters.load()) sendFrame(*c, 0x2, data, len);
+}
+
+void WsServer::setMeters(const std::shared_ptr<Client>& c, bool on) { c->meters = on; }
+
+size_t WsServer::meterClientCount() {
+    std::lock_guard lock(clientsMu_);
+    return static_cast<size_t>(std::count_if(clients_.begin(), clients_.end(), [](auto& c) { return c->ready.load() && c->meters.load(); }));
 }
 
 }  // namespace ts

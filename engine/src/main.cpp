@@ -220,6 +220,18 @@ int main(int argc, char** argv) {
         return resp.dump(-1, ' ', false, json::error_handler_t::replace);
     };
     server.onMessage = [&](const std::shared_ptr<WsServer::Client>& c, const std::string& text) {
+        // meters.subscribe is per connection, so the server answers it itself.
+        if (text.find("\"meters.subscribe\"") != std::string::npos) {
+            try {
+                const json req = json::parse(text);
+                if (req.value("method", "") == "meters.subscribe") {
+                    server.setMeters(c, req.contains("params") ? req["params"].value("on", true) : true);
+                    server.sendText(c, json{{"id", req.value("id", json(0))}, {"result", nullptr}}.dump());
+                    return;
+                }
+            } catch (...) {
+            }
+        }
         const std::string resp = handle(text);
         if (resp.find("\"code\":-32700") == std::string::npos) server.sendText(c, resp);
     };
@@ -267,7 +279,10 @@ int main(int argc, char** argv) {
         std::vector<uint8_t> frame;
         while (!g_quit) {
             std::this_thread::sleep_for(std::chrono::milliseconds(33));
-            if (!server.clientCount()) continue;
+            // Nobody is looking (no client, or the window is hidden): the audio thread skips meters.
+            const bool wanted = server.meterClientCount() > 0;
+            engine.setMetersActive(wanted);
+            if (!wanted) continue;
             engine.pollExternalMeters();
             const uint32_t layout = engine.meters(vals);
             const uint32_t magic = 0x314D5354, count = static_cast<uint32_t>(vals.size());

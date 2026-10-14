@@ -148,6 +148,8 @@ public:
     /// Plays a MIDI short message on the instrument chosen in settings (MIDI devices). Lock-free
     /// for the caller: safe from MIDI driver callbacks. Returns false when no instrument is set.
     bool playMidi(uint8_t status, uint8_t data1, uint8_t data2);
+    /// Whether anyone shows the level meters; when not, the audio thread doesn't compute them.
+    void setMetersActive(bool on) { metersActive_.store(on, std::memory_order_relaxed); }
     /// Called to request process exit.
     std::function<void()> onShutdownRequested;
 
@@ -235,6 +237,7 @@ private:
     DspScheduler dsp_;
     // The instrument MIDI devices play (settings.midiInstrument), resolved on every publish.
     std::atomic<std::shared_ptr<Fx>> midiTarget_;
+    std::atomic<bool> metersActive_{true};
     void resolveMidiTargetLocked();
     double runningRate_ = 48000.0;
     std::atomic<float> cpuPercent_{0};

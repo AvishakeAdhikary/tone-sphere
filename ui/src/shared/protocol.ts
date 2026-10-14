@@ -346,6 +346,8 @@ export interface RpcMethods {
   'fx.openEditor': { params: { nodeId: string; fxId: string }; result: void };
   /** MIDI short messages [status, data1, data2] for an instrument (notes, CCs, pitch bend). */
   'fx.midi': { params: { nodeId: string; fxId: string; events: number[][] }; result: void };
+  /** This connection wants binary meter frames (default) or not (hidden window). */
+  'meters.subscribe': { params: { on: boolean }; result: void };
   'plugins.scan': { params: void; result: void };
   'app.setMode': { params: { exe: string; mode: 'off' | 'copy' | 'isolate' }; result: void };
   'app.setRule': { params: { exe: string; pinned?: boolean }; result: void };

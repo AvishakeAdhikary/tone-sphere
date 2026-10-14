@@ -348,6 +348,12 @@ wss.on('connection', (ws, req) => {
     } catch {
       return;
     }
+    // Per connection, like the engine: a hidden window stops its meter frames.
+    if (msg.method === 'meters.subscribe') {
+      ws.wantsMeters = msg.params?.on !== false;
+      ws.send(JSON.stringify({ id: msg.id, result: null }));
+      return;
+    }
     const h = handlers[msg.method];
     try {
       if (!h) throw Object.assign(new Error(`Unknown method ${msg.method}`), { code: -32601 });
@@ -407,7 +413,7 @@ setInterval(() => {
       buf.writeFloatLE(v * 0.6, 12 + (n.meter.offset + c * 2 + 1) * 4);
     }
   }
-  for (const c of clients) c.send(buf);
+  for (const c of clients) if (c.wantsMeters !== false) c.send(buf);
 }, 33);
 
 console.log(`ToneSphere mock engine on ws://127.0.0.1:${PORT}/?token=${TOKEN}`);

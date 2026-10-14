@@ -30,6 +30,9 @@ public:
     void broadcastText(const std::string& s);
     void broadcastBinary(const void* data, size_t len);
     size_t clientCount();
+    /// Meter frames go only to clients that want them (a hidden window doesn't).
+    void setMeters(const std::shared_ptr<Client>& c, bool on);
+    size_t meterClientCount();
 
     MessageHandler onMessage;
     ConnectHandler onConnect;

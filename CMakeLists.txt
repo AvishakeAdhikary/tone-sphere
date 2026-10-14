@@ -27,6 +27,15 @@ else()
   add_compile_options(-Wall -Wextra -Wno-unused-parameter)
 endif()
 
+# Release builds optimise across files (MSVC /GL + /LTCG, -flto): the audio path inlines through
+# the DSP, graph and bridge code.
+include(CheckIPOSupported)
+check_ipo_supported(RESULT TS_IPO LANGUAGES C CXX)
+option(TONESPHERE_LTO "Link-time optimisation for release builds" ON)
+if(TONESPHERE_LTO AND TS_IPO)
+  set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
+endif()
+
 include(FetchContent)
 set(FETCHCONTENT_QUIET ON)
 FetchContent_Declare(nlohmann_json

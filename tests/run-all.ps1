@@ -27,6 +27,7 @@ $suites = @(
   @('osc', 'tests\integration\osc.mjs'),
   @('presets', 'tests\integration\presets.mjs'),
   @('http-rpc', 'tests\integration\http-rpc.mjs'),
+  @('meters-subscribe', 'tests\integration\meters-subscribe.mjs'),
   @('crash-report', 'tests\integration\crash-report.mjs'),
   @('vbcable-signature', 'tests\integration\vbcable-signature.mjs')
 )

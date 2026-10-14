@@ -41,6 +41,7 @@ See `ui/src/shared/protocol.ts` (the source of truth for types) and `engine/src/
 | Method | Params | Result |
 |---|---|---|
 | `engine.getState` | – | `EngineState` |
+| `meters.subscribe` | `{on}`: this connection wants meter frames (on by default). With no subscriber the engine skips meter work on the audio thread | – |
 | `engine.setSettings` | `Partial<EngineSettings>` | `EngineSettings` |
 | `engine.restart` | – | – |
 | `engine.shutdown` | – | – |

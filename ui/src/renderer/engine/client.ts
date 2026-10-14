@@ -50,7 +50,10 @@ export class EngineClient {
     const ws = new WebSocket(`ws://127.0.0.1:${d.port}/?token=${encodeURIComponent(d.token)}`);
     ws.binaryType = 'arraybuffer';
     this.ws = ws;
-    ws.onopen = () => this.onStatus('connected');
+    ws.onopen = () => {
+      this.onStatus('connected');
+      this.syncMeters();
+    };
     ws.onmessage = (ev) => this.handleMessage(ev.data);
     ws.onclose = () => {
       this.ws = null;
@@ -65,6 +68,16 @@ export class EngineClient {
       }
     };
     ws.onerror = () => ws.close();
+  }
+
+  // Meters are only worth sending while someone can see them (the window is often in the tray).
+  private metersHooked = false;
+  private syncMeters(): void {
+    if (!this.metersHooked) {
+      this.metersHooked = true;
+      document.addEventListener('visibilitychange', () => this.syncMeters());
+    }
+    if (this.ws?.readyState === WebSocket.OPEN) void this.call('meters.subscribe', { on: !document.hidden }).catch(() => {});
   }
 
   close(): void {

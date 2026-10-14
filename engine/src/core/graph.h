@@ -130,6 +130,7 @@ struct Program {
     std::vector<std::shared_ptr<NodeRuntime>> keepNodes;
     std::vector<std::shared_ptr<RouteRuntime>> keepRoutes;
     std::shared_ptr<MeterBank> meters;
+    const std::atomic<bool>* metersOn = nullptr;  // null = always (tests); engine: someone is watching
     std::vector<NodeRuntime*> soloBuses;
     double sampleRate = 48000.0;
 

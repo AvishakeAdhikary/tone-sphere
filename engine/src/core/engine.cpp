@@ -472,6 +472,7 @@ void Engine::compileAndPublishLocked() {
     auto p = std::make_shared<Program>();
     p->sampleRate = runningRate_;
     p->meters = meterBank_;
+    p->metersOn = &metersActive_;
 
     auto included = [&](const NodeModel& n) { return n.rt && (n.present || n.bin == Bin::Bus || n.kind == DeviceKind::Vban); };
     std::map<std::string, size_t> index;
