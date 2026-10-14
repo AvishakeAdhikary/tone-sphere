@@ -8,6 +8,7 @@
   "private": true,
   "type": "module",
   "main": "dist-electron/main.cjs",
+  "desktopName": "tonesphere.desktop",
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "build:renderer": "vite build",
@@ -142,6 +143,7 @@
       "icon": "assets/icon.png",
       "category": "Audio",
       "executableName": "tonesphere",
+      "syncDesktopName": true,
       "synopsis": "Route any audio anywhere",
       "extraResources": [
         {
