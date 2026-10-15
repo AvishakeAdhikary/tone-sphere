@@ -256,15 +256,20 @@ void RenderBridge::engineWrite(const float* const* in, size_t frames, double now
     const size_t maxOut = scratch_.size() / cfg_.channels;
     const size_t produced = rs_.pullInterleaved(scratch_.data(), maxOut, step);
 
+    // Blocks dropped before the device has started playing (some drivers, e.g. ASIO4ALL, deliver
+    // their first callbacks a few hundred ms after start) or while settling are inaudible: count
+    // them as settling, not as dropouts.
+    std::atomic<uint64_t>& dropped =
+        devicePrimed_.load(std::memory_order_acquire) && nowSec - startedAt_ >= 2.0 ? stats_.overruns : stats_.settling;
     if (!cfg_.master && fillNow > tgt * 3.0 + target_.period() * 2.0) {
         // Device is not consuming (stalled or much slower): drop this block and re-lock.
-        stats_.overruns.fetch_add(1, std::memory_order_relaxed);
+        dropped.fetch_add(1, std::memory_order_relaxed);
         ctl_.reset();
         rate_.reset();
     } else if (produced > 0) {
         const size_t w = ring_.write(scratch_.data(), produced);
         engTotal_ += w;
-        if (w < produced) stats_.overruns.fetch_add(1, std::memory_order_relaxed);
+        if (w < produced) dropped.fetch_add(1, std::memory_order_relaxed);
     }
 
     double fill = static_cast<double>(ring_.fillApprox());

@@ -75,7 +75,6 @@ async function main() {
     await call('route.connect', { from: aIn.id, to: bus.id });
     await call('tone.set', { enabled: true, freq: 1000, levelDb: -60, target: aOut.id });
     await sleep(3000);
-    const x0 = { in: at(aIn.id)?.xruns ?? 0, out: at(aOut.id)?.xruns ?? 0 };
     // DAWs on ToneSphere ASIO at the same time.
     const a = runHost(['run', 'ToneSphere ASIO', String(SECS + 4), '440', '-6', '256']);
     await sleep(700);
@@ -97,7 +96,8 @@ async function main() {
     check(`${DRIVER}: streams open`, i1?.state === 'active' && o1?.state === 'active' && !i1.statusText && !o1.statusText, {
       in: `${i1?.channels} ch @ ${i1?.sampleRate}`, out: `${o1?.channels} ch @ ${o1?.sampleRate}`, period: o1?.diag?.devicePeriod,
     });
-    check(`${DRIVER}: no dropouts`, (i1?.xruns ?? 0) - x0.in === 0 && (o1?.xruns ?? 0) - x0.out === 0, { in: i1?.diag, out: o1?.diag });
+    // From the stream's start: blocks dropped while the driver starts up count as settling, not dropouts.
+    check(`${DRIVER}: no dropouts`, (i1?.xruns ?? 0) === 0 && (o1?.xruns ?? 0) === 0, { in: i1?.diag, out: o1?.diag });
     check(`${DRIVER}: the interface's input reaches the mix`, inPeak > -150, { peakDb: +inPeak.toFixed(1) });
     check('DAWs alongside: DAW B hears DAW A', Math.abs(rb.inFreqHz - 440) < 4 && Math.abs(rb.inPeakDb + 6) < 0.7, { f: rb.inFreqHz, db: rb.inPeakDb });
     check('DAWs alongside: no clicks', rb.inClicks === 0, rb.inClicks);

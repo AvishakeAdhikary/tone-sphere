@@ -207,6 +207,40 @@ TEST_CASE("Render bridge locks and does not underrun", "[drift]") {
     REQUIRE_THAT(rp / double(rn), WithinAbs(180, 15));
 }
 
+TEST_CASE("Render bridge: a device that starts late isn't counted as dropouts, a stall later is", "[drift]") {
+    // ASIO4ALL on a real interface: its first callback came ~300 ms after start, and the blocks
+    // the engine dropped meanwhile showed as 98 dropouts although nothing was audible.
+    BridgeConfig cfg;
+    cfg.channels = 2;
+    cfg.deviceRate = 48000;
+    cfg.engineRate = 48000;
+    cfg.devicePeriod = 512;
+    cfg.engineMaxBlock = 128;
+    RenderBridge b;
+    b.init(cfg);
+    b.markStarted();
+    std::vector<float> dev(512 * 2);
+    std::vector<float> l(128, 0.1f), r(128, 0.1f);
+    const float* in[2] = {l.data(), r.data()};
+    double tDev = 0.3, tEng = 0;  // the device's first callback is 300 ms late
+    auto run = [&](double from, double to, double stallFrom, double stallTo) {
+        for (double t = from; t < to; t += 0.0005) {
+            while (tEng <= t) { b.engineWrite(in, 128, t); tEng += 128 / 48000.0; }
+            while (tDev <= t) {
+                if (tDev < stallFrom || tDev >= stallTo) b.deviceRead(dev.data(), 512, tDev);
+                tDev += 512 / 48000.0;
+            }
+        }
+    };
+    run(0, 20, 1e9, 1e9);
+    INFO("settling " << b.stats().settling << " overruns " << b.stats().overruns << " underruns " << b.stats().underruns);
+    REQUIRE(b.stats().settling > 0);  // blocks were dropped while waiting...
+    REQUIRE(b.stats().overruns == 0);  // ...but none counts as a dropout
+    REQUIRE(b.stats().underruns == 0);
+    run(20, 30, 25.0, 25.5);  // a real stall once running is still reported
+    REQUIRE(b.stats().overruns > 0);
+}
+
 TEST_CASE("Capture bridge follows a device that runs 1 % slow (cheap USB interface)", "[drift]") {
     // Measured on a real AI-04 at 44.1 kHz: about -10,300 ppm. Beyond the PI loop's own range:
     // the measured device rate (feed-forward) has to carry it.
